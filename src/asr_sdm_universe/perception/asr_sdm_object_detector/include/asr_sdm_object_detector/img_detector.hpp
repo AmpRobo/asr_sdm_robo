@@ -13,10 +13,10 @@
 // cv_bridge header differs between Ubuntu versions:
 // Ubuntu 22.04 (ROS2 Humble): cv_bridge.h
 // Ubuntu 24.04 (ROS2 Jazzy): cv_bridge.hpp
-#if __has_include(<cv_bridge/cv_bridge.hpp>)
-#include <cv_bridge/cv_bridge.hpp>
-#else
+#ifdef ROS_DISTRO_HUMBLE
 #include <cv_bridge/cv_bridge.h>
+#else
+#include <cv_bridge/cv_bridge.hpp>
 #endif
 
 #include <chrono>
