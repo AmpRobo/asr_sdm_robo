@@ -1,0 +1,40 @@
+<?xml version="1.0"?>
+<?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
+<package format="3">
+  <name>ros2_system_monitor</name>
+  <version>0.0.0</version>
+  <description>System monitoring tools for ROS2</description>
+  
+  <!-- Authors of the original version of ros-system-monitor -->
+  <author>Ralf Kaestner</author>
+  <author>Jerome Maye</author>
+  <!-- Author/maintainer of the ros2-system-monitor (fork version of ros-system-monitor) -->
+  <author>kei1107</author>
+  <maintainer email="15386742407@163.com">Yunxiu586</maintainer>
+  <license>BSD-3-Clause</license>
+
+  <buildtool_depend>ament_cmake</buildtool_depend>
+  <buildtool_depend>ament_cmake_python</buildtool_depend>
+  <buildtool_depend>ament_cmake_auto</buildtool_depend>
+
+  <exec_depend>rclpy</exec_depend>
+  <exec_depend>diagnostic_updater</exec_depend>
+  <exec_depend>diagnostic_msgs</exec_depend>
+  <exec_depend>std_msgs</exec_depend>
+  <exec_depend>sysstat</exec_depend>      <!-- Provides system statistics tools (e.g., iostat, mpstat) -->
+  <exec_depend>lm-sensors</exec_depend>    <!-- Provides sensor information (e.g., temperature) -->
+  <exec_depend>ifstat</exec_depend>        <!-- Provides network interface statistics -->
+  <exec_depend>ntpdate</exec_depend>       <!-- Used for NTP time synchronization checks -->
+
+  <test_depend>ament_lint_auto</test_depend>
+  <!-- <test_depend>ament_cmake_copyright</test_depend> -->
+  <!-- <test_depend>ament_cmake_flake8</test_depend> -->
+  <test_depend>ament_cmake_black</test_depend>
+  <test_depend>ament_cmake_mypy</test_depend>
+  <test_depend>ament_cmake_lint_cmake</test_depend>
+  <test_depend>ament_cmake_pep257</test_depend>
+
+  <export>
+    <build_type>ament_cmake</build_type>
+  </export>
+</package>
