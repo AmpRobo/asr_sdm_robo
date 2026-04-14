@@ -43,17 +43,14 @@ from launch.conditions import IfCondition
 from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
 
-
 def _to_launch_bool(value):
     return "true" if value else "false"
-
 
 def _coerce_bool(value):
     if isinstance(value, str):
         normalized = value.strip().lower()
         return normalized in {"1", "true", "yes", "on"}
     return bool(value)
-
 
 def _load_enable_settings(config_path):
     defaults = {
@@ -88,7 +85,6 @@ def _load_enable_settings(config_path):
         resolved[key] = _to_launch_bool(_coerce_bool(value))
 
     return resolved
-
 
 def _create_monitor_nodes(context):
     config_file = LaunchConfiguration("system_monitor_config_file").perform(context)
@@ -136,7 +132,6 @@ def _create_monitor_nodes(context):
     )
 
     return [cpu_monitor, hdd_monitor, mem_monitor, net_monitor, ntp_monitor]
-
 
 def generate_launch_description():
     config_file_default = os.path.join(
