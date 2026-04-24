@@ -1,4 +1,4 @@
-# [WIP]asr_sdm_radxa_ws
+# [WIP] asr_sdm_radxa_ws
 Workspace of Radxa Zero for Amphibious Snake-like Robot with Screw-drive Mechanism
 
 ## Environment Setup
@@ -109,4 +109,12 @@ sudo apt-get update && sudo apt-get install -y libgoogle-glog-dev
 ```sh
 colcon build --symlink-install --parallel-workers 2
 ```
+
+# Contributing
+
+1. Fork it (<https://github.com/AmpRobo/asr_sdm_robo/fork>)
+2. Create your feature branch (`git checkout -b feature/fooBar`)
+3. Commit your changes (`git commit -asm 'feat: add some fooBar'`)
+4. Push to the branch (`git push origin feature/fooBar`)
+5. Create a new Pull Request
 
