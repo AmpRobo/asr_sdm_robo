@@ -1,7 +1,11 @@
-# [WIP] asr_sdm_radxa_ws
-Workspace of Radxa Zero for Amphibious Snake-like Robot with Screw-drive Mechanism
+# [WIP] asr_sdm_robo
+Workspace for Amphibious Snake-like Robot with Screw-drive Mechanism
 
-## Environment Setup
+## Remote PC Environment Setup
+
+
+
+## Radxa Zero Environment Setup
 
 ### .bash.rc
 ```sh
@@ -103,7 +107,7 @@ Install the official glog library. This is used instead of the `glog_vendor` pac
 sudo apt-get update && sudo apt-get install -y libgoogle-glog-dev
 ```
 
-## ROS
+## ROS2
 
 ### Source code compilation
 ```sh
