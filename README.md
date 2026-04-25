@@ -3,6 +3,15 @@ Workspace for Amphibious Snake-like Robot with Screw-drive Mechanism
 
 ## Remote PC Environment Setup
 
+### asr_sdm_monitor
+```sh
+# Qt6+ QML Dependency
+sudo apt update
+sudo apt install -y qt6-base-dev qt6-declarative-dev qt6-tools-dev qml6-module-qtquick qml6-module-qtquick-controls qml6-module-qtquick-layouts qml6-module-qtqml-workerscript qml6-module-qtquick-window qml6-module-qtqml qml6-module-qtquick-templates
+
+# Run monitor
+ros2 run asr_sdm_monitor asr_sdm_monitor
+```
 
 
 ## Radxa Zero Environment Setup
