@@ -42,8 +42,8 @@ Rectangle {
                         model: root.columns
                         delegate: Text {
                             required property var modelData
-                            Layout.preferredWidth: modelData.width
-                            Layout.fillWidth: modelData.fill === true
+                            Layout.preferredWidth: modelData.width !== undefined ? modelData.width : 80
+			    Layout.fillWidth: modelData.fill === true
                             text: modelData.label
                             font.pixelSize: 16
                             font.bold: true
@@ -77,8 +77,8 @@ Rectangle {
                             model: root.columns
                             delegate: Text {
                                 required property var modelData
-                                Layout.preferredWidth: modelData.width
-                                Layout.fillWidth: modelData.fill === true
+                                Layout.preferredWidth: modelData.width !== undefined ? modelData.width : 80
+				Layout.fillWidth: modelData.fill === true
                                 text: UiHelpers.display(rowDelegate.rowData[modelData.key])
                                 font.pixelSize: 15
                                 color: appPalette.textSecondary

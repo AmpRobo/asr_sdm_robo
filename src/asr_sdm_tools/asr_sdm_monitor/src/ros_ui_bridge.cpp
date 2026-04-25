@@ -1,19 +1,30 @@
 #include "asr_sdm_monitor/ros_ui_bridge.hpp"
 
+#include <QJsonArray>
+#include <QJsonDocument>
+#include <QJsonObject>
 #include <QMetaObject>
 #include <QStringList>
 #include <Qt>
 
 #include <algorithm>
+#include <chrono>
 #include <map>
 #include <numeric>
 #include <regex>
 #include <sstream>
 #include <vector>
 
+namespace
+{
+constexpr int kVideoSlotCount = 2;
+constexpr const char *kImageType = "sensor_msgs/msg/Image";
+constexpr const char *kCompressedImageType = "sensor_msgs/msg/CompressedImage";
+}
+
 RosUiBridge::RosUiBridge(QObject *parent)
     : QObject(parent),
-      ros_status_("Waiting for /diagnostics ...")
+      ros_status_("Waiting for /diagnostics and /system_monitor/video ...")
 {
     node_ = std::make_shared<rclcpp::Node>("diagnostics_qml_ui_node");
 
@@ -24,10 +35,33 @@ RosUiBridge::RosUiBridge(QObject *parent)
             diagnosticsCallback(msg);
         });
 
+    auto latched_qos = rclcpp::QoS(1);
+    video_topics_sub_ = node_->create_subscription<std_msgs::msg::String>(
+        (video_topic_namespace_ + QStringLiteral("/available_topics")).toStdString(),
+        latched_qos.transient_local().reliable(),
+        [this](const std_msgs::msg::String::SharedPtr msg)
+        {
+            handleVideoTopicsMessage(msg);
+        });
+
+    for (int slot_index = 0; slot_index < kVideoSlotCount; ++slot_index) {
+        video_status_subs_[static_cast<size_t>(slot_index)] = node_->create_subscription<std_msgs::msg::String>(
+            (video_topic_namespace_ + QStringLiteral("/slot%1/status").arg(slot_index)).toStdString(),
+            latched_qos.transient_local().reliable(),
+            [this, slot_index](const std_msgs::msg::String::SharedPtr msg)
+            {
+                handleVideoSlotStatusMessage(slot_index, msg);
+            });
+    }
+
+    video_select_pub_ = node_->create_publisher<std_msgs::msg::String>(
+        (video_topic_namespace_ + QStringLiteral("/select")).toStdString(),
+        latched_qos.transient_local().reliable());
+
     executor_ = std::make_unique<rclcpp::executors::SingleThreadedExecutor>();
     executor_->add_node(node_);
 
-    ros_status_ = "Subscribed: /diagnostics";
+    ros_status_ = "Subscribed: /diagnostics, /system_monitor/video/*";
     emit rosStatusChanged();
 
     ros_thread_ = std::thread([this]()
@@ -120,6 +154,88 @@ QVariantMap RosUiBridge::ntpSummary() const
 QVariantList RosUiBridge::ntpRows() const
 {
     return ntp_rows_;
+}
+
+QVariantList RosUiBridge::videoTopics() const
+{
+    return video_topics_;
+}
+
+QString RosUiBridge::videoTopic0() const
+{
+    return video_slots_[0].topic;
+}
+
+QString RosUiBridge::videoTopic1() const
+{
+    return video_slots_[1].topic;
+}
+
+QString RosUiBridge::videoStatus0() const
+{
+    return video_slots_[0].status;
+}
+
+QString RosUiBridge::videoStatus1() const
+{
+    return video_slots_[1].status;
+}
+
+int RosUiBridge::videoFrame0Revision() const
+{
+    return video_slots_[0].frame_revision;
+}
+
+int RosUiBridge::videoFrame1Revision() const
+{
+    return video_slots_[1].frame_revision;
+}
+
+QImage RosUiBridge::videoFrameImage(int slotIndex) const
+{
+    if (slotIndex < 0 || slotIndex >= kVideoSlotCount) {
+        return {};
+    }
+
+    std::lock_guard<std::mutex> lock(video_frame_mutex_);
+    return video_slots_[static_cast<size_t>(slotIndex)].frame.copy();
+}
+
+void RosUiBridge::refreshVideoTopics()
+{
+}
+
+void RosUiBridge::setVideoTopic(int slotIndex, const QString &topicName)
+{
+    if (slotIndex < 0 || slotIndex >= kVideoSlotCount) {
+        return;
+    }
+
+    const QString normalized_topic = topicName.trimmed();
+    const int other_slot_index = slotIndex == 0 ? 1 : 0;
+
+    if (!normalized_topic.isEmpty() && video_slots_[static_cast<size_t>(other_slot_index)].topic == normalized_topic) {
+        stopVideoSlot(other_slot_index);
+        publishVideoSelection(other_slot_index, QString());
+    }
+
+    auto &slot = video_slots_[static_cast<size_t>(slotIndex)];
+    if (slot.topic == normalized_topic) {
+        return;
+    }
+
+    stopVideoSlot(slotIndex);
+    slot.topic = normalized_topic;
+    slot.topic_type = video_topic_types_.value(normalized_topic);
+    slot.status = normalized_topic.isEmpty() ? QStringLiteral("No topic selected")
+                                           : QStringLiteral("Waiting for video frame");
+
+    emitVideoSlotChanged(slotIndex);
+    publishVideoSelection(slotIndex, normalized_topic);
+
+    if (!normalized_topic.isEmpty()) {
+        startVideoSlot(slotIndex);
+    }
 }
 
 void RosUiBridge::diagnosticsCallback(const diagnostic_msgs::msg::DiagnosticArray::SharedPtr msg)
@@ -504,4 +620,274 @@ void RosUiBridge::updateNtp(const diagnostic_msgs::msg::DiagnosticStatus &status
             emit ntpRowsChanged();
         },
         Qt::QueuedConnection);
+}
+
+void RosUiBridge::handleVideoTopicsMessage(const std_msgs::msg::String::SharedPtr msg)
+{
+    const QJsonDocument document = QJsonDocument::fromJson(QByteArray::fromStdString(msg->data));
+    if (!document.isObject()) {
+        return;
+    }
+
+    const QJsonArray topics = document.object().value(QStringLiteral("topics")).toArray();
+    QStringList discovered_names;
+    QMap<QString, QString> discovered_types;
+    QVariantList topic_items;
+
+    for (const QJsonValue &value : topics) {
+        const QJsonObject topic_object = value.toObject();
+        const QString name = topic_object.value(QStringLiteral("name")).toString().trimmed();
+        const QString type = topic_object.value(QStringLiteral("type")).toString().trimmed();
+        if (name.isEmpty()) {
+            continue;
+        }
+
+        discovered_names.append(name);
+        discovered_types.insert(name, type);
+        topic_items.append(name);
+    }
+
+    discovered_names.removeDuplicates();
+    discovered_names.sort(Qt::CaseSensitive);
+
+    QMetaObject::invokeMethod(
+        this,
+        [this, discovered_names, discovered_types, topic_items]()
+        {
+            video_topic_names_ = discovered_names;
+            video_topic_types_ = discovered_types;
+            video_topics_ = topic_items;
+            emit videoTopicsChanged();
+        },
+        Qt::QueuedConnection);
+}
+
+void RosUiBridge::handleVideoSlotStatusMessage(int slotIndex, const std_msgs::msg::String::SharedPtr msg)
+{
+    if (slotIndex < 0 || slotIndex >= kVideoSlotCount) {
+        return;
+    }
+
+    const QJsonDocument document = QJsonDocument::fromJson(QByteArray::fromStdString(msg->data));
+    if (!document.isObject()) {
+        return;
+    }
+
+    const QJsonObject object = document.object();
+    const QString selected_topic = object.value(QStringLiteral("selected_topic")).toString().trimmed();
+    const QString topic_type = object.value(QStringLiteral("topic_type")).toString().trimmed();
+    const QString status = object.value(QStringLiteral("status")).toString().trimmed();
+
+    QMetaObject::invokeMethod(
+        this,
+        [this, slotIndex, selected_topic, topic_type, status]()
+        {
+            auto &slot = video_slots_[static_cast<size_t>(slotIndex)];
+            slot.topic = selected_topic;
+            slot.topic_type = topic_type;
+            if (!status.isEmpty()) {
+                slot.status = status;
+            }
+            emitVideoSlotChanged(slotIndex);
+        },
+        Qt::QueuedConnection);
+}
+
+void RosUiBridge::publishVideoSelection(int slotIndex, const QString &topicName)
+{
+    if (!video_select_pub_) {
+        return;
+    }
+
+    QJsonObject payload;
+    payload.insert(QStringLiteral("slot"), slotIndex);
+    payload.insert(QStringLiteral("topic"), topicName);
+
+    std_msgs::msg::String msg;
+    msg.data = QJsonDocument(payload).toJson(QJsonDocument::Compact).toStdString();
+    video_select_pub_->publish(msg);
+}
+
+void RosUiBridge::stopVideoSlot(int slotIndex)
+{
+    if (slotIndex < 0 || slotIndex >= kVideoSlotCount) {
+        return;
+    }
+
+    auto &slot = video_slots_[static_cast<size_t>(slotIndex)];
+    slot.image_sub.reset();
+    slot.compressed_sub.reset();
+    slot.frame_revision = 0;
+
+    {
+        std::lock_guard<std::mutex> lock(video_frame_mutex_);
+        slot.frame = QImage();
+    }
+
+    if (slot.topic.isEmpty()) {
+        slot.status = QStringLiteral("No topic selected");
+    }
+    emitVideoSlotChanged(slotIndex);
+}
+
+void RosUiBridge::startVideoSlot(int slotIndex)
+{
+    if (slotIndex < 0 || slotIndex >= kVideoSlotCount) {
+        return;
+    }
+
+    auto &slot = video_slots_[static_cast<size_t>(slotIndex)];
+    slot.image_sub.reset();
+    slot.compressed_sub.reset();
+
+    const std::string image_topic = (video_topic_namespace_ + QStringLiteral("/slot%1/image").arg(slotIndex)).toStdString();
+    const std::string compressed_topic = (video_topic_namespace_ + QStringLiteral("/slot%1/compressed").arg(slotIndex)).toStdString();
+    const rclcpp::SensorDataQoS qos;
+
+    slot.status = QStringLiteral("Waiting for video frame");
+    slot.image_sub = node_->create_subscription<sensor_msgs::msg::Image>(
+        image_topic, qos,
+        [this, slotIndex](const sensor_msgs::msg::Image::SharedPtr msg)
+        {
+            imageCallback(slotIndex, msg);
+        });
+    slot.compressed_sub = node_->create_subscription<sensor_msgs::msg::CompressedImage>(
+        compressed_topic, qos,
+        [this, slotIndex](const sensor_msgs::msg::CompressedImage::SharedPtr msg)
+        {
+            compressedImageCallback(slotIndex, msg);
+        });
+
+    emitVideoSlotChanged(slotIndex);
+}
+
+void RosUiBridge::imageCallback(int slotIndex, const sensor_msgs::msg::Image::SharedPtr msg)
+{
+    QString error;
+    const QImage image = imageMessageToQImage(*msg, &error);
+    if (image.isNull()) {
+        updateVideoStatus(slotIndex, error.isEmpty() ? QStringLiteral("Unable to decode image") : error);
+        return;
+    }
+
+    const QString status = QStringLiteral("%1x%2 %3")
+                               .arg(msg->width)
+                               .arg(msg->height)
+                               .arg(QString::fromStdString(msg->encoding));
+    updateVideoFrame(slotIndex, image, status);
+}
+
+void RosUiBridge::compressedImageCallback(int slotIndex, const sensor_msgs::msg::CompressedImage::SharedPtr msg)
+{
+    QImage image;
+    if (!image.loadFromData(msg->data.data(), static_cast<int>(msg->data.size()))) {
+        updateVideoStatus(slotIndex, QStringLiteral("Unable to decode compressed image"));
+        return;
+    }
+
+    const QString format = QString::fromStdString(msg->format).trimmed();
+    const QString status = format.isEmpty()
+                               ? QStringLiteral("Compressed image")
+                               : QStringLiteral("Compressed image (%1)").arg(format);
+    updateVideoFrame(slotIndex, image, status);
+}
+
+void RosUiBridge::updateVideoFrame(int slotIndex, const QImage &image, const QString &status)
+{
+    if (slotIndex < 0 || slotIndex >= kVideoSlotCount) {
+        return;
+    }
+
+    const QImage image_copy = image.copy();
+
+    QMetaObject::invokeMethod(
+        this,
+        [this, slotIndex, image_copy, status]()
+        {
+            auto &slot = video_slots_[static_cast<size_t>(slotIndex)];
+            {
+                std::lock_guard<std::mutex> lock(video_frame_mutex_);
+                slot.frame = image_copy;
+            }
+
+            ++slot.frame_revision;
+            slot.status = status;
+            emitVideoSlotChanged(slotIndex);
+        },
+        Qt::QueuedConnection);
+}
+
+void RosUiBridge::updateVideoStatus(int slotIndex, const QString &status)
+{
+    if (slotIndex < 0 || slotIndex >= kVideoSlotCount) {
+        return;
+    }
+
+    QMetaObject::invokeMethod(
+        this,
+        [this, slotIndex, status]()
+        {
+            auto &slot = video_slots_[static_cast<size_t>(slotIndex)];
+            slot.status = status;
+            emitVideoSlotChanged(slotIndex);
+        },
+        Qt::QueuedConnection);
+}
+
+void RosUiBridge::emitVideoSlotChanged(int slotIndex)
+{
+    if (slotIndex == 0) {
+        emit videoSlot0Changed();
+    } else if (slotIndex == 1) {
+        emit videoSlot1Changed();
+    }
+}
+
+QImage RosUiBridge::imageMessageToQImage(const sensor_msgs::msg::Image &msg, QString *errorMessage)
+{
+    if (msg.width == 0 || msg.height == 0) {
+        if (errorMessage) {
+            *errorMessage = QStringLiteral("Invalid image size");
+        }
+        return {};
+    }
+
+    const qsizetype required_size = static_cast<qsizetype>(msg.step) * static_cast<qsizetype>(msg.height);
+    if (required_size <= 0 || static_cast<qsizetype>(msg.data.size()) < required_size) {
+        if (errorMessage) {
+            *errorMessage = QStringLiteral("Image data is incomplete");
+        }
+        return {};
+    }
+
+    const uchar *data = msg.data.data();
+    const int width = static_cast<int>(msg.width);
+    const int height = static_cast<int>(msg.height);
+    const int bytes_per_line = static_cast<int>(msg.step);
+    const QString encoding = QString::fromStdString(msg.encoding).toLower();
+
+    if (encoding == QStringLiteral("rgb8")) {
+        return QImage(data, width, height, bytes_per_line, QImage::Format_RGB888).copy();
+    }
+
+    if (encoding == QStringLiteral("bgr8")) {
+        return QImage(data, width, height, bytes_per_line, QImage::Format_RGB888).rgbSwapped();
+    }
+
+    if (encoding == QStringLiteral("rgba8")) {
+        return QImage(data, width, height, bytes_per_line, QImage::Format_RGBA8888).copy();
+    }
+
+    if (encoding == QStringLiteral("bgra8")) {
+        return QImage(data, width, height, bytes_per_line, QImage::Format_RGBA8888).rgbSwapped();
+    }
+
+    if (encoding == QStringLiteral("mono8") || encoding == QStringLiteral("8uc1")) {
+        return QImage(data, width, height, bytes_per_line, QImage::Format_Grayscale8).copy();
+    }
+
+    if (errorMessage) {
+        *errorMessage = QStringLiteral("Unsupported image encoding: %1").arg(QString::fromStdString(msg.encoding));
+    }
+    return {};
 }

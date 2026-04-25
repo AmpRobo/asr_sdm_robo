@@ -20,29 +20,6 @@ Rectangle {
         anchors.margins: 20
         spacing: 14
 
-        Text {
-            text: I18n.t(root.language, "diagnostics")
-            font.pixelSize: 18
-            font.bold: true
-            color: appPalette.textPrimary
-        }
-
-        Text {
-            text: I18n.t(root.language, "topicPrefix") + " /diagnostics"
-            font.pixelSize: 16
-            color: appPalette.textSecondary
-            wrapMode: Text.WrapAnywhere
-        }
-
-        Text {
-            text: I18n.t(root.language, "statusPrefix") + " " + root.rosStatus
-            font.pixelSize: 16
-            color: appPalette.textSecondary
-            wrapMode: Text.WrapAnywhere
-        }
-
-        Item { width: 1; height: 10 }
-
         SelectableButton {
             label: I18n.t(root.language, "hardware")
             selected: root.currentSection === 0

@@ -18,6 +18,9 @@ Rectangle {
 
     Text {
         anchors.centerIn: parent
+        width: Math.max(0, parent.width - 16)
+        horizontalAlignment: Text.AlignHCenter
+        elide: Text.ElideRight
         text: root.label
         font.pixelSize: 16
         font.bold: root.selected
