@@ -15,8 +15,9 @@ Item {
     readonly property var tabKeys: ["cpu", "memory", "hdd", "net", "ntp"]
 
     RowLayout {
+        id: tabLayout
         anchors.fill: parent
-        spacing: 12
+        spacing: root.width < 520 ? 6 : 12
 
         Repeater {
             model: root.tabKeys
@@ -24,13 +25,12 @@ Item {
                 label: I18n.t(root.language, modelData)
                 selected: root.currentIndex === index
                 appPalette: root.appPalette
+                Layout.fillWidth: true
+                Layout.minimumWidth: 64
                 Layout.preferredWidth: 140
-                Layout.fillWidth: false
                 implicitHeight: 46
                 onClicked: root.tabSelected(index)
             }
         }
-
-        Item { Layout.fillWidth: true }
     }
 }

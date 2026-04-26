@@ -8,6 +8,8 @@ set(CMAKE_AUTOMOC ON)
 find_package(ament_cmake REQUIRED)
 find_package(rclcpp REQUIRED)
 find_package(diagnostic_msgs REQUIRED)
+find_package(sensor_msgs REQUIRED)
+find_package(std_msgs REQUIRED)
 find_package(Qt6 REQUIRED COMPONENTS Core Gui Qml Quick QuickControls2)
 
 qt_standard_project_setup()
@@ -15,7 +17,9 @@ qt_standard_project_setup()
 qt_add_executable(${PROJECT_NAME}
   src/main.cpp
   src/ros_ui_bridge.cpp
+  src/ros_video_image_provider.cpp
   include/asr_sdm_monitor/ros_ui_bridge.hpp
+  include/asr_sdm_monitor/ros_video_image_provider.hpp
 )
 
 qt_add_resources(${PROJECT_NAME} "qml_resources"
@@ -54,6 +58,8 @@ target_link_libraries(${PROJECT_NAME} PRIVATE
   Qt6::QuickControls2
   rclcpp::rclcpp
   ${diagnostic_msgs_TARGETS}
+  ${sensor_msgs_TARGETS}
+  ${std_msgs_TARGETS}
 )
 
 install(TARGETS ${PROJECT_NAME}

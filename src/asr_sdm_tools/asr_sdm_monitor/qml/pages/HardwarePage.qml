@@ -20,7 +20,9 @@ Item {
             appPalette: root.appPalette
             language: root.language
             currentIndex: root.currentTab
-            onTabSelected: root.tabChanged(index)
+            onTabSelected: function(index) {
+		root.tabChanged(index)
+	    }
         }
 
         StackLayout {

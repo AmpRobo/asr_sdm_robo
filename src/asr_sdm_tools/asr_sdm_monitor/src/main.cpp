@@ -5,6 +5,7 @@
 
 #include <rclcpp/rclcpp.hpp>
 #include "asr_sdm_monitor/ros_ui_bridge.hpp"
+#include "asr_sdm_monitor/ros_video_image_provider.hpp"
 
 int main(int argc, char *argv[])
 {
@@ -15,6 +16,7 @@ int main(int argc, char *argv[])
     qmlRegisterSingletonInstance("RosUi", 1, 0, "RosUi", &bridge);
 
     QQmlApplicationEngine engine;
+    engine.addImageProvider(QStringLiteral("rosvideo"), new RosVideoImageProvider(&bridge));
     engine.load(QUrl(QStringLiteral("qrc:/qt/qml/AsrSdmMonitor/qml/Main.qml")));
 
     if (engine.rootObjects().isEmpty()) {
