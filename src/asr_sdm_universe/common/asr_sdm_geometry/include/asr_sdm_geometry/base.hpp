@@ -13,7 +13,7 @@ namespace geometry
 {
 
 using Real = double;
-inline constexpr Real EPS = static_cast<Real>(1e-6);
+inline constexpr Real EPS = static_cast<Real>(1e-5);
 inline const Real PI = std::acos(static_cast<Real>(-1));
 
 enum { OUT, ON, IN };
