@@ -1,9 +1,9 @@
 <?xml version="1.0"?>
 <?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
 <package format="3">
-  <name>five_aplus_ros</name>
+  <name>asr_sdm_video_enhancement_ml</name>
   <version>0.1.0</version>
-  <description>ROS2 C++ ONNX Runtime node for FiveA+ underwater image enhancement.</description>
+  <description>ROS2 C++ ONNX Runtime node for ML-based underwater video enhancement (FiveA+).</description>
   <maintainer email="cortin@todo.todo">cortin</maintainer>
   <license>MIT</license>
 

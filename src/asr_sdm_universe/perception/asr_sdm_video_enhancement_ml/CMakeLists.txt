@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.8)
-project(five_aplus_ros)
+project(asr_sdm_video_enhancement_ml)
 
 if(CMAKE_COMPILER_IS_GNUCXX OR CMAKE_CXX_COMPILER_ID MATCHES "Clang")
   add_compile_options(-Wall -Wextra -Wpedantic)
@@ -35,28 +35,28 @@ if(NOT EXISTS "${ONNXRUNTIME_LIBRARY}")
   message(FATAL_ERROR "ONNX Runtime library not found at ${ONNXRUNTIME_LIBRARY}. Set ONNXRUNTIME_ROOT.")
 endif()
 
-add_executable(five_aplus_node cpp_runtime/src/five_aplus_node.cpp)
-target_include_directories(five_aplus_node PRIVATE
+add_executable(asr_sdm_video_enhancement_ml_node cpp_runtime/src/asr_sdm_video_enhancement_ml_node.cpp)
+target_include_directories(asr_sdm_video_enhancement_ml_node PRIVATE
   cpp_runtime/include
   ${ONNXRUNTIME_INCLUDE_DIR}
   ${OpenCV_INCLUDE_DIRS}
 )
-target_link_libraries(five_aplus_node
+target_link_libraries(asr_sdm_video_enhancement_ml_node
   ${ONNXRUNTIME_LIBRARY}
   ${OpenCV_LIBS}
 )
-ament_target_dependencies(five_aplus_node
+ament_target_dependencies(asr_sdm_video_enhancement_ml_node
   cv_bridge
   image_transport
   rclcpp
   sensor_msgs
 )
-set_target_properties(five_aplus_node PROPERTIES
+set_target_properties(asr_sdm_video_enhancement_ml_node PROPERTIES
   BUILD_RPATH "${ONNXRUNTIME_ROOT}/lib"
   INSTALL_RPATH "${ONNXRUNTIME_ROOT}/lib"
 )
 
-install(TARGETS five_aplus_node
+install(TARGETS asr_sdm_video_enhancement_ml_node
   DESTINATION lib/${PROJECT_NAME}
 )
 install(DIRECTORY config launch models

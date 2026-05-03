@@ -1,4 +1,4 @@
-#include "five_aplus_ros/five_aplus_node.hpp"
+#include "asr_sdm_video_enhancement_ml/asr_sdm_video_enhancement_ml_node.hpp"
 
 #include <algorithm>
 #include <chrono>
@@ -15,12 +15,12 @@
 namespace enc = sensor_msgs::image_encodings;
 using std::placeholders::_1;
 
-namespace five_aplus_ros
+namespace asr_sdm_video_enhancement_ml
 {
 
-FiveAPlusNode::FiveAPlusNode(const rclcpp::NodeOptions & options)
-: Node("five_aplus_node", options),
-  env_(ORT_LOGGING_LEVEL_WARNING, "five_aplus_ros"),
+VideoEnhancementMlNode::VideoEnhancementMlNode(const rclcpp::NodeOptions & options)
+: Node("asr_sdm_video_enhancement_ml_node", options),
+  env_(ORT_LOGGING_LEVEL_WARNING, "asr_sdm_video_enhancement_ml"),
   session_(nullptr),
   num_threads_(0),
   normalize_output_(true),
@@ -30,7 +30,7 @@ FiveAPlusNode::FiveAPlusNode(const rclcpp::NodeOptions & options)
 {
   model_path_ = declare_parameter<std::string>("model_path", "models/five_aplus_epoch97.onnx");
   input_topic_ = declare_parameter<std::string>("input_topic", "/camera/camera/color/image_raw");
-  output_topic_ = declare_parameter<std::string>("output_topic", "/five_aplus/image");
+  output_topic_ = declare_parameter<std::string>("output_topic", "/asr_sdm_video_enhancement_ml/image");
   num_threads_ = declare_parameter<int64_t>("num_threads", 0);
   normalize_output_ = declare_parameter<bool>("normalize_output", true);
 
@@ -52,13 +52,13 @@ FiveAPlusNode::FiveAPlusNode(const rclcpp::NodeOptions & options)
 
   image_pub_ = create_publisher<sensor_msgs::msg::Image>(output_topic_, rclcpp::QoS(10));
   image_sub_ = create_subscription<sensor_msgs::msg::Image>(
-    input_topic_, rclcpp::SensorDataQoS(), std::bind(&FiveAPlusNode::imageCallback, this, _1));
+    input_topic_, rclcpp::SensorDataQoS(), std::bind(&VideoEnhancementMlNode::imageCallback, this, _1));
 
-  RCLCPP_INFO(get_logger(), "FiveA+ node loaded %s", model_path_.c_str());
+  RCLCPP_INFO(get_logger(), "Video enhancement ML node loaded %s", model_path_.c_str());
   RCLCPP_INFO(get_logger(), "Subscribing %s, publishing %s", input_topic_.c_str(), output_topic_.c_str());
 }
 
-void FiveAPlusNode::imageCallback(const sensor_msgs::msg::Image::ConstSharedPtr msg)
+void VideoEnhancementMlNode::imageCallback(const sensor_msgs::msg::Image::ConstSharedPtr msg)
 {
   const auto callback_start = std::chrono::steady_clock::now();
   if (msg->encoding != enc::BGR8 && msg->encoding != enc::RGB8) {
@@ -127,7 +127,7 @@ void FiveAPlusNode::imageCallback(const sensor_msgs::msg::Image::ConstSharedPtr 
     std::chrono::duration<double, std::milli>(inference_end - inference_start));
 }
 
-std::vector<float> FiveAPlusNode::imageToTensor(const cv::Mat & rgb_image) const
+std::vector<float> VideoEnhancementMlNode::imageToTensor(const cv::Mat & rgb_image) const
 {
   cv::Mat rgb_float;
   rgb_image.convertTo(rgb_float, CV_32FC3, 1.0 / 255.0);
@@ -147,7 +147,7 @@ std::vector<float> FiveAPlusNode::imageToTensor(const cv::Mat & rgb_image) const
   return tensor;
 }
 
-cv::Mat FiveAPlusNode::tensorToBgrImage(const float * output_data, const std::vector<int64_t> & shape) const
+cv::Mat VideoEnhancementMlNode::tensorToBgrImage(const float * output_data, const std::vector<int64_t> & shape) const
 {
   if (shape.size() != 4 || shape[0] != 1 || shape[1] != 3 || shape[2] <= 0 || shape[3] <= 0) {
     RCLCPP_ERROR(
@@ -200,7 +200,7 @@ cv::Mat FiveAPlusNode::tensorToBgrImage(const float * output_data, const std::ve
   return bgr;
 }
 
-void FiveAPlusNode::logStats(
+void VideoEnhancementMlNode::logStats(
   std::chrono::duration<double, std::milli> callback_ms,
   std::chrono::duration<double, std::milli> inference_ms)
 {
@@ -214,16 +214,16 @@ void FiveAPlusNode::logStats(
   const double callback_fps = 1000.0 / (accumulated_callback_ms_ / static_cast<double>(frame_count_));
   const double inference_fps = 1000.0 / (accumulated_inference_ms_ / static_cast<double>(frame_count_));
   RCLCPP_INFO(
-    get_logger(), "FiveA+ processed %zu frames: callback %.2f FPS, inference %.2f FPS",
+    get_logger(), "Video enhancement ML processed %zu frames: callback %.2f FPS, inference %.2f FPS",
     frame_count_, callback_fps, inference_fps);
 }
 
-}  // namespace five_aplus_ros
+}  // namespace asr_sdm_video_enhancement_ml
 
 int main(int argc, char ** argv)
 {
   rclcpp::init(argc, argv);
-  rclcpp::spin(std::make_shared<five_aplus_ros::FiveAPlusNode>());
+  rclcpp::spin(std::make_shared<asr_sdm_video_enhancement_ml::VideoEnhancementMlNode>());
   rclcpp::shutdown();
   return 0;
 }

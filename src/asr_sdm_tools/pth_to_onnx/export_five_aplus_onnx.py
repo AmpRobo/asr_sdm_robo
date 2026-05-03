@@ -17,8 +17,12 @@ import torch.nn.functional as F
 
 
 TOOL_ROOT = Path(__file__).resolve().parents[1]
+_REPO_ROOT = Path(__file__).resolve().parents[3]
 DEFAULT_WEIGHTS = Path("/home/cortin/Desktop/FIVE_APLUS_epoch97.pth")
-DEFAULT_OUTPUT = Path("/home/cortin/ros2_ws/src/five_aplus_ros/models/five_aplus_epoch97.onnx")
+DEFAULT_OUTPUT = (
+    _REPO_ROOT
+    / "src/asr_sdm_universe/perception/asr_sdm_video_enhancement_ml/models/five_aplus_epoch97.onnx"
+)
 DEFAULT_INPUT_SHAPES = ((1, 3, 256, 256), (1, 3, 480, 640))
 
 

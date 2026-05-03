@@ -1,5 +1,5 @@
-#ifndef FIVE_APLUS_ROS__FIVE_APLUS_NODE_HPP_
-#define FIVE_APLUS_ROS__FIVE_APLUS_NODE_HPP_
+#ifndef ASR_SDM_VIDEO_ENHANCEMENT_ML__ASR_SDM_VIDEO_ENHANCEMENT_ML_NODE_HPP_
+#define ASR_SDM_VIDEO_ENHANCEMENT_ML__ASR_SDM_VIDEO_ENHANCEMENT_ML_NODE_HPP_
 
 #include <chrono>
 #include <memory>
@@ -11,13 +11,13 @@
 #include <rclcpp/rclcpp.hpp>
 #include <sensor_msgs/msg/image.hpp>
 
-namespace five_aplus_ros
+namespace asr_sdm_video_enhancement_ml
 {
 
-class FiveAPlusNode : public rclcpp::Node
+class VideoEnhancementMlNode : public rclcpp::Node
 {
 public:
-  explicit FiveAPlusNode(const rclcpp::NodeOptions & options = rclcpp::NodeOptions());
+  explicit VideoEnhancementMlNode(const rclcpp::NodeOptions & options = rclcpp::NodeOptions());
 
 private:
   void imageCallback(const sensor_msgs::msg::Image::ConstSharedPtr msg);
@@ -46,6 +46,6 @@ private:
   double accumulated_inference_ms_;
 };
 
-}  // namespace five_aplus_ros
+}  // namespace asr_sdm_video_enhancement_ml
 
-#endif  // FIVE_APLUS_ROS__FIVE_APLUS_NODE_HPP_
+#endif  // ASR_SDM_VIDEO_ENHANCEMENT_ML__ASR_SDM_VIDEO_ENHANCEMENT_ML_NODE_HPP_

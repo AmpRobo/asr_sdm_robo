@@ -8,7 +8,7 @@ from launch_ros.actions import Node
 
 
 def generate_launch_description():
-    package_share = get_package_share_directory("five_aplus_ros")
+    package_share = get_package_share_directory("asr_sdm_video_enhancement_ml")
     default_model = os.path.join(package_share, "models", "five_aplus_epoch97.onnx")
     onnxruntime_root = os.environ.get("ONNXRUNTIME_ROOT")
     if not onnxruntime_root:
@@ -34,13 +34,13 @@ def generate_launch_description():
             SetEnvironmentVariable("LD_LIBRARY_PATH", ld_library_path),
             DeclareLaunchArgument("model_path", default_value=default_model),
             DeclareLaunchArgument("input_topic", default_value="/camera/camera/color/image_raw"),
-            DeclareLaunchArgument("output_topic", default_value="/five_aplus/image"),
+            DeclareLaunchArgument("output_topic", default_value="/asr_sdm_video_enhancement_ml/image"),
             DeclareLaunchArgument("num_threads", default_value="0"),
             DeclareLaunchArgument("normalize_output", default_value="true"),
             Node(
-                package="five_aplus_ros",
-                executable="five_aplus_node",
-                name="five_aplus_node",
+                package="asr_sdm_video_enhancement_ml",
+                executable="asr_sdm_video_enhancement_ml_node",
+                name="asr_sdm_video_enhancement_ml_node",
                 output="screen",
                 parameters=[
                     {
