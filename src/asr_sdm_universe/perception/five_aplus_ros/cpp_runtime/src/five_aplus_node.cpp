@@ -147,7 +147,7 @@ std::vector<float> FiveAPlusNode::imageToTensor(const cv::Mat & rgb_image) const
   return tensor;
 }
 
-cv::Mat FiveAPlusNode::tensorToBgrImage(float * output_data, const std::vector<int64_t> & shape) const
+cv::Mat FiveAPlusNode::tensorToBgrImage(const float * output_data, const std::vector<int64_t> & shape) const
 {
   if (shape.size() != 4 || shape[0] != 1 || shape[1] != 3 || shape[2] <= 0 || shape[3] <= 0) {
     RCLCPP_ERROR(

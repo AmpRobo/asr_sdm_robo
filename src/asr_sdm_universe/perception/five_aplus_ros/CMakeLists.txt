@@ -12,7 +12,14 @@ find_package(OpenCV REQUIRED)
 find_package(rclcpp REQUIRED)
 find_package(sensor_msgs REQUIRED)
 
-set(ONNXRUNTIME_ROOT "$ENV{ONNXRUNTIME_ROOT}" CACHE PATH "Path to ONNX Runtime root")
+# If ONNXRUNTIME_ROOT was first configured with an empty env, it stays empty in the
+# CMake cache unless we FORCE-update when the environment is set later (e.g. after
+# adding ONNXRUNTIME_ROOT to ~/.bashrc).
+if(NOT "$ENV{ONNXRUNTIME_ROOT}" STREQUAL "")
+  set(ONNXRUNTIME_ROOT "$ENV{ONNXRUNTIME_ROOT}" CACHE PATH "Path to ONNX Runtime root" FORCE)
+else()
+  set(ONNXRUNTIME_ROOT "${ONNXRUNTIME_ROOT}" CACHE PATH "Path to ONNX Runtime root")
+endif()
 if(NOT ONNXRUNTIME_ROOT)
   message(FATAL_ERROR
     "ONNXRUNTIME_ROOT is not set. Please set the ONNXRUNTIME_ROOT environment variable "
