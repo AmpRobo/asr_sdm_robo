@@ -31,9 +31,36 @@
   <link name="l_motor_bottom_disk_assemble001">
     <visual>
       <!--motor_bottom_disk_assemble001/motor_bottom_disk_assemble002.-->
-      <origin rpy="0 1.5707963267948963 0" xyz="-0.069 0.0 0.0"/>
+      <origin rpy="0 1.5707963267948963 0" xyz="-0.138 0.0 0.0"/>
       <geometry>
         <mesh filename="package://asr_sdm_description/meshes/asr_sdm_v1_motor_bottom_disk_assemble.dae"/>
+      </geometry>
+    </visual>
+  </link>
+  <link name="l_screw_rotor_right001">
+    <visual>
+      <!--screw_rotor_right001/screw_rotor_right002.-->
+      <origin rpy="0 1.5707963267948948 0" xyz="-0.0815 0.0 0.0"/>
+      <geometry>
+        <mesh filename="package://asr_sdm_description/meshes/asr_sdm_v1_screw_rotor_right.dae"/>
+      </geometry>
+    </visual>
+  </link>
+  <link name="l_cycloid_outter_motor_opposite_side003">
+    <visual>
+      <!--cycloid_outter_motor_opposite_side003/cycloid_outter_motor_opposite_side003.-->
+      <origin rpy="0 -1.5707963267948963 0" xyz="-0.069 0.0 0.0"/>
+      <geometry>
+        <mesh filename="package://asr_sdm_description/meshes/asr_sdm_v1_cycloid_outter_motor_opposite_side.dae"/>
+      </geometry>
+    </visual>
+  </link>
+  <link name="l_cycloid_outter_motor_side003">
+    <visual>
+      <!--cycloid_outter_motor_side003/cycloid_outter_motor_side003.-->
+      <origin rpy="0 1.5707963267948963 0" xyz="-0.094 0.0 0.0"/>
+      <geometry>
+        <mesh filename="package://asr_sdm_description/meshes/asr_sdm_v1_cycloid_outter_motor_side.dae"/>
       </geometry>
     </visual>
   </link>
@@ -51,6 +78,22 @@
   <joint name="l_cycloid_outter_motor_opposite_side001__to__l_motor_bottom_disk_assemble001" type="fixed">
     <parent link="l_cycloid_outter_motor_opposite_side001"/>
     <child link="l_motor_bottom_disk_assemble001"/>
+    <origin rpy="0 0 0" xyz="0.0 0.0 0.0"/>
+  </joint>
+  <joint name="l_cycloid_outter_motor_opposite_side001__to__l_cycloid_outter_motor_opposite_side003" type="fixed">
+    <parent link="l_cycloid_outter_motor_opposite_side001"/>
+    <child link="l_cycloid_outter_motor_opposite_side003"/>
+    <origin rpy="0 0 0" xyz="0.0 0.0 0.0"/>
+  </joint>
+  <joint name="l_cycloid_outter_motor_opposite_side003__to__l_screw_rotor_right001" type="continuous">
+    <parent link="l_cycloid_outter_motor_opposite_side003"/>
+    <child link="l_screw_rotor_right001"/>
+    <origin rpy="0 0 0" xyz="0.0 0.0 0.0"/>
+    <axis xyz="1 0 0"/>
+  </joint>
+  <joint name="l_cycloid_outter_motor_opposite_side003__to__l_cycloid_outter_motor_side003" type="fixed">
+    <parent link="l_cycloid_outter_motor_opposite_side003"/>
+    <child link="l_cycloid_outter_motor_side003"/>
     <origin rpy="0 0 0" xyz="0.0 0.0 0.0"/>
   </joint>
 </robot>
