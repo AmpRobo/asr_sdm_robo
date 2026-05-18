@@ -1,4 +1,5 @@
 #include <Eigen/Core>
+#include <Eigen/Geometry>
 #include <cv_bridge/cv_bridge.hpp>
 #include <rclcpp/rclcpp.hpp>
 
@@ -9,6 +10,7 @@
 #include <svo/config.h>
 #include <svo/frame.h>
 #include <svo/frame_handler_mono.h>
+#include <svo/imu_preprocessor.h>
 #include <svo/imu_types.h>
 #include <svo/map.h>
 #include <svo_ros/visualizer.h>
@@ -59,6 +61,7 @@ private:
   // --- Image pipeline (producer-consumer, single-frame) ---
   rclcpp::Subscription<sensor_msgs::msg::Image>::SharedPtr sub_img_;
   sensor_msgs::msg::Image::ConstSharedPtr latest_img_;
+  double latest_img_rel_ts_ = 0.0;  // relative timestamp (bag_start_time_ = t=0)
   std::mutex img_mutex_;
   std::condition_variable img_cv_;
   bool new_img_ready_ = false;
@@ -72,11 +75,24 @@ private:
   rclcpp::Subscription<sensor_msgs::msg::Imu>::SharedPtr sub_imu_;
   std::shared_ptr<svo::ImuHandler> imu_handler_;
   bool use_imu_ = false;
-  bool set_initial_attitude_from_gravity_ = true;
   svo::ImuCalibration imu_calib_;
   svo::ImuInitialization imu_init_;
   svo::IMUHandlerOptions imu_options_;
-  Eigen::Quaterniond last_imu_rotation_{Eigen::Quaterniond::Identity()};
+
+  // --- IMU yaw alignment (unify IMU world to SVO visual world) ---
+  // NOTE: The final implementation uses gravity-aligned Roll/Pitch + yaw=0.
+  // IMU quaternion yaw is NOT used — it drifts continuously (sensor fusion drift),
+  // not a fixed offset. The visual front-end establishes yaw from image features.
+
+  // IMU preprocessor (visual-guided offline calibration + data collection):
+  //   0=none: no IMU preprocessing, use raw ImuHandler
+  //   1=collect: collect visual poses + raw IMU for offline calibration
+  int imu_preprocessing_mode_ = 0;
+  std::shared_ptr<svo::ImuPreprocessor> imu_preprocessor_;
+
+  // Bag uses absolute timestamps (2013), but SVO uses wall clock (2026).
+  // We normalize ALL timestamps to relative time: first received message = t=0.
+  double bag_start_time_ = -1.0;  // absolute timestamp of first message received
 
   // --- IMU health monitoring ---
   int imu_meas_count_ = 0;
@@ -204,9 +220,7 @@ VoNode::VoNode()
   use_imu_ = vk::getParam<bool>(this, "use_imu", false);
   if (use_imu_)
   {
-    RCLCPP_INFO(this->get_logger(), "IMU fusion is ENABLED");
-    set_initial_attitude_from_gravity_ =
-        vk::getParam<bool>(this, "set_initial_attitude_from_gravity", true);
+    RCLCPP_INFO(this->get_logger(), "IMU data collection: ENABLED (rotation prior is permanently disabled)");
 
     imu_calib_.delay_imu_cam = vk::getParam<double>(this, "imu_delay_imu_cam", 0.0);
     imu_calib_.max_imu_delta_t = vk::getParam<double>(this, "imu_max_imu_delta_t", 0.1);
@@ -235,6 +249,25 @@ VoNode::VoNode()
     imu_options_.stationary_gyr_sigma_thresh_ = vk::getParam<double>(
         this, "stationary_gyr_sigma_thresh", 0.0);
 
+    // NOTE: The final implementation uses gravity-aligned Roll/Pitch + yaw=0.
+    // IMU quaternion yaw is NOT used — it drifts continuously (sensor fusion drift).
+    // The visual front-end establishes yaw from image features.
+
+    // IMU preprocessing mode:
+    // 0 = no preprocessing (use raw ImuHandler directly)
+    // 1 = collect (gather visual poses + IMU for offline calibration)
+    // 2 = aligned (load calibration params, use aligned IMU for interpolation)
+    imu_preprocessing_mode_ = vk::getParam<int>(this, "imu_preprocessing_mode", 0);
+
+    if (imu_preprocessing_mode_ > 0)
+    {
+      svo::ImuPreprocessorOptions preproc_opts;
+      preproc_opts.gravity_magnitude = imu_calib_.gravity_magnitude;
+      preproc_opts.verbose = true;
+      imu_preprocessor_ = std::make_shared<svo::ImuPreprocessor>(preproc_opts);
+      RCLCPP_INFO(this->get_logger(), "IMU preprocessing mode=%d", imu_preprocessing_mode_);
+    }
+
     imu_handler_ = std::make_shared<svo::ImuHandler>(imu_calib_, imu_init_, imu_options_);
 
     RCLCPP_INFO(this->get_logger(),
@@ -244,6 +277,8 @@ VoNode::VoNode()
   }
 
   vo_ = new svo::FrameHandlerMono(cam_, use_imu_);
+  if (use_imu_ && imu_handler_)
+    vo_->setImuCalibrator(imu_handler_->calibrator());
   vo_->start();
 }
 
@@ -276,8 +311,11 @@ void VoNode::init()
   if (use_imu_)
   {
     const std::string imu_topic = vk::getParam<std::string>(this, "imu_topic", "/imu/data");
+    rclcpp::QoS qos_imu(100);
+    qos_imu.reliability(rclcpp::ReliabilityPolicy::Reliable);
+    qos_imu.durability(rclcpp::DurabilityPolicy::Volatile);
     sub_imu_ = create_subscription<sensor_msgs::msg::Imu>(
-        imu_topic, rclcpp::SensorDataQoS(),
+        imu_topic, qos_imu,
         std::bind(&VoNode::imuCb, this, std::placeholders::_1));
     RCLCPP_INFO(this->get_logger(), "Subscribing to IMU: %s", imu_topic.c_str());
   }
@@ -303,7 +341,15 @@ VoNode::~VoNode()
 // =============================================================================
 void VoNode::imuCb(const sensor_msgs::msg::Imu::ConstSharedPtr& msg)
 {
-  const double t = rclcpp::Time(msg->header.stamp).seconds();
+  // Convert bag absolute timestamp (2013) to relative time (first message = t=0)
+  double t_abs = rclcpp::Time(msg->header.stamp).seconds();
+  if (bag_start_time_ < 0.0)
+  {
+    bag_start_time_ = t_abs;
+    RCLCPP_INFO(this->get_logger(), "Bag baseline set: first IMU ts=%.3f (wall=%.3f)", t_abs, this->get_clock()->now().seconds());
+  }
+  const double t = t_abs - bag_start_time_;
+
   ++imu_meas_count_;
 
   if (imu_meas_count_ <= 5)
@@ -353,6 +399,19 @@ void VoNode::imuCb(const sensor_msgs::msg::Imu::ConstSharedPtr& msg)
           Eigen::Vector3d(msg->linear_acceleration.x,
                            msg->linear_acceleration.y,
                            msg->linear_acceleration.z)));
+
+  // Feed raw IMU to preprocessor for data collection (mode 1)
+  if (imu_preprocessing_mode_ == 1 && imu_preprocessor_)
+  {
+    imu_preprocessor_->addImuData(
+        t,
+        Eigen::Vector3d(msg->angular_velocity.x,
+                        msg->angular_velocity.y,
+                        msg->angular_velocity.z),
+        Eigen::Vector3d(msg->linear_acceleration.x,
+                        msg->linear_acceleration.y,
+                        msg->linear_acceleration.z));
+  }
 }
 
 // =============================================================================
@@ -360,7 +419,14 @@ void VoNode::imuCb(const sensor_msgs::msg::Imu::ConstSharedPtr& msg)
 // =============================================================================
 void VoNode::imgCb(const sensor_msgs::msg::Image::ConstSharedPtr& msg)
 {
-  const double timestamp = rclcpp::Time(msg->header.stamp).seconds();
+  // Convert bag absolute timestamp (2013) to relative time (first message = t=0)
+  double ts_abs = rclcpp::Time(msg->header.stamp).seconds();
+  if (bag_start_time_ < 0.0)
+  {
+    bag_start_time_ = ts_abs;
+    RCLCPP_INFO(this->get_logger(), "Bag baseline set: first IMG ts=%.3f (wall=%.3f)", ts_abs, this->get_clock()->now().seconds());
+  }
+  const double timestamp = ts_abs - bag_start_time_;
 
   if (enable_frame_throttle_ && target_fps_ > 0.0)
   {
@@ -373,6 +439,7 @@ void VoNode::imgCb(const sensor_msgs::msg::Image::ConstSharedPtr& msg)
   {
     std::lock_guard<std::mutex> lock(img_mutex_);
     latest_img_ = msg;
+    latest_img_rel_ts_ = timestamp;
     new_img_ready_ = true;
   }
   img_cv_.notify_one();
@@ -387,10 +454,10 @@ void VoNode::run()
 
   if (use_imu_ && imu_handler_)
   {
-    RCLCPP_INFO(this->get_logger(), "Waiting for IMU data to accumulate...");
-    std::this_thread::sleep_for(std::chrono::seconds(3));
+    RCLCPP_INFO(this->get_logger(), "IMU fusion enabled, waiting for first image...");
   }
 
+  double last_imu_status_time = 0.0;
   while (rclcpp::ok() && !quit_)
   {
     sensor_msgs::msg::Image::ConstSharedPtr img;
@@ -404,7 +471,8 @@ void VoNode::run()
       if (quit_ || !new_img_ready_)
         continue;
       img = latest_img_;
-      timestamp = rclcpp::Time(img->header.stamp).seconds();
+      // Use the relative timestamp computed in imgCb (bag absolute → relative)
+      timestamp = latest_img_rel_ts_;
       new_img_ready_ = false;
     }
 
@@ -412,28 +480,18 @@ void VoNode::run()
     if (quit_)
       break;
 
-    // --- IMU prior ---
-    if (use_imu_ && imu_handler_)
+    // Heartbeat: every 5 seconds, print IMU data status + prior state
+    double now = this->get_clock()->now().seconds();
+    if (now - last_imu_status_time > 5.0)
     {
-      if (!vo_->hasStarted() && set_initial_attitude_from_gravity_)
-      {
-        Eigen::Quaterniond R_imu_world;
-        if (imu_handler_->getInitialAttitude(timestamp, R_imu_world))
-        {
-          vo_->setRotationPrior(R_imu_world);
-          last_imu_rotation_ = R_imu_world;
-        }
-      }
-      else if (vo_->hasStarted() && vo_->lastFrame() != nullptr)
-      {
-        Eigen::Quaterniond R_imu_last_cur;
-        if (imu_handler_->getRelativeRotationPrior(
-                vo_->lastFrame()->timestamp_, timestamp, false, R_imu_last_cur))
-        {
-          vo_->setRotationIncrementPrior(R_imu_last_cur);
-          last_imu_rotation_ = R_imu_last_cur * last_imu_rotation_;
-        }
-      }
+      last_imu_status_time = now;
+      // IMU data is being collected (rotation prior is permanently disabled)
+      bool imu_calib_ready = (imu_handler_ && imu_handler_->isCalibrated());
+      RCLCPP_INFO(this->get_logger(),
+          "[HEARTBEAT] wall_time=%.3f last_imu_ts=%.3f imu_meas_count=%d "
+          "imu_data_collection=1 imu_calib_ready=%d",
+          now, last_imu_msg_ts_, imu_meas_count_,
+          imu_calib_ready);
     }
 
     // --- Image conversion ---
@@ -450,6 +508,19 @@ void VoNode::run()
 
     // --- SVO ---
     vo_->addImage(img_cv, timestamp);
+
+    // --- IMU preprocessor: mode 1 = collect visual poses for calibration ---
+    if (imu_preprocessing_mode_ == 1 && imu_preprocessor_ && vo_->hasStarted())
+    {
+      auto last = vo_->lastFrame();
+      if (last && last->isKeyframe())
+      {
+        imu_preprocessor_->addVisualPose(
+            last->timestamp_,
+            last->T_f_w_.translation(),
+            Eigen::Quaterniond(last->T_f_w_.rotationMatrix()));
+      }
+    }
 
     // --- Visualization ---
     if (enable_visualization_)
@@ -507,11 +578,71 @@ void VoNode::processUserActions()
       if (imu_handler_)
       {
         imu_handler_->reset();
-        last_imu_rotation_ = Eigen::Quaterniond::Identity();
+      }
+      if (imu_preprocessor_)
+      {
+        imu_preprocessor_->reset();
       }
       break;
     case 's':
       vo_->start();
+      break;
+    case 'c':
+      // Run offline calibration from collected data (mode 1)
+      if (imu_preprocessing_mode_ == 1 && imu_preprocessor_)
+      {
+        RCLCPP_INFO(this->get_logger(), "Running offline IMU calibration...");
+        auto result = imu_preprocessor_->processAll();
+        if (result.valid)
+        {
+          RCLCPP_INFO(this->get_logger(),
+              "Calibration SUCCESS: gyro_bias=[%.4f,%.4f,%.4f] "
+              "acc_bias=[%.4f,%.4f,%.4f] scale=%.4f "
+              "pos_residual=%.4fm rot_angle=%.2fdeg",
+              result.gyro_bias.x(), result.gyro_bias.y(), result.gyro_bias.z(),
+              result.acc_bias.x(), result.acc_bias.y(), result.acc_bias.z(),
+              result.scale, result.residual_position_m, result.residual_rotation_deg);
+          // Auto-save to default calibration file
+          const std::string save_path = "imu_calibration.yaml";
+          if (imu_preprocessor_->saveToYaml(save_path))
+          {
+            RCLCPP_INFO(this->get_logger(),
+                "Calibration auto-saved to: %s (press 'l' to reload)", save_path.c_str());
+          }
+        }
+        else
+        {
+          RCLCPP_WARN(this->get_logger(), "Calibration FAILED: %s", result.message.c_str());
+        }
+      }
+      else if (imu_preprocessing_mode_ != 1)
+      {
+        RCLCPP_WARN(this->get_logger(),
+            "Calibration ('c') only works in mode 1 (imu_preprocessing_mode:=1)");
+      }
+      break;
+    case 'l':
+      // Load calibration from file
+      {
+        const std::string calib_file = vk::getParam<std::string>(
+            this, "imu_calib_file", "");
+        if (!calib_file.empty() && imu_preprocessor_)
+        {
+          RCLCPP_INFO(this->get_logger(), "Loading IMU calibration from: %s", calib_file.c_str());
+          if (imu_preprocessor_->loadFromYaml(calib_file))
+          {
+            RCLCPP_INFO(this->get_logger(), "Calibration loaded successfully");
+          }
+          else
+          {
+            RCLCPP_WARN(this->get_logger(), "Failed to load calibration file: %s", calib_file.c_str());
+          }
+        }
+        else
+        {
+          RCLCPP_WARN(this->get_logger(), "No calibration file specified (imu_calib_file)");
+        }
+      }
       break;
   }
 }

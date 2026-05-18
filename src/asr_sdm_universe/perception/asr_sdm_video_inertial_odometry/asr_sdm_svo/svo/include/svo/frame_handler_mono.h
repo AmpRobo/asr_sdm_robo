@@ -55,22 +55,10 @@ public:
     const double timestamp);
 
   // -------------------------------------------------------------------------
-  // IMU Prior Support
+  // IMU Support (for data collection only — NO rotation prior)
   // -------------------------------------------------------------------------
-  /// Set initial IMU world orientation from gravity (called at startup).
-  void setRotationPrior(const Quaterniond & R_world_from_imu);
-
-  /// Set incremental rotation from IMU (called between frames).
-  void setRotationIncrementPrior(const Quaterniond & R_imu_last_from_imu_cur);
-
-  /// Get the current IMU rotation prior quaternion.
-  const Quaterniond & rotationPrior() const { return rotation_prior_; }
-
-  /// Lambda for IMU rotation prior regularization in pose optimizer.
-  double rotationPriorLambda() const { return rotation_prior_lambda_; }
-
-  /// Get the incremental IMU rotation between frames.
-  const Quaterniond& rotationIncrement() const { return rotation_increment_; }
+  /// Set IMU online calibrator for visual-guided IMU preprocessing.
+  void setImuCalibrator(ImuOnlineCalibrator* calib) { imu_calibrator_ = calib; }
 
 protected:
   vk::AbstractCamera * cam_;     //!< Camera model, can be ATAN, Pinhole or Ocam (see vikit).
@@ -87,12 +75,15 @@ protected:
   DepthFilter * depth_filter_;  //!< Depth estimation algorithm runs in a parallel thread and is
                                //!< used to initialize new 3D points.
 
-  // IMU rotation prior (set externally via setRotationPrior / setRotationIncrementPrior)
-  bool use_imu_ = false;                 //!< Whether IMU fusion is enabled
-  Quaterniond rotation_prior_;             //!< Gravity-aligned IMU world orientation (from initial attitude)
-  Quaterniond rotation_increment_;        //!< Incremental IMU rotation between last and current frame
-  Quaterniond last_rotation_prior_;      //!< Previous frame's rotation_prior_ for tracking
-  double rotation_prior_lambda_;         //!< Regularization strength for IMU rotation prior
+  // IMU data collection (used for future frame-interpolation or offline analysis)
+  bool use_imu_ = false;            //!< Whether IMU data is being collected
+  Quaterniond last_optimized_quat_;     //!< Visual-optimized rotation from last frame
+
+  /// Online IMU calibrator (set by VoNode via setImuCalibrator).
+  ImuOnlineCalibrator* imu_calibrator_ = nullptr;
+
+  /// Notify that a frame was successfully optimized (called from pose optimizer).
+  void setLastOptimizedRotation(const Quaterniond& q) { last_optimized_quat_ = q; }
 
   /// Initialize the visual odometry algorithm.
   virtual void initialize();

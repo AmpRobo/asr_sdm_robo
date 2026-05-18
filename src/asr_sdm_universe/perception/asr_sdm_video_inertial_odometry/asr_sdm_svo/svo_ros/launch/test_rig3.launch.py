@@ -16,8 +16,7 @@ def generate_launch_description():
     # Get the package share directory
     svo_ros_dir = get_package_share_directory('svo_ros')
 
-    camera_yaml_path = os.path.join(svo_ros_dir, 'param', 'camera_pinhole.yaml')
-    vo_yaml_path = os.path.join(svo_ros_dir, 'param', 'vo_rig3_stable.yaml')
+    camera_yaml_path = os.path.join(svo_ros_dir, 'param', 'my_camera.yaml')
     imu_yaml_path = os.path.join(svo_ros_dir, 'param', 'imu_rig3.yaml')
     imu_calib_yaml_path = os.path.join(svo_ros_dir, 'param', 'imu_rig3_calib.yaml')
 
@@ -82,6 +81,12 @@ def generate_launch_description():
         description='IMU ROS 2 topic name'
     )
 
+    imu_preprocessing_mode_arg = DeclareLaunchArgument(
+        'imu_preprocessing_mode',
+        default_value='0',
+        description='IMU preprocessing: 0=none, 1=collect+calibrate, 2=use calibration'
+    )
+
 
     svo_node = Node(
         package='svo_ros',
@@ -90,11 +95,14 @@ def generate_launch_description():
         output='screen',
         parameters=[
             camera_yaml_path,
-            vo_yaml_path,
             imu_yaml_path,
             {
                 # Allow overriding via launch arg
                 'cam_topic': LaunchConfiguration('cam_topic'),
+
+                # Note: do NOT enable use_sim_time for this bag.
+                # The bag (converted from ROS1) uses real Unix timestamps (March 2013).
+                # Enabling --clock would use simulated time, breaking IMU-camera sync.
 
                 # Initial camera orientation to point downward
                 'init_rx': 3.14,
@@ -116,7 +124,8 @@ def generate_launch_description():
                 # IMU configuration (loaded from imu_rig3.yaml)
                 'use_imu': LaunchConfiguration('use_imu'),
                 'imu_topic': LaunchConfiguration('imu_topic'),
-                'calib_file': imu_calib_yaml_path,
+                'imu_preprocessing_mode': LaunchConfiguration('imu_preprocessing_mode'),
+                'imu_calib_file': imu_calib_yaml_path,
             },
         ],
     )
@@ -182,6 +191,7 @@ def generate_launch_description():
         target_fps_arg,
         use_imu_arg,
         imu_topic_arg,
+        imu_preprocessing_mode_arg,
         env_libgl,
         env_gallium,
         env_gl_version,

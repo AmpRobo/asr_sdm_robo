@@ -1,0 +1,28 @@
+{
+  "dataset": "airground_rig_s3_ros2",
+  "imu_rig_axis_angle_deg": {
+    "z_axis": 16.14,
+    "x_axis": 43.81
+  },
+  "imu_to_rig_rotation_deg": {
+    "rx": 882.84,
+    "ry": -278.53,
+    "rz": -2497.89
+  },
+  "imu_orientation_mean_deg": {
+    "roll": 2.9,
+    "pitch": 10.35,
+    "yaw": 116.6
+  },
+  "rig_orientation_mean_deg": {
+    "roll": 9.46,
+    "pitch": 1.09,
+    "yaw": -57.99
+  },
+  "svo_vs_rig_position_ate_m": {
+    "mean": 0.5849,
+    "rms": 0.6811,
+    "max": 1.8883
+  },
+  "fusion_failure_root_cause": "IMU built-in quaternion yaw angle (~117°) differs from ground truth yaw (~-155°) by ~175°. SVO's getInitialAttitude() uses this IMU orientation to establish the world frame, propagating the yaw misalignment into the IMU rotation prior. The camera-down Rx(180°) transform further rotates the reference frame. When the IMU prior is compared with the visual prior, they are in different coordinate frames, causing the fusion to fail. Solution: calibrate IMU-to-world yaw offset, or use visual poses to estimate the IMU world orientation."
+}

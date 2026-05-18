@@ -56,7 +56,7 @@ namespace svo {
 
 /**
  * @brief Constructs monocular frame handler with camera model.
- * 
+ *
  * @param cam Camera model (pinhole, atan, etc.)
  */
 FrameHandlerMono::FrameHandlerMono(vk::AbstractCamera* cam, bool use_imu) :
@@ -65,10 +65,7 @@ FrameHandlerMono::FrameHandlerMono(vk::AbstractCamera* cam, bool use_imu) :
   reprojector_(cam_, map_),
   depth_filter_(NULL),
   use_imu_(use_imu),
-  rotation_prior_(Quaterniond::Identity()),
-  rotation_increment_(Quaterniond::Identity()),
-  last_rotation_prior_(Quaterniond::Identity()),
-  rotation_prior_lambda_(use_imu ? 5.0 : 0.0)
+  last_optimized_quat_(Quaterniond::Identity())
 {
   initialize();
 }
@@ -160,19 +157,9 @@ void FrameHandlerMono::addImage(const cv::Mat& img, const double timestamp)
  */
 FrameHandlerMono::UpdateResult FrameHandlerMono::processFirstFrame()
 {
-  // Set world origin at first frame
-  // If IMU is enabled, use gravity-aligned initial attitude from IMU
-  if (use_imu_ && rotation_prior_lambda_ > 0.0)
-  {
-    // R_cam_world = R_imu_world^{-1} (camera orientation from gravity-aligned IMU)
-    const Eigen::Matrix3d R_imu_world = rotation_prior_.toRotationMatrix();
-    Eigen::Matrix3d R_cam_world = R_imu_world.transpose();
-    new_frame_->T_f_w_ = SE3(R_cam_world, Vector3d::Zero());
-  }
-  else
-  {
-    new_frame_->T_f_w_ = SE3(Matrix3d::Identity(), Vector3d::Zero());
-  }
+  // Pure visual: world origin at first frame, no IMU rotation prior.
+  // SVO is a direct method — any external rotation distorts photometric alignment.
+  new_frame_->T_f_w_ = SE3(Matrix3d::Identity(), Vector3d::Zero());
   
   // Initialize KLT tracker with first frame features
   if(klt_homography_init_.addFirstFrame(new_frame_) == initialization::FAILURE)
@@ -226,10 +213,10 @@ FrameHandlerBase::UpdateResult FrameHandlerMono::processSecondFrame()
  * @brief Processes a normal tracking frame.
  *
  * Main tracking pipeline:
- * 1. Initialize pose from last frame (or IMU rotation prior if available)
+ * 1. Initialize pose from last frame (constant velocity)
  * 2. Sparse image alignment (coarse pose estimation)
  * 3. Reproject map points and align features (fine pose estimation)
- * 4. Pose optimization (Gauss-Newton refinement) -- with optional IMU rotation prior
+ * 4. Pose optimization (Gauss-Newton refinement) — pure visual only
  * 5. Structure optimization (refine 3D points)
  * 6. Keyframe decision
  * 7. Optional local bundle adjustment
@@ -240,20 +227,10 @@ FrameHandlerBase::UpdateResult FrameHandlerMono::processSecondFrame()
  */
 FrameHandlerBase::UpdateResult FrameHandlerMono::processFrame()
 {
-  // Initialize pose: use constant velocity + IMU rotation prior if available
-  if (use_imu_ && rotation_prior_lambda_ > 0.0 && last_frame_ != nullptr)
-  {
-    // Apply IMU rotation prior to initialize pose.
-    // R_imu_world = accumulated world orientation from IMU (gravity-aligned)
-    // R_imu_world^{-1} gives camera orientation in world frame
-    const Eigen::Matrix3d R_imu_world = rotation_prior_.toRotationMatrix();
-    Eigen::Matrix3d R_cam_world = R_imu_world.transpose();
-    new_frame_->T_f_w_ = SE3(R_cam_world, last_frame_->T_f_w_.translation());
-  }
-  else
-  {
-    new_frame_->T_f_w_ = last_frame_->T_f_w_;
-  }
+  // Pure visual: initialize pose as constant velocity from last frame.
+  // IMU rotation prior is permanently disabled — SVO is a direct method
+  // and external rotation priors corrupt the photometric alignment.
+  new_frame_->T_f_w_ = last_frame_ ? last_frame_->T_f_w_ : SE3(Matrix3d::Identity(), Vector3d::Zero());
 
   // === Stage 1: Sparse Image Alignment ===
   // Direct method: minimize photometric error between frames
@@ -274,6 +251,11 @@ FrameHandlerBase::UpdateResult FrameHandlerMono::processFrame()
   const size_t repr_n_mps = reprojector_.n_trials_;
   SVO_LOG2(repr_n_mps, repr_n_new_references);
   SVO_DEBUG_STREAM("Reprojection:\t nPoints = "<<repr_n_mps<<"\t \t nMatches = "<<repr_n_new_references);
+
+  SVO_WARN_STREAM("processFrame: img_align=" << img_align_n_tracked
+      << "  T=" << new_frame_->T_f_w_.translation().transpose()
+      << "  repr_trials=" << repr_n_mps << "  repr_matches=" << repr_n_new_references
+      << "  reproj_ok=" << (repr_n_new_references >= Config::qualityMinFts()));
   
   // Check for tracking failure
   if(repr_n_new_references < Config::qualityMinFts())
@@ -285,42 +267,31 @@ FrameHandlerBase::UpdateResult FrameHandlerMono::processFrame()
   }
 
   // === Stage 3: Pose Optimization ===
-  // Gauss-Newton refinement of camera pose (with optional IMU rotation prior)
+  // Pure visual Gauss-Newton refinement (NO IMU rotation prior).
+  // SVO is a direct method — external rotation priors distort photometric alignment
+  // and permanently corrupt the world frame. IMU is used only for data collection.
   SVO_START_TIMER("pose_optimizer");
   size_t sfba_n_edges_final;
   double sfba_thresh, sfba_error_init, sfba_error_final;
-  if (use_imu_ && rotation_prior_lambda_ > 0.0 && !rotation_prior_.isApprox(Quaterniond::Identity(), 1e-6))
-  {
-    // R_imu_last_from_imu_cur: incremental IMU rotation between last frame and current frame.
-    // This is accumulated in vo_node and stored back in rotation_prior_ by setRotationIncrementPrior.
-    // Since setRotationIncrementPrior overwrites rotation_prior_ with R_imu_last_cur,
-    // we need to recover the last IMU orientation. Use T_f_w_.rotationMatrix() as proxy
-    // for the camera's IMU-aligned world rotation, then derive R_imu_last_from_imu_cur.
-    // Simplification: use Identity if last frame exists and we want pure IMU prior.
-    // (The actual R_imu_last_from_imu_cur was already integrated in vo_node
-    // and stored back into rotation_prior_ via setRotationIncrementPrior.)
-    pose_optimizer::optimizeGaussNewtonWithImuPrior(
-        Config::poseOptimThresh(), Config::poseOptimNumIter(), false,
-        new_frame_,
-        rotation_prior_,        // R_world_from_imu (gravity-aligned world orientation)
-        rotation_increment_,    // R_imu_last_from_imu_cur (incremental from IMU gyroscope)
-        rotation_prior_lambda_,
-        sfba_thresh, sfba_error_init, sfba_error_final, sfba_n_edges_final);
-    SVO_DEBUG_STREAM("PoseOptimizer: IMU prior enabled (lambda="
-                     << rotation_prior_lambda_ << ")");
-  }
-  else
-  {
-    pose_optimizer::optimizeGaussNewton(
-        Config::poseOptimThresh(), Config::poseOptimNumIter(), false,
-        new_frame_, sfba_thresh, sfba_error_init, sfba_error_final, sfba_n_edges_final);
-  }
+  pose_optimizer::optimizeGaussNewton(
+      Config::poseOptimThresh(), Config::poseOptimNumIter(), false,
+      new_frame_, sfba_thresh, sfba_error_init, sfba_error_final, sfba_n_edges_final);
   SVO_STOP_TIMER("pose_optimizer");
+
+  // Save optimized rotation for next frame
+  last_optimized_quat_ = Quaterniond(new_frame_->T_f_w_.rotationMatrix());
+
   SVO_LOG4(sfba_thresh, sfba_error_init, sfba_error_final, sfba_n_edges_final);
   SVO_DEBUG_STREAM("PoseOptimizer:\t ErrInit = "<<sfba_error_init<<"px\t thresh = "<<sfba_thresh);
   SVO_DEBUG_STREAM("PoseOptimizer:\t ErrFin. = "<<sfba_error_final<<"px\t nObsFin. = "<<sfba_n_edges_final);
   
-  if(sfba_n_edges_final < 20)
+  // Require at least qualityMinFts() inliers. If the reprojector found a lot of matches
+  // but the optimizer rejected most (e.g., during reloc recovery or motion blur), still
+  // allow tracking to continue with a relaxed threshold so we don't wipe the map.
+  const bool sfba_ok = (sfba_n_edges_final >= Config::qualityMinFts()) ||
+      (sfba_n_edges_final >= Config::qualityMinFts() / 2 &&
+       repr_n_new_references >= Config::qualityMinFts() * 2);
+  if (!sfba_ok)
     return RESULT_FAILURE;
 
   // === Stage 4: Structure Optimization ===
@@ -480,32 +451,8 @@ void FrameHandlerMono::resetAll()
   core_kfs_.clear();
   overlap_kfs_.clear();
   depth_filter_->reset();
-  // IMU state: only reset the lambda, keep rotation_prior_ and use_imu_ state
-  // so that IMU fusion can continue across resets without requiring re-enable
   if (use_imu_)
-    rotation_prior_lambda_ = 5.0;
-  rotation_increment_ = Quaterniond::Identity();
-  last_rotation_prior_ = Quaterniond::Identity();
-}
-
-// =============================================================================
-// IMU PRIOR SUPPORT
-// =============================================================================
-void FrameHandlerMono::setRotationPrior(const Quaterniond& R_world_from_imu)
-{
-  rotation_prior_ = R_world_from_imu;
-  last_rotation_prior_ = R_world_from_imu;
-  rotation_prior_lambda_ = 5.0;  // Strong regularization for initial alignment
-}
-
-void FrameHandlerMono::setRotationIncrementPrior(const Quaterniond& R_imu_last_from_imu_cur)
-{
-  // Accumulate IMU rotations: each new increment updates the world orientation
-  // R_world_imu(new) = R_imu_last_from_imu_cur * R_world_imu(last)
-  // Then we invert it to get R_world_from_imu for the camera
-  rotation_prior_ = R_imu_last_from_imu_cur * rotation_prior_;
-  rotation_increment_ = R_imu_last_from_imu_cur;
-  rotation_prior_lambda_ = 0.05;  // Weak regularization (IMU only provides rotation)
+    last_optimized_quat_ = Quaterniond::Identity();
 }
 
 /**

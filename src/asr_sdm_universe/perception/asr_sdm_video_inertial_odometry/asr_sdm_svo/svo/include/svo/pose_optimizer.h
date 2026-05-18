@@ -21,15 +21,17 @@ void optimizeGaussNewton(
   const double reproj_thresh, const size_t n_iter, const bool verbose, FramePtr & frame,
   double & estimated_scale, double & error_init, double & error_final, size_t & num_obs);
 
-/// Version with IMU rotation prior:
-///   - R_world_from_imu: initial gravity-aligned orientation of world w.r.t. IMU
-///   - R_imu_last_from_imu_cur: relative rotation of IMU between frames (from gyroscope)
+/// Version with IMU rotation prior + camera-down installation correction:
+///   - R_world_from_imu: gravity-aligned orientation of IMU w.r.t. world
+///   - R_imu_last_from_imu_cur: relative rotation from IMU gyroscope
 ///   - lambda: regularization strength (0 = no prior, >0 = stronger prior)
+///   - R_cam_imu_T: camera-down installation correction matrix (R_cam_imu^T)
 void optimizeGaussNewtonWithImuPrior(
   const double reproj_thresh, const size_t n_iter, const bool verbose, FramePtr & frame,
   const Quaterniond& R_world_from_imu, const Quaterniond& R_imu_last_from_imu_cur,
   double lambda,
-  double & estimated_scale, double & error_init, double & error_final, size_t & num_obs);
+  double & estimated_scale, double & error_init, double & error_final, size_t & num_obs,
+  const Eigen::Matrix3d& R_cam_imu_T = Eigen::Matrix3d::Identity());
 
 }  // namespace pose_optimizer
 }  
