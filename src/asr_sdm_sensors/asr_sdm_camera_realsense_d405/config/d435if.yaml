@@ -1,0 +1,77 @@
+# Intel RealSense D435IF configuration for realsense2_camera/rs_launch.py.
+#
+# This is a flat YAML file, because the official rs_launch.py reads config_file
+# directly as launch/node parameters. Do not wrap these parameters under:
+# camera:
+#   camera:
+#     ros__parameters:
+#
+# Default ROS graph names are intentionally preserved:
+#   node:   /camera/camera
+#   topics: /camera/camera/...
+
+camera_namespace: camera
+camera_name: camera
+
+# Match the D435IF through the D435 family name. The official wrapper matches
+# device_type as a regular-expression pattern against the device name, and
+# device_type:=d435 matches D435-family devices.
+# Use serial_no for strict device selection when multiple RealSense cameras are connected.
+device_type: d435
+
+# Basic launch behavior.
+initial_reset: false
+wait_for_device_timeout: -1.0
+reconnect_timeout: 6.0
+log_level: info
+output: screen
+
+# Image streams supported by the D435IF Stereo Module and RGB Camera.
+enable_color: true
+enable_depth: true
+enable_infra: false
+enable_infra1: true
+enable_infra2: true
+
+# Let the driver select valid default profiles for the connected D435IF.
+# You can set explicit profiles after checking `rs-enumerate-devices -c`, for example:
+# rgb_camera.color_profile: 1280x720x30
+# depth_module.depth_profile: 640x480x30
+# depth_module.infra_profile: 640x480x30
+rgb_camera.color_profile: 0,0,0
+depth_module.depth_profile: 0,0,0
+depth_module.infra_profile: 0,0,0
+rgb_camera.color_format: RGB8
+depth_module.depth_format: Z16
+depth_module.infra1_format: Y8
+depth_module.infra2_format: Y8
+
+# IMU streams supported by the D435IF Motion Module.
+# unite_imu_method > 0 creates /camera/camera/imu in addition to
+# /camera/camera/gyro/sample and /camera/camera/accel/sample.
+enable_gyro: true
+enable_accel: true
+unite_imu_method: 2
+gyro_fps: 0
+accel_fps: 0
+angular_velocity_cov: 0.01
+linear_accel_cov: 0.01
+
+# Synchronization and post-processing outputs that add useful topics.
+enable_sync: true
+align_depth.enable: true
+pointcloud.enable: true
+pointcloud.stream_filter: 2
+pointcloud.stream_index_filter: 0
+pointcloud.ordered_pc: false
+pointcloud.allow_no_texture_points: false
+
+# Enable the RealSense RGBD topic. This requires enable_color, enable_depth,
+# enable_sync, and align_depth.enable to be true.
+enable_rgbd: true
+
+# TF and diagnostics.
+# tf_publish_rate > 0.0 enables dynamic /tf in addition to /tf_static.
+publish_tf: true
+tf_publish_rate: 30.0
+diagnostics_period: 1.0
