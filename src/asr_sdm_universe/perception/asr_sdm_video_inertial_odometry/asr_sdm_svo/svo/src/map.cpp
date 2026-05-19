@@ -192,24 +192,43 @@ void Map::getCloseKeyframes(
     const FramePtr& frame,
     std::list< std::pair<FramePtr,double> >& close_kfs) const
 {
+  close_kfs.clear();
+  close_kfs.clear();
   for(auto kf : keyframes_)
   {
-    // Check if any key point is visible in frame
+    // Check if any key point OR feature is visible in frame.
+    // During initialization, points are stored in fts_ (not key_pts_), so we must
+    // check both lists to find overlapping keyframes after init.
+    bool has_overlap = false;
     for(auto keypoint : kf->key_pts_)
     {
-      if(keypoint == nullptr)
-        continue;
-
-      if(frame->isVisible(keypoint->point->pos_))
+      if(keypoint != nullptr && keypoint->point != nullptr &&
+         frame->isVisible(keypoint->point->pos_))
       {
-        // Keyframe has overlapping field of view
-        close_kfs.push_back(
-            std::make_pair(
-                kf, (frame->T_f_w_.translation()-kf->T_f_w_.translation()).norm()));
+        has_overlap = true;
         break;
       }
     }
+    if (!has_overlap)
+    {
+      for(auto ftr : kf->fts_)
+      {
+        if(ftr != nullptr && ftr->point != nullptr &&
+           frame->isVisible(ftr->point->pos_))
+        {
+          has_overlap = true;
+          break;
+        }
+      }
+    }
+    if(has_overlap)
+    {
+      close_kfs.push_back(
+          std::make_pair(
+              kf, (frame->T_f_w_.translation()-kf->T_f_w_.translation()).norm()));
+    }
   }
+  SVO_WARN_STREAM("getCloseKeyframes: map has " << keyframes_.size() << " kfs, found " << close_kfs.size() << " overlapping");
 }
 
 /**

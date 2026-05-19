@@ -1,0 +1,88 @@
+{
+  "dataset": "airground_rig_s3_ros2",
+  "imu": {
+    "messages": 16244,
+    "duration_s": 162.428,
+    "rate_hz": 100.01,
+    "acc_mean": [
+      1.72913,
+      -0.57584,
+      -9.24511
+    ],
+    "acc_std": [
+      2.51091,
+      1.70303,
+      0.82718
+    ],
+    "gyro_mean": [
+      0.005795,
+      -0.00107,
+      -0.011477
+    ],
+    "gyro_std": [
+      0.117036,
+      0.283817,
+      0.368735
+    ],
+    "acc_norm_mean": 9.90943
+  },
+  "ground_truth": {
+    "messages": 19039,
+    "duration_s": 162.442,
+    "rate_hz": 117.21,
+    "position_range": {
+      "x": [
+        -1.3636,
+        0.6755
+      ],
+      "y": [
+        -1.6807,
+        1.4958
+      ],
+      "z": [
+        1.2873,
+        2.308
+      ]
+    }
+  },
+  "imu_coordinate_frame": {
+    "gravity_dominant_axis": "Z",
+    "gravity_sign": "-",
+    "acc_mean_xyz": [
+      1.86108,
+      -2.28195,
+      -9.36439
+    ],
+    "acc_norm_mean": 9.8257,
+    "interpretation": "IMU Z axis negative direction points to sky (gravity along -Z in world frame)"
+  },
+  "attitude_comparison": {
+    "quaternion_error_deg": {
+      "mean": 112.65,
+      "std": 53.13,
+      "max": 179.9,
+      "min": 15.02
+    },
+    "euler_error_deg": {
+      "roll": {
+        "mean_deg": -10.84,
+        "std_deg": 28.13,
+        "max_deg": 144.08,
+        "min_deg": -204.1
+      },
+      "pitch": {
+        "mean_deg": -4.09,
+        "std_deg": 25.28,
+        "max_deg": 46.55,
+        "min_deg": -94.04
+      },
+      "yaw": {
+        "mean_deg": 42.8,
+        "std_deg": 119.48,
+        "max_deg": 239.26,
+        "min_deg": -162.4
+      }
+    },
+    "note": "IMU gyro integration has no external correction, yaw drift is expected"
+  }
+}

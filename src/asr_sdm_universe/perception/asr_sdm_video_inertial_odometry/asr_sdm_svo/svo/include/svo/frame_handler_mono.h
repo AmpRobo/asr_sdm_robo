@@ -55,22 +55,43 @@ public:
     const double timestamp);
 
   // -------------------------------------------------------------------------
-  // IMU Prior Support
+  // IMU Support: inter-frame pose prediction + timestamp interpolation
+  // (NO rotation prior — rotation prior is permanently disabled in SVO)
   // -------------------------------------------------------------------------
-  /// Set initial IMU world orientation from gravity (called at startup).
-  void setRotationPrior(const Quaterniond & R_world_from_imu);
+  /// Set IMU handler for inter-frame pose prediction.
+  /// Must be called before addImage if use_imu_ is true.
+  void setImuHandler(ImuHandler* handler) { imu_handler_ = handler; }
 
-  /// Set incremental rotation from IMU (called between frames).
-  void setRotationIncrementPrior(const Quaterniond & R_imu_last_from_imu_cur);
+  /// Set IMU online calibrator for visual-guided IMU preprocessing.
+  void setImuCalibrator(ImuOnlineCalibrator* calib) { imu_calibrator_ = calib; }
 
-  /// Get the current IMU rotation prior quaternion.
-  const Quaterniond & rotationPrior() const { return rotation_prior_; }
+  /// Set IMU prior weights for SparseImgAlign.
+  /// Follows rpg/vio_mono.yaml convention: lambda_rot=0.5, lambda_trans=0.0.
+  void setImgAlignPriorLambda(double lambda_rot, double lambda_trans)
+  {
+    img_align_prior_lambda_rot_ = lambda_rot;
+    img_align_prior_lambda_trans_ = lambda_trans;
+  }
 
-  /// Lambda for IMU rotation prior regularization in pose optimizer.
-  double rotationPriorLambda() const { return rotation_prior_lambda_; }
+  /// Set IMU prior weights for pose optimizer (bundle adjustment stage).
+  /// Follows rpg/imufusion convention: lambda > 0 constrains rotation toward IMU.
+  void setPoseOptimPriorLambda(double lambda_rot, double lambda_trans = 0.0)
+  {
+    pose_optim_prior_lambda_rot_ = lambda_rot;
+    pose_optim_prior_lambda_trans_ = lambda_trans;
+  }
 
-  /// Get the incremental IMU rotation between frames.
-  const Quaterniond& rotationIncrement() const { return rotation_increment_; }
+  /// Set zero-motion detection thresholds.
+  /// accel_std_thresh: m/s²; if accel std < this, robot is stationary.
+  /// window_sec: look-back window for accelerometer statistics.
+  void setZeroMotionParams(double accel_std_thresh, double window_sec)
+  {
+    zero_motion_accel_std_thresh_ = accel_std_thresh;
+    zero_motion_window_sec_ = window_sec;
+  }
+
+  /// Returns true if the robot is currently detected as stationary.
+  bool isStationary() const { return is_stationary_; }
 
 protected:
   vk::AbstractCamera * cam_;     //!< Camera model, can be ATAN, Pinhole or Ocam (see vikit).
@@ -87,12 +108,27 @@ protected:
   DepthFilter * depth_filter_;  //!< Depth estimation algorithm runs in a parallel thread and is
                                //!< used to initialize new 3D points.
 
-  // IMU rotation prior (set externally via setRotationPrior / setRotationIncrementPrior)
-  bool use_imu_ = false;                 //!< Whether IMU fusion is enabled
-  Quaterniond rotation_prior_;             //!< Gravity-aligned IMU world orientation (from initial attitude)
-  Quaterniond rotation_increment_;        //!< Incremental IMU rotation between last and current frame
-  Quaterniond last_rotation_prior_;      //!< Previous frame's rotation_prior_ for tracking
-  double rotation_prior_lambda_;         //!< Regularization strength for IMU rotation prior
+  // IMU: inter-frame pose prediction + IMU prior for SparseImgAlign
+  bool use_imu_ = false;              //!< Whether IMU data is available
+  ImuHandler* imu_handler_ = nullptr;  //!< IMU handler for inter-frame integration
+  ImuOnlineCalibrator* imu_calibrator_ = nullptr;  //!< IMU online calibrator
+  double last_imu_timestamp_ = 0.0;     //!< Last IMU timestamp for inter-frame integration
+  Quaterniond last_optimized_quat_;     //!< Visual-optimized rotation from last frame
+  bool is_stationary_ = false;        //!< Zero-motion detection via accel variance
+  double zero_motion_accel_std_thresh_ = 0.05;  //!< m/s²; accel std < this = stationary
+  double zero_motion_window_sec_ = 0.3;  //!< Window for zero-motion accel stats
+
+  /// IMU prior weights for SparseImgAlign (pyramid direct alignment).
+  double img_align_prior_lambda_rot_ = 0.5;
+  double img_align_prior_lambda_trans_ = 0.0;
+
+  /// IMU prior weight for pose optimizer (bundle adjustment over reprojected points).
+  /// Follows rpg/imufusion convention: lambda > 0 → constrain rotation toward IMU.
+  double pose_optim_prior_lambda_rot_ = 0.0;
+  double pose_optim_prior_lambda_trans_ = 0.0;
+
+  /// Notify that a frame was successfully optimized (called from pose optimizer).
+  void setLastOptimizedRotation(const Quaterniond& q) { last_optimized_quat_ = q; }
 
   /// Initialize the visual odometry algorithm.
   virtual void initialize();
@@ -116,6 +152,9 @@ protected:
   virtual bool needNewKf(double scene_depth_mean);
 
   void setCoreKfs(size_t n_closest);
+
+  /// Compute IMU motion prior via gyro integration (overrides base class).
+  virtual void getMotionPrior() override;
 };
 
 }  

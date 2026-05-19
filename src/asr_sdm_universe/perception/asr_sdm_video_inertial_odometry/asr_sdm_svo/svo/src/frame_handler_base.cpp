@@ -292,18 +292,24 @@ void FrameHandlerBase::optimizeStructure(
     if((*it)->point != NULL)
       pts.push_back((*it)->point);
   }
-  
+
   // Select points that haven't been optimized recently
   // nth_element partitions: oldest optimized points come first
   max_n_pts = min(max_n_pts, pts.size());
   nth_element(pts.begin(), pts.begin() + max_n_pts, pts.end(), ptLastOptimComparator);
-  
+
   // Optimize selected points
   for(deque<Point*>::iterator it=pts.begin(); it!=pts.begin()+max_n_pts; ++it)
   {
     (*it)->optimize(max_iter);
     (*it)->last_structure_optim_ = frame->id_;  // Mark as recently optimized
   }
+}
+
+void FrameHandlerBase::getMotionPrior()
+{
+  // No IMU data available
+  have_motion_prior_ = false;
 }
 
 

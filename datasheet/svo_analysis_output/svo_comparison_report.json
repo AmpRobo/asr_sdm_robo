@@ -1,0 +1,29 @@
+{
+  "dataset": "airground_rig_s3_ros2",
+  "time_offset_s": 415444865.141,
+  "scale_vs_ground_truth": 1.0794,
+  "umeyama_rotation_deg": {
+    "rx": 6.2,
+    "ry": -15.7,
+    "rz": -115.16
+  },
+  "position_error_ate_m": {
+    "mean": 0.6315,
+    "rms": 0.7354,
+    "max": 2.028
+  },
+  "orientation_error_deg": {
+    "roll": {
+      "mean": 162.65,
+      "std": 13.42
+    },
+    "pitch": {
+      "mean": 15.8,
+      "std": 13.58
+    },
+    "yaw": {
+      "mean": 154.45,
+      "std": 11.42
+    }
+  }
+}
