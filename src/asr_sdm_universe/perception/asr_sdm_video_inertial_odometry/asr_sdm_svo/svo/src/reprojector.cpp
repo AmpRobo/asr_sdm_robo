@@ -133,6 +133,8 @@ void Reprojector::reprojectMap(
   list< pair<FramePtr,double> > close_kfs;
   map_.getCloseKeyframes(frame, close_kfs);
 
+  SVO_DEBUG_STREAM("reprojectMap: close_kfs=" << close_kfs.size());
+
   // Sort by distance (closest first)
   close_kfs.sort(boost::bind(&std::pair<FramePtr, double>::second, _1) <
                  boost::bind(&std::pair<FramePtr, double>::second, _2));

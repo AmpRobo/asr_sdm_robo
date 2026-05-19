@@ -13,3 +13,11 @@
 
     n_pyr_levels: 4
     max_epi_search_steps: 15000
+
+    # Tracking robustness (lowered for handheld/downward rig)
+    reproj_thresh: 2.0
+    poseoptim_thresh: 2.0
+    quality_min_fts: 20
+    quality_max_drop_fts: 40
+    kfselect_mindist: 0.12
+    triang_min_corner_score: 20.0

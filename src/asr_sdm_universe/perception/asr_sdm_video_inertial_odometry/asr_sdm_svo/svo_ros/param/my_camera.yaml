@@ -1,0 +1,39 @@
+# Matrix Vision Bluefox Camera - SVO Parameters (for --params-file)
+# Parameters extracted from rosbag camera_info topic
+# Source: airground_rig_s3_ros2 bag (March 2013)
+
+/**:
+  ros__parameters:
+    # === Camera Model ===
+    cam_model: Pinhole
+    cam_width: 752
+    cam_height: 480
+    cam_fx: 414.53614481293
+    cam_fy: 414.284429350582
+    cam_cx: 348.804988446924
+    cam_cy: 240.076451079671
+    cam_d0: -0.283076309221788
+    cam_d1: 0.0666741033311962
+    cam_d2: 0.000895882002804517
+    cam_d3: 0.000778261034630782
+
+    # === SVO Algorithm Parameters ===
+    grid_size: 30
+    max_n_kfs: 10
+    max_fts: 120
+    triang_min_corner_score: 10.0
+    reproj_thresh: 2.0
+    poseoptim_thresh: 2.0
+    kfselect_mindist: 0.08
+    map_scale: 1.0
+    quality_min_fts: 20
+    quality_max_drop_fts: 40
+    n_pyr_levels: 4
+    max_epi_search_steps: 15000
+    fast_type: 10
+    init_min_disparity: 30.0
+    init_min_tracked: 40
+    init_min_inliers: 30
+    patch_match_thresh_factor: 1.5
+    subpix_n_iter: 20
+    loba_num_iter: 0

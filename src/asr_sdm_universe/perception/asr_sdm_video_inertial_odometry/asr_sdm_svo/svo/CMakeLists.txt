@@ -58,6 +58,7 @@ set(SOURCEFILES
   src/config.cpp
   src/sparse_img_align.cpp
   src/imu_handler.cpp
+  src/imu_preprocessor.cpp
 )
 
 # Add g2o if available
