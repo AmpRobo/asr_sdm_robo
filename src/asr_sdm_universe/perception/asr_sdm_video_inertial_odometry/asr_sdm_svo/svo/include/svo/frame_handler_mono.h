@@ -55,8 +55,13 @@ public:
     const double timestamp);
 
   // -------------------------------------------------------------------------
-  // IMU Support (for data collection only — NO rotation prior)
+  // IMU Support: inter-frame pose prediction + timestamp interpolation
+  // (NO rotation prior — rotation prior is permanently disabled in SVO)
   // -------------------------------------------------------------------------
+  /// Set IMU handler for inter-frame pose prediction.
+  /// Must be called before addImage if use_imu_ is true.
+  void setImuHandler(ImuHandler* handler) { imu_handler_ = handler; }
+
   /// Set IMU online calibrator for visual-guided IMU preprocessing.
   void setImuCalibrator(ImuOnlineCalibrator* calib) { imu_calibrator_ = calib; }
 
@@ -75,12 +80,12 @@ protected:
   DepthFilter * depth_filter_;  //!< Depth estimation algorithm runs in a parallel thread and is
                                //!< used to initialize new 3D points.
 
-  // IMU data collection (used for future frame-interpolation or offline analysis)
-  bool use_imu_ = false;            //!< Whether IMU data is being collected
+  // IMU: inter-frame pose prediction (NO rotation prior)
+  bool use_imu_ = false;              //!< Whether IMU data is available for prediction
+  ImuHandler* imu_handler_ = nullptr;  //!< IMU handler for inter-frame integration
+  ImuOnlineCalibrator* imu_calibrator_ = nullptr;  //!< IMU online calibrator
+  double last_imu_timestamp_ = 0.0;     //!< Last IMU timestamp for inter-frame integration
   Quaterniond last_optimized_quat_;     //!< Visual-optimized rotation from last frame
-
-  /// Online IMU calibrator (set by VoNode via setImuCalibrator).
-  ImuOnlineCalibrator* imu_calibrator_ = nullptr;
 
   /// Notify that a frame was successfully optimized (called from pose optimizer).
   void setLastOptimizedRotation(const Quaterniond& q) { last_optimized_quat_ = q; }

@@ -65,6 +65,9 @@ FrameHandlerMono::FrameHandlerMono(vk::AbstractCamera* cam, bool use_imu) :
   reprojector_(cam_, map_),
   depth_filter_(NULL),
   use_imu_(use_imu),
+  imu_handler_(nullptr),
+  imu_calibrator_(nullptr),
+  last_imu_timestamp_(0.0),
   last_optimized_quat_(Quaterniond::Identity())
 {
   initialize();
@@ -227,10 +230,31 @@ FrameHandlerBase::UpdateResult FrameHandlerMono::processSecondFrame()
  */
 FrameHandlerBase::UpdateResult FrameHandlerMono::processFrame()
 {
-  // Pure visual: initialize pose as constant velocity from last frame.
-  // IMU rotation prior is permanently disabled — SVO is a direct method
-  // and external rotation priors corrupt the photometric alignment.
-  new_frame_->T_f_w_ = last_frame_ ? last_frame_->T_f_w_ : SE3(Matrix3d::Identity(), Vector3d::Zero());
+  // === Pose Initialization: IMU inter-frame prediction ===
+  // IMU gyro integration provides an initial rotation estimate between frames.
+  // This is a PURE initial guess — it never enters the optimizer or corrupts the map.
+  // Fallback to constant velocity (translation only) if IMU is unavailable.
+  if (use_imu_ && imu_handler_ != nullptr && last_frame_ != nullptr &&
+      last_imu_timestamp_ > 0.0)
+  {
+    Eigen::Quaterniond R_imu_delta;
+    if (imu_handler_->getPoseIncrement(last_imu_timestamp_, new_frame_->timestamp_, R_imu_delta))
+    {
+      // Predict rotation: R_cam_world(new) = R_imu_delta * R_cam_world(last)
+      // Camera rotation is the inverse of IMU rotation in world frame.
+      const Eigen::Matrix3d R_last = last_frame_->T_f_w_.rotationMatrix();
+      const Eigen::Matrix3d R_new = R_last * R_imu_delta.conjugate().toRotationMatrix();
+      new_frame_->T_f_w_ = SE3(R_new, last_frame_->T_f_w_.translation());
+    }
+    else
+    {
+      new_frame_->T_f_w_ = last_frame_->T_f_w_;
+    }
+  }
+  else
+  {
+    new_frame_->T_f_w_ = last_frame_ ? last_frame_->T_f_w_ : SE3(Matrix3d::Identity(), Vector3d::Zero());
+  }
 
   // === Stage 1: Sparse Image Alignment ===
   // Direct method: minimize photometric error between frames
@@ -280,6 +304,9 @@ FrameHandlerBase::UpdateResult FrameHandlerMono::processFrame()
 
   // Save optimized rotation for next frame
   last_optimized_quat_ = Quaterniond(new_frame_->T_f_w_.rotationMatrix());
+  // Update IMU timestamp for next inter-frame integration
+  if (use_imu_ && imu_handler_ != nullptr)
+    last_imu_timestamp_ = new_frame_->timestamp_;
 
   SVO_LOG4(sfba_thresh, sfba_error_init, sfba_error_final, sfba_n_edges_final);
   SVO_DEBUG_STREAM("PoseOptimizer:\t ErrInit = "<<sfba_error_init<<"px\t thresh = "<<sfba_thresh);
@@ -452,7 +479,10 @@ void FrameHandlerMono::resetAll()
   overlap_kfs_.clear();
   depth_filter_->reset();
   if (use_imu_)
+  {
     last_optimized_quat_ = Quaterniond::Identity();
+    last_imu_timestamp_ = 0.0;
+  }
 }
 
 /**

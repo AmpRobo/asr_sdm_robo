@@ -237,6 +237,22 @@ public:
   std::unique_ptr<ImuOnlineCalibrator> calibrator_;
   const IMUHandlerOptions options_;
 
+  /// Integrate biased-corrected gyroscope readings between two timestamps.
+  /// Returns R_imu_last_from_imu_cur (quaternion: IMU rotation from cur→last frame).
+  /// Returns false if no IMU data is available in the interval.
+  /// Uses online or static gyro bias for correction.
+  bool getPoseIncrement(double last_timestamp, double cur_timestamp,
+                        Eigen::Quaterniond& R_imu_last_from_imu_cur);
+
+  /// Interpolate IMU state (omega + acc) at a specific timestamp.
+  /// Returns false if no IMU data brackets the target timestamp.
+  /// Uses linear interpolation between the two nearest IMU measurements.
+  bool getPoseAt(double timestamp,
+                 Eigen::Vector3d& omega_interp,
+                 Eigen::Vector3d& acc_interp,
+                 double& dt_last,
+                 double& dt_cur) const;
+
   /// Online calibrator: uses visual rotation as reference to estimate gyro bias and T_cam_imu.
 
   /// Feed raw angular velocity to the calibrator for inter-frame delta integration.

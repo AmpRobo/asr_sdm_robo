@@ -1,3 +1,4 @@
+#include <algorithm>
 #include <iomanip>
 #include <numeric>
 #include <svo/global.h>
@@ -389,6 +390,110 @@ void ImuHandler::reset()
   ulock_t lock(measurements_mut_);
   measurements_.clear();
   temporal_imu_window_.clear();
+}
+
+bool ImuHandler::getPoseIncrement(double last_timestamp, double cur_timestamp,
+                                 Eigen::Quaterniond& R_imu_last_from_imu_cur)
+{
+  ulock_t lock(measurements_mut_);
+
+  if (measurements_.empty())
+    return false;
+
+  // Find first measurement with timestamp >= last_timestamp
+  auto it = std::lower_bound(
+      measurements_.begin(), measurements_.end(), last_timestamp,
+      [](const ImuMeasurement& m, double t) { return m.timestamp_ < t; });
+
+  if (it == measurements_.end())
+    return false;
+
+  // Get bias (online or static)
+  const Eigen::Vector3d gyro_bias = currentGyroBias();
+
+  // Integrate from last_timestamp to cur_timestamp
+  Eigen::Quaterniond R_imu_delta = Eigen::Quaterniond::Identity();
+  double prev_t = last_timestamp;
+  Eigen::Vector3d prev_omega = it->angular_velocity_;
+
+  for (; it != measurements_.end(); ++it)
+  {
+    if (it->timestamp_ > cur_timestamp)
+      break;
+
+    double dt = it->timestamp_ - prev_t;
+    if (dt <= 0.0 || dt > imu_calib_.max_imu_delta_t)
+    {
+      prev_t = it->timestamp_;
+      prev_omega = it->angular_velocity_;
+      continue;
+    }
+
+    Eigen::Vector3d omega_corr = it->angular_velocity_ - gyro_bias;
+
+    // Normalize angle to avoid numerical issues for long integration
+    double omega_norm = omega_corr.norm();
+    if (omega_norm > 1e-8)
+    {
+      double angle = omega_norm * dt;
+      Eigen::Vector3d axis = omega_corr / omega_norm;
+      // Incremental rotation: q_new = q_old * exp(axis * angle)
+      R_imu_delta = R_imu_delta * Eigen::Quaterniond(
+          Eigen::AngleAxisd(angle, axis));
+    }
+
+    prev_t = it->timestamp_;
+    prev_omega = it->angular_velocity_;
+  }
+
+  // R_imu_last_from_imu_cur = inverse of R_imu_delta = conjugate
+  // (IMU at cur → IMU at last, same as original getRelativeRotationPrior)
+  R_imu_last_from_imu_cur = R_imu_delta.conjugate();
+  return true;
+}
+
+bool ImuHandler::getPoseAt(double timestamp,
+                           Eigen::Vector3d& omega_interp,
+                           Eigen::Vector3d& acc_interp,
+                           double& dt_last,
+                           double& dt_cur) const
+{
+  ulock_t lock(measurements_mut_);
+
+  if (measurements_.size() < 2)
+    return false;
+
+  // Find bracket: measurements_[i].timestamp_ <= timestamp < measurements_[i+1].timestamp_
+  ssize_t idx = -1;
+  for (ssize_t i = 0; i < static_cast<ssize_t>(measurements_.size()) - 1; ++i)
+  {
+    if (measurements_[i].timestamp_ <= timestamp &&
+        timestamp < measurements_[i + 1].timestamp_)
+    {
+      idx = i;
+      break;
+    }
+  }
+
+  if (idx < 0)
+    return false;
+
+  const ImuMeasurement& m_last = measurements_[static_cast<size_t>(idx)];
+  const ImuMeasurement& m_cur  = measurements_[static_cast<size_t>(idx + 1)];
+
+  double total_dt = m_cur.timestamp_ - m_last.timestamp_;
+  if (total_dt <= 0.0)
+    return false;
+
+  double alpha = (timestamp - m_last.timestamp_) / total_dt;
+  omega_interp = m_last.angular_velocity_ +
+                 alpha * (m_cur.angular_velocity_ - m_last.angular_velocity_);
+  acc_interp   = m_last.linear_acceleration_ +
+                 alpha * (m_cur.linear_acceleration_ - m_last.linear_acceleration_);
+  dt_last = timestamp - m_last.timestamp_;
+  dt_cur  = m_cur.timestamp_ - timestamp;
+
+  return true;
 }
 
 IMUTemporalStatus ImuHandler::checkTemporalStatus(const double time_sec)

@@ -278,7 +278,10 @@ VoNode::VoNode()
 
   vo_ = new svo::FrameHandlerMono(cam_, use_imu_);
   if (use_imu_ && imu_handler_)
+  {
+    vo_->setImuHandler(imu_handler_.get());
     vo_->setImuCalibrator(imu_handler_->calibrator());
+  }
   vo_->start();
 }
 
