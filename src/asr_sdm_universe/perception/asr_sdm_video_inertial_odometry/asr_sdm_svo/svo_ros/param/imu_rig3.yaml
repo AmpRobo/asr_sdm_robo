@@ -50,6 +50,12 @@
     img_align_prior_lambda_rot: 0.5
     img_align_prior_lambda_trans: 0.0
 
+    # === IMU VIO prior weight for pose optimizer (reprojected point BA) ===
+    # Follows rpg/imufusion convention: lambda > 0 pulls rotation toward IMU.
+    # Start with 0 (disabled) and increase if pose is noisy.
+    pose_optim_prior_lambda_rot: 0.0
+    pose_optim_prior_lambda_trans: 0.0
+
     # === Zero-motion detection (accelerometer variance) ===
     # If accel std dev < thresh over window, robot is stationary.
     # stationary → skip IMU gyro prior (rotation already known from last frame)

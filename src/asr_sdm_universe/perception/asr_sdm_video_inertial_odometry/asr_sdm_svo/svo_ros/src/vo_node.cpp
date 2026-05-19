@@ -288,10 +288,13 @@ VoNode::VoNode()
     vo_->setZeroMotionParams(
         vk::getParam<double>(this, "zero_motion_accel_std_thresh", 0.05),
         vk::getParam<double>(this, "zero_motion_window_sec", 0.3));
+    vo_->setPoseOptimPriorLambda(
+        vk::getParam<double>(this, "pose_optim_prior_lambda_rot", 0.0),
+        vk::getParam<double>(this, "pose_optim_prior_lambda_trans", 0.0));
     RCLCPP_INFO(this->get_logger(),
-                "IMU prior λ_rot=%.2f λ_trans=%.2f zero_motion_accel_std=%.3f",
+                "IMU prior λ_img_align=%.2f λ_pose_optim=%.2f zero_motion_accel_std=%.3f",
                 vk::getParam<double>(this, "img_align_prior_lambda_rot", 0.5),
-                vk::getParam<double>(this, "img_align_prior_lambda_trans", 0.0),
+                vk::getParam<double>(this, "pose_optim_prior_lambda_rot", 0.0),
                 vk::getParam<double>(this, "zero_motion_accel_std_thresh", 0.05));
   }
   vo_->start();

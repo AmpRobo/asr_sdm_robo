@@ -73,6 +73,14 @@ public:
     img_align_prior_lambda_trans_ = lambda_trans;
   }
 
+  /// Set IMU prior weights for pose optimizer (bundle adjustment stage).
+  /// Follows rpg/imufusion convention: lambda > 0 constrains rotation toward IMU.
+  void setPoseOptimPriorLambda(double lambda_rot, double lambda_trans = 0.0)
+  {
+    pose_optim_prior_lambda_rot_ = lambda_rot;
+    pose_optim_prior_lambda_trans_ = lambda_trans;
+  }
+
   /// Set zero-motion detection thresholds.
   /// accel_std_thresh: m/s²; if accel std < this, robot is stationary.
   /// window_sec: look-back window for accelerometer statistics.
@@ -109,6 +117,15 @@ protected:
   bool is_stationary_ = false;        //!< Zero-motion detection via accel variance
   double zero_motion_accel_std_thresh_ = 0.05;  //!< m/s²; accel std < this = stationary
   double zero_motion_window_sec_ = 0.3;  //!< Window for zero-motion accel stats
+
+  /// IMU prior weights for SparseImgAlign (pyramid direct alignment).
+  double img_align_prior_lambda_rot_ = 0.5;
+  double img_align_prior_lambda_trans_ = 0.0;
+
+  /// IMU prior weight for pose optimizer (bundle adjustment over reprojected points).
+  /// Follows rpg/imufusion convention: lambda > 0 → constrain rotation toward IMU.
+  double pose_optim_prior_lambda_rot_ = 0.0;
+  double pose_optim_prior_lambda_trans_ = 0.0;
 
   /// Notify that a frame was successfully optimized (called from pose optimizer).
   void setLastOptimizedRotation(const Quaterniond& q) { last_optimized_quat_ = q; }

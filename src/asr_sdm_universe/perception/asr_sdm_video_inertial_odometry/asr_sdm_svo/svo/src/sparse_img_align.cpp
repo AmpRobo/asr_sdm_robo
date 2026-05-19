@@ -123,8 +123,8 @@ void SparseImgAlign::applyPrior(const Sophus::SE3d& T_cur_from_ref)
   const Sophus::SE3d::Tangent se3_error =
       (T_cur_ref_prior_.inverse() * T_cur_from_ref).log();
 
-  // Prior gradient contribution
-  g_.noalias() += prior_I_ * se3_error;
+  // Prior gradient contribution: Jres_ = -prior_I_ * residual (standard GN)
+  Jres_.noalias() -= prior_I_ * se3_error;
 }
 
 /**

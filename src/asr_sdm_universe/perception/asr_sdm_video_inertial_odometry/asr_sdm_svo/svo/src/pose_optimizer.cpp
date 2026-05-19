@@ -117,6 +117,46 @@ inline void computeImuPriorTerm(
 
 }  // anonymous namespace
 
+// =============================================================================
+// POSE OPTIMIZER CLASS (rpg/imufusion mirror)
+// =============================================================================
+
+PoseOptimizer::PoseOptimizer(SolverOptions options) : options_(options) {}
+
+void PoseOptimizer::setRotationPrior(const Quaterniond& R_frame_world, double lambda)
+{
+  have_prior_ = true;
+  prior_lambda_ = lambda;
+  prior_R_world_ = R_frame_world;
+}
+
+size_t PoseOptimizer::run(
+    FramePtr& frame,
+    const double reproj_thresh,
+    const Quaterniond& R_world_from_imu,
+    const Quaterniond& R_imu_last_from_imu_cur,
+    double lambda,
+    double& estimated_scale,
+    double& error_init,
+    double& error_final)
+{
+  if (lambda <= 0.0)
+  {
+    double dummy;
+    size_t num_obs;
+    optimizeGaussNewton(reproj_thresh, options_.max_iter, false, frame,
+                        estimated_scale, error_init, dummy, num_obs);
+    return num_obs;
+  }
+  imu_delta_ = R_imu_last_from_imu_cur;
+  size_t num_obs;
+  optimizeGaussNewtonWithImuPrior(
+      reproj_thresh, options_.max_iter, false, frame,
+      R_world_from_imu, R_imu_last_from_imu_cur, lambda,
+      estimated_scale, error_init, error_final, num_obs);
+  return num_obs;
+}
+
 /**
  * @brief Optimizes camera pose using Gauss-Newton with robust weighting.
  *

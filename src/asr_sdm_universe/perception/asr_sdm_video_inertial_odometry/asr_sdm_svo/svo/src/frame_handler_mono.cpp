@@ -311,15 +311,45 @@ FrameHandlerBase::UpdateResult FrameHandlerMono::processFrame()
   }
 
   // === Stage 3: Pose Optimization ===
-  // Pure visual Gauss-Newton refinement (NO IMU rotation prior).
-  // SVO is a direct method — external rotation priors distort photometric alignment
-  // and permanently corrupt the world frame. IMU is used only for data collection.
+  // Gauss-Newton refinement of reprojected 3D points.
+  // Optionally inject IMU rotation prior (rpg/imufusion style) when
+  // pose_optim_prior_lambda_rot_ > 0: the optimizer pulls the rotation
+  // toward the IMU-derived prediction based on the last visual result.
   SVO_START_TIMER("pose_optimizer");
   size_t sfba_n_edges_final;
   double sfba_thresh, sfba_error_init, sfba_error_final;
-  pose_optimizer::optimizeGaussNewton(
-      Config::poseOptimThresh(), Config::poseOptimNumIter(), false,
-      new_frame_, sfba_thresh, sfba_error_init, sfba_error_final, sfba_n_edges_final);
+  if (pose_optim_prior_lambda_rot_ > 0.0 && use_imu_ && imu_handler_ != nullptr &&
+      last_imu_timestamp_ > 0.0)
+  {
+    // Get IMU delta rotation from last to current frame
+    Eigen::Quaterniond R_imu_delta;
+    if (imu_handler_->getPoseIncrement(last_imu_timestamp_,
+                                      new_frame_->timestamp_, R_imu_delta))
+    {
+      // Use last visual rotation as the IMU world reference.
+      // This constrains the optimizer to stay close to the IMU-derived
+      // rotation while still being driven by visual reprojection errors.
+      pose_optimizer::optimizeGaussNewtonWithImuPrior(
+          Config::poseOptimThresh(), Config::poseOptimNumIter(), false,
+          new_frame_,
+          last_optimized_quat_,          // R_world_from_imu (≈ visual rotation)
+          R_imu_delta,                  // R_imu_last_from_imu_cur
+          pose_optim_prior_lambda_rot_,
+          sfba_thresh, sfba_error_init, sfba_error_final, sfba_n_edges_final);
+    }
+    else
+    {
+      pose_optimizer::optimizeGaussNewton(
+          Config::poseOptimThresh(), Config::poseOptimNumIter(), false,
+          new_frame_, sfba_thresh, sfba_error_init, sfba_error_final, sfba_n_edges_final);
+    }
+  }
+  else
+  {
+    pose_optimizer::optimizeGaussNewton(
+        Config::poseOptimThresh(), Config::poseOptimNumIter(), false,
+        new_frame_, sfba_thresh, sfba_error_init, sfba_error_final, sfba_n_edges_final);
+  }
   SVO_STOP_TIMER("pose_optimizer");
 
   // Save optimized rotation for next frame
@@ -620,3 +650,5 @@ void FrameHandlerMono::getMotionPrior()
   // Tier 3: No prior
   have_motion_prior_ = false;
 }
+
+}  // namespace svo
