@@ -61,8 +61,9 @@ struct IMUHandlerOptions
 {
   bool temporal_stationary_check = false;
   double temporal_window_length_sec_ = 0.5;
-  double stationary_acc_sigma_thresh_ = 0.0;
-  double stationary_gyr_sigma_thresh_ = 0.0;
+  double stationary_acc_sigma_thresh_ = 0.0;  //!< m/s^2 std dev; below = stationary
+  double stationary_gyr_sigma_thresh_ = 0.0;  //!< rad/s std dev; below = stationary
+  double zero_motion_window_sec = 0.3;         //!< window for zero-motion detection
 };
 
 /// Preintegrated IMU measurement between two camera timestamps.
@@ -222,6 +223,15 @@ public:
   bool getInitialAttitude(double timestamp, Eigen::Quaterniond& R_imu_world) const;
   IMUTemporalStatus checkTemporalStatus(const double time_sec);
   void reset();
+
+  /// Returns mean and standard deviation of linear acceleration over the past window_sec.
+  /// Used for zero-motion detection: if accel_std < threshold, the sensor is stationary.
+  /// Returns false if the buffer doesn't have enough data for the requested window.
+  bool getWindowedAccelerometerStats(
+      double window_sec,
+      double& accel_mean_norm,    // mean acceleration magnitude (should be ~9.81 at rest)
+      double& accel_std_norm,     // std dev of acceleration magnitude
+      Eigen::Vector3d& accel_mean_vec) const;  // mean acceleration vector
 
   // Convenience method: get rotation prior transformed by current R_cam_imu estimate.
   // Returns R_cam_delta = R_cam_imu * R_imu_delta * R_cam_imu^T (camera-frame rotation).

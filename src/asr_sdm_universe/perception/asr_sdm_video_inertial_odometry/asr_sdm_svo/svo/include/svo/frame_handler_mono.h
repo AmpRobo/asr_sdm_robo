@@ -73,6 +73,18 @@ public:
     img_align_prior_lambda_trans_ = lambda_trans;
   }
 
+  /// Set zero-motion detection thresholds.
+  /// accel_std_thresh: m/s²; if accel std < this, robot is stationary.
+  /// window_sec: look-back window for accelerometer statistics.
+  void setZeroMotionParams(double accel_std_thresh, double window_sec)
+  {
+    zero_motion_accel_std_thresh_ = accel_std_thresh;
+    zero_motion_window_sec_ = window_sec;
+  }
+
+  /// Returns true if the robot is currently detected as stationary.
+  bool isStationary() const { return is_stationary_; }
+
 protected:
   vk::AbstractCamera * cam_;     //!< Camera model, can be ATAN, Pinhole or Ocam (see vikit).
   Reprojector reprojector_;      //!< Projects points from other keyframes into the current frame
@@ -94,6 +106,9 @@ protected:
   ImuOnlineCalibrator* imu_calibrator_ = nullptr;  //!< IMU online calibrator
   double last_imu_timestamp_ = 0.0;     //!< Last IMU timestamp for inter-frame integration
   Quaterniond last_optimized_quat_;     //!< Visual-optimized rotation from last frame
+  bool is_stationary_ = false;        //!< Zero-motion detection via accel variance
+  double zero_motion_accel_std_thresh_ = 0.05;  //!< m/s²; accel std < this = stationary
+  double zero_motion_window_sec_ = 0.3;  //!< Window for zero-motion accel stats
 
   /// Notify that a frame was successfully optimized (called from pose optimizer).
   void setLastOptimizedRotation(const Quaterniond& q) { last_optimized_quat_ = q; }

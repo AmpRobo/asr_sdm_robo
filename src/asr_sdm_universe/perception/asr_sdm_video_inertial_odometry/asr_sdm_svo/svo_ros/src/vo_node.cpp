@@ -285,10 +285,14 @@ VoNode::VoNode()
     vo_->setImgAlignPriorLambda(
         vk::getParam<double>(this, "img_align_prior_lambda_rot", 0.5),
         vk::getParam<double>(this, "img_align_prior_lambda_trans", 0.0));
+    vo_->setZeroMotionParams(
+        vk::getParam<double>(this, "zero_motion_accel_std_thresh", 0.05),
+        vk::getParam<double>(this, "zero_motion_window_sec", 0.3));
     RCLCPP_INFO(this->get_logger(),
-                "IMU prior λ_rot=%.2f λ_trans=%.2f",
+                "IMU prior λ_rot=%.2f λ_trans=%.2f zero_motion_accel_std=%.3f",
                 vk::getParam<double>(this, "img_align_prior_lambda_rot", 0.5),
-                vk::getParam<double>(this, "img_align_prior_lambda_trans", 0.0));
+                vk::getParam<double>(this, "img_align_prior_lambda_trans", 0.0),
+                vk::getParam<double>(this, "zero_motion_accel_std_thresh", 0.05));
   }
   vo_->start();
 }
@@ -496,13 +500,12 @@ void VoNode::run()
     if (now - last_imu_status_time > 5.0)
     {
       last_imu_status_time = now;
-      // IMU data is being collected (rotation prior is permanently disabled)
       bool imu_calib_ready = (imu_handler_ && imu_handler_->isCalibrated());
       RCLCPP_INFO(this->get_logger(),
           "[HEARTBEAT] wall_time=%.3f last_imu_ts=%.3f imu_meas_count=%d "
-          "imu_data_collection=1 imu_calib_ready=%d",
+          "imu_data_collection=1 imu_calib_ready=%d is_stationary=%d",
           now, last_imu_msg_ts_, imu_meas_count_,
-          imu_calib_ready);
+          imu_calib_ready, vo_->isStationary());
     }
 
     // --- Image conversion ---

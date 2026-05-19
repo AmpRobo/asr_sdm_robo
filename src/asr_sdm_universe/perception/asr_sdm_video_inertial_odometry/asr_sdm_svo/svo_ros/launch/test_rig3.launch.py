@@ -93,6 +93,12 @@ def generate_launch_description():
         description='IMU translation prior weight in SparseImgAlign (0 = pure visual)'
     )
 
+    zero_motion_accel_std_thresh_arg = DeclareLaunchArgument(
+        'zero_motion_accel_std_thresh',
+        default_value='0.05',
+        description='Zero-motion accel std thresh (m/s²); below = stationary'
+    )
+
     imu_preprocessing_mode_arg = DeclareLaunchArgument(
         'imu_preprocessing_mode',
         default_value='0',
@@ -144,6 +150,9 @@ def generate_launch_description():
                 # lambda_trans=0.0: pure visual translation (recommended for monocular)
                 'img_align_prior_lambda_rot': LaunchConfiguration('img_align_prior_lambda_rot'),
                 'img_align_prior_lambda_trans': LaunchConfiguration('img_align_prior_lambda_trans'),
+
+                # Zero-motion detection: accel std < thresh → stationary → skip IMU prior
+                'zero_motion_accel_std_thresh': LaunchConfiguration('zero_motion_accel_std_thresh'),
             },
         ],
     )
@@ -212,6 +221,7 @@ def generate_launch_description():
         imu_preprocessing_mode_arg,
         img_align_prior_lambda_rot_arg,
         img_align_prior_lambda_trans_arg,
+        zero_motion_accel_std_thresh_arg,
         env_libgl,
         env_gallium,
         env_gl_version,

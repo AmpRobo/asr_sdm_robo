@@ -570,6 +570,7 @@ void FrameHandlerMono::setCoreKfs(size_t n_closest)
  * Three-tier fallback:
  * 1. IMU gyro integration → integrate biased gyroscope data between frames
  *    Gets R_imu_delta = exp(ω_corrected * dt) for each IMU measurement interval.
+ *    Skipped if zero-motion detected (accel_std > thresh → stationary).
  * 2. Constant velocity (when lambda > 0) → T = Identity, have_motion_prior_ = true
  * 3. No prior available → have_motion_prior_ = false
  *
@@ -578,8 +579,20 @@ void FrameHandlerMono::setCoreKfs(size_t n_closest)
  */
 void FrameHandlerMono::getMotionPrior()
 {
+  // Update zero-motion detection using accelerometer variance
+  if (use_imu_ && imu_handler_ != nullptr)
+  {
+    double accel_mean_norm, accel_std_norm;
+    Eigen::Vector3d accel_mean_vec;
+    if (imu_handler_->getWindowedAccelerometerStats(
+            zero_motion_window_sec_, accel_mean_norm, accel_std_norm, accel_mean_vec))
+    {
+      is_stationary_ = (accel_std_norm < zero_motion_accel_std_thresh_);
+    }
+  }
+
   if (use_imu_ && imu_handler_ != nullptr && last_frame_ != nullptr &&
-      last_imu_timestamp_ > 0.0)
+      last_imu_timestamp_ > 0.0 && !is_stationary_)
   {
     Eigen::Quaterniond R_imu_delta;
     if (imu_handler_->getPoseIncrement(last_imu_timestamp_,

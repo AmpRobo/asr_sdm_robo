@@ -392,6 +392,54 @@ void ImuHandler::reset()
   temporal_imu_window_.clear();
 }
 
+bool ImuHandler::getWindowedAccelerometerStats(
+    double window_sec,
+    double& accel_mean_norm,
+    double& accel_std_norm,
+    Eigen::Vector3d& accel_mean_vec) const
+{
+  ulock_t lock(measurements_mut_);
+
+  if (measurements_.empty())
+    return false;
+
+  // Find newest timestamp in buffer
+  const double newest_ts = measurements_.back().timestamp_;
+  const double oldest_allowed = newest_ts - window_sec;
+
+  // Collect samples within window
+  std::vector<double> accel_norms;
+  double sum_ax = 0.0, sum_ay = 0.0, sum_az = 0.0;
+  int count = 0;
+
+  for (const auto& m : measurements_)
+  {
+    if (m.timestamp_ < oldest_allowed)
+      break;
+    const double a_norm = m.linear_acceleration_.norm();
+    accel_norms.push_back(a_norm);
+    sum_ax += m.linear_acceleration_.x();
+    sum_ay += m.linear_acceleration_.y();
+    sum_az += m.linear_acceleration_.z();
+    ++count;
+  }
+
+  if (count < 5)
+    return false;
+
+  accel_mean_vec = Eigen::Vector3d(sum_ax, sum_ay, sum_az) / static_cast<double>(count);
+  accel_mean_norm = std::accumulate(accel_norms.begin(), accel_norms.end(), 0.0)
+                    / static_cast<double>(count);
+
+  // Compute standard deviation
+  double sq_sum = 0.0;
+  for (double n : accel_norms)
+    sq_sum += (n - accel_mean_norm) * (n - accel_mean_norm);
+  accel_std_norm = std::sqrt(sq_sum / static_cast<double>(count));
+
+  return true;
+}
+
 bool ImuHandler::getPoseIncrement(double last_timestamp, double cur_timestamp,
                                  Eigen::Quaterniond& R_imu_last_from_imu_cur)
 {
