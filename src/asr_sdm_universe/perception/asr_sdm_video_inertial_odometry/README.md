@@ -40,23 +40,7 @@ ros2 launch svo_ros test_rig3.launch.py fast_type:=9
 ros2 launch svo_ros test_rig3.launch.py fast_type:=10
 ros2 launch svo_ros test_rig3.launch.py fast_type:=11
 ros2 launch svo_ros test_rig3.launch.py fast_type:=12
-# 1. 纯视觉（对比基准）
-ros2 launch svo_ros test_rig3.launch.py use_imu:=true \
-  img_align_prior_lambda_rot:=0.0 pose_optim_prior_lambda_rot:=0.0
-
-# 2. 仅 SparseImgAlign 用 IMU（方案A，推荐）
-ros2 launch svo_ros test_rig3.launch.py use_imu:=true \
-  img_align_prior_lambda_rot:=0.5 pose_optim_prior_lambda_rot:=0.0
-
-# 3. SparseImgAlign + PoseOptimizer 全部用 IMU（方案B）
-ros2 launch svo_ros test_rig3.launch.py use_imu:=true \
-  img_align_prior_lambda_rot:=0.5 pose_optim_prior_lambda_rot:=0.5
-# IMU notes:
-# - imu_preprocessing_mode=0: raw IMU collection, no online processing
-# - imu_preprocessing_mode=1: collect visual poses + IMU for offline calibration (press 'c' to run)
-# - IMU rotation prior is PERMANENTLY DISABLED: SVO is a direct method that cannot
-#   accept external rotation priors without corrupting the photometric alignment.
-#   IMU data is collected for offline analysis / future frame interpolation only.
+# ros2 launch svo_ros test_rig3.launch.py use_imu:=true imu_topic:=/imu/data
 丢帧（默认），队列 2：
 ros2 launch svo_ros test_rig3.launch.py fast_type:=10 max_queue_size:=2 drop_frames:=true
 不丢帧（满了就阻塞回调）：

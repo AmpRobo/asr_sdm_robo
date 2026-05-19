@@ -49,41 +49,34 @@ inline Eigen::Matrix3d skew(const Eigen::Vector3d& v)
   return S;
 }
 
-/// IMU rotation prior regularization with camera-down installation correction.
+/// IMU rotation prior regularization: adds a soft constraint on camera rotation
+/// to be consistent with IMU-predicted orientation.
+/// Uses block-diagonal separation: only affects the rotation block (top-left 3x3)
+/// of the full 6x6 se(3) Hessian, leaving translation optimization unaffected.
 ///
-/// R_cam_imu_T = R_cam_imu^T (Rx(180°) for camera-down rig).
+/// Parameters:
+///   - R_cam_world_prior: camera rotation in world frame (prior estimate)
+///   - R_imu_world_mat: IMU orientation in world frame (3x3 matrix)
+///   - R_imu_last_from_imu_cur: relative rotation of IMU between last and current frame
+///   - lambda: regularization strength (scaled by lambda^2)
 ///
-/// IMU frame: z ≈ world +z (upward). Camera frame: optical axis = world -z.
-///
-/// Camera rotation in world: R_cam_world = R_cam_imu^T * R_imu_world^T
-///
-/// IMU-predicted camera rotation at current frame:
-///   R_cam_world_imu = R_cam_imu^T * (R_imu_world * R_imu_last_from_imu_cur^T)^T
-///
-/// Residual: theta = log(R_cam_world_imu * R_cam_world_prior^{-1})
+/// Residual: theta = log(R_imu_world * R_imu_last_from_imu_cur * R_cam_world^{-1})
 /// Cost: J = theta^T * theta
-///
-/// Outlier detection: if ||theta|| > outlier_threshold_deg, reduce effective lambda
-/// to prevent IMU from pulling the pose away from visual.
+/// Gradient (w.r.t. se3 tangent): g_rot = w^2 * theta
+/// Hessian approximation: H_rot = w^2 * I_3 (Gauss-Newton)
 inline void computeImuPriorTerm(
     const Eigen::Matrix3d& R_cam_world_prior,
     const Eigen::Matrix3d& R_imu_world_mat,
     const Eigen::Matrix3d& R_imu_last_from_imu_cur,
-    const Eigen::Matrix3d& R_cam_imu_T,
     double lambda,
     Vector6d* g_prior,
-    Matrix6d* H_prior,
-    double* outlier_theta_deg = nullptr)
+    Matrix6d* H_prior)
 {
-  // IMU predicts: R_imu_world(new) = R_imu_delta * R_imu_world(old)
-  // Camera world: R_cam_world = R_cam_imu^T * R_imu_world^T
-  // So IMU-predicted camera world rotation:
-  // R_cam_world_imu = R_cam_imu^T * (R_imu_last_mat * R_imu_world_mat)^T
-  //                 = R_cam_imu^T * R_imu_world_mat^T * R_imu_last_mat^T
-  const Eigen::Matrix3d R_cam_world_imu = R_cam_imu_T * R_imu_world_mat.transpose() * R_imu_last_from_imu_cur.transpose();
+  // Target rotation: R_target = R_imu_world * R_imu_last_from_imu_cur
+  const Eigen::Matrix3d R_target = R_imu_world_mat * R_imu_last_from_imu_cur;
 
-  // Error rotation: R_err = R_cam_world_imu * R_cam_world_prior^{-1}
-  const Eigen::Matrix3d R_err = R_cam_world_imu * R_cam_world_prior.transpose();
+  // Error rotation: R_err = R_target * R_cam_world_prior^{-1}
+  const Eigen::Matrix3d R_err = R_target * R_cam_world_prior.transpose();
 
   // Axis-angle from SO(3) logarithm
   Eigen::AngleAxisd aa(R_err);
@@ -91,71 +84,21 @@ inline void computeImuPriorTerm(
   if (angle > M_PI)  // Unwrap to [-pi, pi]
     angle -= 2 * M_PI;
   const Eigen::Vector3d theta = aa.axis() * angle;
-  const double theta_deg = std::abs(angle) * 180.0 / M_PI;
 
-  if (outlier_theta_deg != nullptr)
-    *outlier_theta_deg = theta_deg;
-
-  // Outlier suppression: if IMU prediction differs by > outlier_threshold_deg
-  // from the visual estimate, reduce effective lambda dramatically.
-  // This prevents the IMU from overriding visual when it diverges.
-  static constexpr double OUTLIER_THRESH_DEG = 30.0;
-  static constexpr double OUTLIER_LAMBDA_FACTOR = 0.01;  // 100x reduction
-  double effective_lambda = lambda;
-  if (theta_deg > OUTLIER_THRESH_DEG)
-  {
-    effective_lambda *= OUTLIER_LAMBDA_FACTOR;
-  }
-
-  const double w_sq = effective_lambda * effective_lambda;
+  // Gauss-Newton: g = J^T * r, H ≈ J^T * J
+  // For rotation-only residual: r(theta) = theta, J = I
+  const double w_sq = lambda * lambda;
   g_prior->setZero();
   g_prior->tail<3>() = w_sq * theta;
 
   H_prior->setZero();
+  // Block-diagonal: only affect rotation block (top-left 3x3)
+  // Translation block (bottom-right 3x3) remains zero — IMU prior constrains
+  // orientation, not position. Off-diagonal blocks also zero.
   H_prior->topLeftCorner<3, 3>() = w_sq * Eigen::Matrix3d::Identity();
 }
 
 }  // anonymous namespace
-
-// =============================================================================
-// POSE OPTIMIZER CLASS (rpg/imufusion mirror)
-// =============================================================================
-
-PoseOptimizer::PoseOptimizer(SolverOptions options) : options_(options) {}
-
-void PoseOptimizer::setRotationPrior(const Quaterniond& R_frame_world, double lambda)
-{
-  have_prior_ = true;
-  prior_lambda_ = lambda;
-  prior_R_world_ = R_frame_world;
-}
-
-size_t PoseOptimizer::run(
-    FramePtr& frame,
-    const double reproj_thresh,
-    const Quaterniond& R_world_from_imu,
-    const Quaterniond& R_imu_last_from_imu_cur,
-    double lambda,
-    double& estimated_scale,
-    double& error_init,
-    double& error_final)
-{
-  if (lambda <= 0.0)
-  {
-    double dummy;
-    size_t num_obs;
-    optimizeGaussNewton(reproj_thresh, options_.max_iter, false, frame,
-                        estimated_scale, error_init, dummy, num_obs);
-    return num_obs;
-  }
-  imu_delta_ = R_imu_last_from_imu_cur;
-  size_t num_obs;
-  optimizeGaussNewtonWithImuPrior(
-      reproj_thresh, options_.max_iter, false, frame,
-      R_world_from_imu, R_imu_last_from_imu_cur, lambda,
-      estimated_scale, error_init, error_final, num_obs);
-  return num_obs;
-}
 
 /**
  * @brief Optimizes camera pose using Gauss-Newton with robust weighting.
@@ -310,8 +253,7 @@ void optimizeGaussNewtonWithImuPrior(
     double& estimated_scale,
     double& error_init,
     double& error_final,
-    size_t& num_obs,
-    const Eigen::Matrix3d& R_cam_imu_T)
+    size_t& num_obs)
 {
   if (lambda <= 0.0)
   {
@@ -327,6 +269,7 @@ void optimizeGaussNewtonWithImuPrior(
   Matrix6d A;
   Vector6d b;
 
+  // Error scale
   std::vector<float> errors;
   errors.reserve(frame->fts_.size());
   for (auto it = frame->fts_.begin(); it != frame->fts_.end(); ++it)
@@ -347,12 +290,15 @@ void optimizeGaussNewtonWithImuPrior(
   chi2_vec_final.reserve(num_obs);
   double scale = estimated_scale;
 
-  // R_imu_world_mat: IMU orientation in world frame (rotation_prior_ = R_imu_delta * R_imu_world)
+  // Compute IMU-related rotation matrices.
+  // R_imu_world: IMU orientation in world frame = R_world_from_imu^{-1}
   const Eigen::Matrix3d R_imu_world_mat = R_world_from_imu.toRotationMatrix();
-  const Eigen::Matrix3d R_imu_last_mat = R_imu_last_from_imu_cur.toRotationMatrix();
-  // R_cam_world_prior (initial estimate from processFrame init):
-  // R_cam_world = R_cam_imu^T * R_imu_world^T
-  const Eigen::Matrix3d R_cam_world_prior = R_cam_imu_T * R_imu_world_mat.transpose();
+  // Target camera rotation consistent with IMU = R_imu_world * R_imu_last_from_imu_cur
+  // R_imu_last_from_imu_cur comes from gyroscope preintegration between frames.
+  // R_cam_world_prior is the current (pre-optimization) camera rotation estimate.
+  const Eigen::Matrix3d R_imu_last_from_imu_cur_mat = R_imu_last_from_imu_cur.toRotationMatrix();
+  const Eigen::Matrix3d R_cam_world_prior =
+      R_imu_world_mat * R_imu_last_from_imu_cur_mat;
 
   for (size_t iter = 0; iter < n_iter; ++iter)
   {
@@ -363,6 +309,7 @@ void optimizeGaussNewtonWithImuPrior(
     A.setZero();
     double new_chi2(0.0);
 
+    // Accumulate reprojection residuals
     for (auto it = frame->fts_.begin(); it != frame->fts_.end(); ++it)
     {
       if ((*it)->point == NULL)
@@ -382,19 +329,16 @@ void optimizeGaussNewtonWithImuPrior(
       new_chi2 += e.squaredNorm() * weight;
     }
 
-    // === Add IMU Rotation Prior (with R_cam_imu correction + outlier suppression) ===
+    // === Add IMU Rotation Prior ===
     if (iter == 0)
     {
       Vector6d g_prior;
       Matrix6d H_prior;
-      double theta_deg = 0.0;
       computeImuPriorTerm(
-          R_cam_world_prior, R_imu_world_mat, R_imu_last_mat,
-          R_cam_imu_T, lambda, &g_prior, &H_prior, &theta_deg);
+          R_cam_world_prior, R_imu_world_mat, R_imu_last_from_imu_cur_mat,
+          lambda, &g_prior, &H_prior);
       A += H_prior;
       b += g_prior;
-      if (verbose && theta_deg > 5.0)
-        std::cout << "  IMU prior theta=" << theta_deg << "deg (effective lambda reduced)" << std::endl;
     }
 
     const Vector6d dT(A.ldlt().solve(b));

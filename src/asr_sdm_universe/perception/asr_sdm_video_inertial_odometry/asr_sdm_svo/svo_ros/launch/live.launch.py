@@ -15,26 +15,37 @@ import yaml
 def generate_launch_description():
     # Get the package share directory
     svo_ros_dir = get_package_share_directory('svo_ros')
-
-    # Load camera + VO parameters from my_camera.yaml
-    camera_yaml_path = os.path.join(svo_ros_dir, 'param', 'my_camera.yaml')
+    
+    # Load camera calibration parameters from YAML
+    camera_yaml_path = os.path.join(svo_ros_dir, 'param', 'camera_atan.yaml')
     with open(camera_yaml_path, 'r') as f:
-        node_parameters = yaml.safe_load(f)
-
-    # Combine with launch args
+        camera_params = yaml.safe_load(f)
+    
+    # Load VO parameters from YAML
+    vo_yaml_path = os.path.join(svo_ros_dir, 'param', 'vo_fast.yaml')
+    with open(vo_yaml_path, 'r') as f:
+        vo_params = yaml.safe_load(f)
+    
+    # Combine all parameters
     node_parameters = {
-        # Camera topic to subscribe to (override via launch argument)
-        'cam_topic': LaunchConfiguration('cam_topic'),
-        **node_parameters,
+        # Camera topic to subscribe to
+        'cam_topic': '/camera/image_raw',
     }
-
+    
+    # Add camera calibration parameters
+    node_parameters.update(camera_params)
+    
+    # Add VO parameters
+    node_parameters.update(vo_params)
+    
     # Declare launch arguments
     cam_topic_arg = DeclareLaunchArgument(
         'cam_topic',
         default_value='/camera/image_raw',
         description='Camera topic to subscribe to'
     )
-
+    
+    
     svo_node = Node(
         package='svo_ros',
         executable='vo',
@@ -42,7 +53,7 @@ def generate_launch_description():
         output='screen',
         parameters=[node_parameters],
     )
-
+    
     return LaunchDescription([
         cam_topic_arg,
         svo_node,

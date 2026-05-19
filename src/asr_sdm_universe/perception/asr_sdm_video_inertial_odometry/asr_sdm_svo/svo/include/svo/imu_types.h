@@ -61,9 +61,8 @@ struct IMUHandlerOptions
 {
   bool temporal_stationary_check = false;
   double temporal_window_length_sec_ = 0.5;
-  double stationary_acc_sigma_thresh_ = 0.0;  //!< m/s^2 std dev; below = stationary
-  double stationary_gyr_sigma_thresh_ = 0.0;  //!< rad/s std dev; below = stationary
-  double zero_motion_window_sec = 0.3;         //!< window for zero-motion detection
+  double stationary_acc_sigma_thresh_ = 0.0;
+  double stationary_gyr_sigma_thresh_ = 0.0;
 };
 
 /// Preintegrated IMU measurement between two camera timestamps.
@@ -100,108 +99,6 @@ private:
   double saturation_accel_max_ = 200.0;
 };
 
-/// Tracks online calibration state for IMU preprocessing.
-///
-/// Uses visual odometry as ground truth to estimate:
-/// 1. Gyroscope bias (drift correction)
-/// 2. T_cam_imu rotation (external rotation calibration)
-///
-/// During the initialization window, we collect (visual_delta_R, imu_delta_R) pairs
-/// and solve for bias + T_cam_imu via least squares.
-class ImuOnlineCalibrator
-{
-public:
-  EIGEN_MAKE_ALIGNED_OPERATOR_NEW
-
-  ImuOnlineCalibrator();
-
-  /// Call when a new frame is processed with known visual rotation delta.
-  /// The calibrator will internally estimate gyro bias and T_cam_imu.
-  void observeVisualRotation(const Eigen::Quaterniond& R_world_last,
-                              const Eigen::Quaterniond& R_world_cur,
-                              double timestamp);
-
-  /// Pre-correct a raw angular velocity measurement using current bias estimate.
-  Eigen::Vector3d correctOmega(const Eigen::Vector3d& omega_raw) const;
-
-  /// Feed raw angular velocity measurement to the calibrator for rolling integration.
-  /// Integrates omega (with current bias estimate) into a quaternion delta between frames.
-  void feedOmegaMeasurement(double timestamp, const Eigen::Vector3d& omega_raw);
-
-  /// Get the current estimated gyro bias (rad/s).
-  const Eigen::Vector3d& gyroBias() const { return omega_bias_; }
-
-  /// Get the current T_cam_imu rotation estimate (R_cam_imu: IMU→camera).
-  /// Returns identity until enough data is collected.
-  const Eigen::Matrix3d& T_cam_imu_R() const { return R_cam_imu_; }
-
-  /// Whether the calibrator has enough data to provide corrected IMU data.
-  bool isReady() const { return calibration_state_ >= CalibrationState::kReady; }
-
-  /// Whether we are still collecting initial data.
-  bool isCalibrating() const { return calibration_state_ < CalibrationState::kReady; }
-
-  /// Number of observation pairs collected so far.
-  size_t numObservations() const { return observations_.size(); }
-
-  enum class CalibrationState
-  {
-    kWaitingForSecondFrame,  // Need at least 2 visual frames
-    kCollecting,             // Actively collecting (visual, imu) pairs
-    kReady                   // Enough data, calibration complete
-  };
-
-  CalibrationState calibrationState() const { return calibration_state_; }
-
-private:
-  /// Run gyro bias estimation from collected (visual_delta, imu_delta) pairs.
-  /// omega_corr = omega_raw - omega_bias
-  /// R_imu_delta ≈ exp(omega_corr * dt)
-  /// We minimize: angle(R_vis_delta * R_cam_imu * R_imu_delta * R_cam_imu^T) over omega_bias
-  void runBiasEstimation();
-
-  /// Run T_cam_imu estimation from collected pairs.
-  /// We find R_cam_imu such that: R_cam_imu * R_imu_delta * R_cam_imu^T ≈ R_vis_delta
-  void runTcamImuEstimation();
-
-  CalibrationState calibration_state_ = CalibrationState::kWaitingForSecondFrame;
-
-  /// Estimated gyro bias (rad/s), updated online.
-  Eigen::Vector3d omega_bias_ = Eigen::Vector3d::Zero();
-
-  /// Estimated camera-to-IMU rotation (R_cam_imu: maps IMU frame → camera frame).
-  /// For camera-down: Rx(180°). Updated online if identity is wrong.
-  Eigen::Matrix3d R_cam_imu_ = Eigen::Matrix3d::Identity();
-
-  /// Minimum observations before we attempt estimation.
-  static constexpr size_t kMinObservations = 5;
-  /// Maximum age of an observation before it's discarded (s).
-  static constexpr double kMaxObservationAge = 3.0;
-
-  struct Observation
-  {
-    double timestamp;
-    Eigen::Quaterniond R_vis_last;   // Visual rotation at last frame (world-from-last-cam)
-    Eigen::Quaterniond R_vis_cur;    // Visual rotation at current frame (world-from-cur-cam)
-    Eigen::Quaterniond R_imu_delta;  // IMU-integrated rotation from last to cur frame
-    double dt;                       // Time span
-  };
-  std::vector<Observation> observations_;
-
-  /// Rolling IMU buffer for current inter-frame integration (for visual alignment).
-  Eigen::Quaterniond R_imu_last_omega_ = Eigen::Quaterniond::Identity();
-  double last_obs_timestamp_ = 0.0;
-  bool first_obs_ = true;
-
-  /// Previous visual rotation for delta computation.
-  Eigen::Quaterniond R_vis_last_ = Eigen::Quaterniond::Identity();
-  bool first_visual_obs_ = true;
-
-  /// State for omega measurement feeding (independent of visual pairing).
-  bool first_omega_obs_ = true;
-  double last_omega_ts_ = 0.0;
-};
-
 /// Handles IMU data buffering, bias correction, preintegration, and rotation priors.
 class ImuHandler
 {
@@ -224,62 +121,13 @@ public:
   IMUTemporalStatus checkTemporalStatus(const double time_sec);
   void reset();
 
-  /// Returns mean and standard deviation of linear acceleration over the past window_sec.
-  /// Used for zero-motion detection: if accel_std < threshold, the sensor is stationary.
-  /// Returns false if the buffer doesn't have enough data for the requested window.
-  bool getWindowedAccelerometerStats(
-      double window_sec,
-      double& accel_mean_norm,    // mean acceleration magnitude (should be ~9.81 at rest)
-      double& accel_std_norm,     // std dev of acceleration magnitude
-      Eigen::Vector3d& accel_mean_vec) const;  // mean acceleration vector
-
-  // Convenience method: get rotation prior transformed by current R_cam_imu estimate.
-  // Returns R_cam_delta = R_cam_imu * R_imu_delta * R_cam_imu^T (camera-frame rotation).
-  // Before calibration: returns R_imu_delta unchanged (R_cam_imu = I).
-  bool getTransformedRotationPrior(
-      double old_cam_timestamp, double new_cam_timestamp,
-      Eigen::Quaterniond& R_cam_delta);
-
   const ImuCalibration& imu_calib_;
   const ImuInitialization& imu_init_;
   mutable Eigen::Vector3d acc_bias_;
   mutable Eigen::Vector3d omega_bias_;
-  std::unique_ptr<ImuOnlineCalibrator> calibrator_;
-  const IMUHandlerOptions options_;
-
-  /// Integrate biased-corrected gyroscope readings between two timestamps.
-  /// Returns R_imu_last_from_imu_cur (quaternion: IMU rotation from cur→last frame).
-  /// Returns false if no IMU data is available in the interval.
-  /// Uses online or static gyro bias for correction.
-  bool getPoseIncrement(double last_timestamp, double cur_timestamp,
-                        Eigen::Quaterniond& R_imu_last_from_imu_cur);
-
-  /// Interpolate IMU state (omega + acc) at a specific timestamp.
-  /// Returns false if no IMU data brackets the target timestamp.
-  /// Uses linear interpolation between the two nearest IMU measurements.
-  bool getPoseAt(double timestamp,
-                 Eigen::Vector3d& omega_interp,
-                 Eigen::Vector3d& acc_interp,
-                 double& dt_last,
-                 double& dt_cur) const;
-
-  /// Online calibrator: uses visual rotation as reference to estimate gyro bias and T_cam_imu.
-
-  /// Feed raw angular velocity to the calibrator for inter-frame delta integration.
-  /// Called from addImuMeasurement.
-  void feedOmegaToCalibrator(double timestamp, const Eigen::Vector3d& omega);
-
-  /// Expose calibrator for visual to update with rotation data.
-  ImuOnlineCalibrator* calibrator() { return calibrator_.get(); }
-
-  /// Returns true only if the online calibrator has converged and is ready to use.
-  /// Until ready, the IMU must NOT be used for pose prediction.
-  bool isCalibrated() const { return calibrator_ && calibrator_->isReady(); }
-
-  /// Get current gyro bias: from calibrator if ready, otherwise static bias.
-  Eigen::Vector3d currentGyroBias() const;
 
 private:
+  const IMUHandlerOptions options_;
   mutable std::mutex measurements_mut_;
   ImuMeasurements measurements_;
   ImuMeasurements temporal_imu_window_;

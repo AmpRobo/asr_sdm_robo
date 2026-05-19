@@ -1,10 +1,7 @@
-#include <algorithm>
-#include <iomanip>
 #include <numeric>
 #include <svo/global.h>
 #include <svo/imu_types.h>
 #include <vikit/math_utils.h>
-#include <Eigen/SVD>
 
 namespace
 {
@@ -72,12 +69,11 @@ ImuHandler::ImuHandler(
     const ImuCalibration& imu_calib,
     const ImuInitialization& imu_init,
     const IMUHandlerOptions& options)
-  : imu_calib_(imu_calib),
+  : options_(options),
+    imu_calib_(imu_calib),
     imu_init_(imu_init),
     acc_bias_(imu_init.acc_bias),
-    omega_bias_(imu_init.omega_bias),
-    calibrator_(std::make_unique<ImuOnlineCalibrator>()),
-    options_(options)
+    omega_bias_(imu_init.omega_bias)
 {}
 
 ImuHandler::~ImuHandler()
@@ -89,8 +85,6 @@ bool ImuHandler::getMeasurements(
     const bool delete_old_measurements,
     ImuMeasurements& measurements)
 {
-  (void)delete_old_measurements;  // Buffer deletion is disabled; keeping all data is safe and correct.
-
   if (new_cam_timestamp <= old_cam_timestamp)
     return false;
 
@@ -101,97 +95,70 @@ bool ImuHandler::getMeasurements(
     return false;
   }
 
+  // Subtract camera delay to get corrected timestamps.
   const double t1 = old_cam_timestamp - imu_calib_.delay_imu_cam;
   const double t2 = new_cam_timestamp - imu_calib_.delay_imu_cam;
 
-  // Buffer layout: deque front=oldest, back=newest (chronological order).
-  // push_back keeps newest at back; forward iteration (begin->end) = oldest->newest.
-  const size_t N = measurements_.size();
+  ImuMeasurements::iterator it1 = measurements_.end();
+  ImuMeasurements::iterator it2 = measurements_.end();
+  bool it2_set = false;
 
-  // Find the newest measurement <= t1 (iterating newest -> oldest via reverse indices).
-  // Start from back (newest), go toward front (oldest).
-  size_t it1_idx = N;  // default: not found
-  for (size_t i = N; i-- > 0; )
+  for (ImuMeasurements::iterator it = measurements_.begin();
+       it != measurements_.end(); ++it)
   {
-    if (measurements_[i].timestamp_ <= t1)
+    if (!it2_set && it->timestamp_ < t2)
     {
-      it1_idx = i;
+      it2 = it;
+      it2_set = true;
+    }
+    if (it->timestamp_ <= t1)
+    {
+      it1 = it;
       break;
     }
   }
 
-  // Find the newest measurement < t2 (iterating newest -> oldest via reverse indices).
-  // We need the LAST IMU before t2 (i.e., the newest measurement whose timestamp is strictly
-  // less than t2). Reverse search ensures we find the newest qualifying element.
-  size_t it2_idx = N;  // default: not found
-  for (size_t i = N; i-- > 0; )
+  if (!it2_set || it1 == measurements_.end())
   {
-    if (measurements_[i].timestamp_ < t2)
+    if (measurements_.empty())
     {
-      it2_idx = i;
-      break;  // First match from back = newest one < t2
+      SVO_WARN_STREAM("ImuHandler: IMU buffer is EMPTY, cannot find any measurements for t1="
+          << t1 << " t2=" << t2);
     }
-  }
-
-  // Handle case where t1 is ahead of all IMU in buffer (read-ahead of camera).
-  // Fall back to the newest IMU as the "before t1" reference point.
-  if (it1_idx == N && it2_idx < N)
-  {
-    SVO_WARN_STREAM("ImuHandler: t1="
-        << std::fixed << std::setprecision(9) << t1
-        << " > newest_imu_ts=" << std::setprecision(9) << measurements_.back().timestamp_
-        << ". Using newest as reference.");
-    it1_idx = it2_idx;  // Start integration from the newest IMU before t2
-  }
-
-  // If we have at least 1 IMU measurement (it2_idx >= it1_idx), we can integrate.
-  // For single-measurement case (it2_idx == it1_idx), integration range is 0 but
-  // we can still use the available data — the getRelativeRotationPrior loop
-  // will handle it gracefully. This handles the read-ahead camera case.
-  if (it1_idx == N || it2_idx == N)
-  {
-    const double it1_ts = (it1_idx < N ? measurements_[it1_idx].timestamp_ : -1.0);
-    const double it2_ts = (it2_idx < N ? measurements_[it2_idx].timestamp_ : -1.0);
-    SVO_WARN_STREAM("ImuHandler: getMeasurements FAIL: "
-        << "t1=" << std::fixed << std::setprecision(9) << t1
-        << " t2=" << std::setprecision(9) << t2 << " dt=" << (t2-t1)
-        << " buf_sz=" << N
-        << " oldest_ts=" << std::setprecision(9) << measurements_.front().timestamp_
-        << " newest_ts=" << std::setprecision(9) << measurements_.back().timestamp_
-        << " it1_idx=" << it1_idx << " it2_idx=" << it2_idx
-        << " it1_ts=" << std::setprecision(9) << it1_ts
-        << " it2_ts=" << std::setprecision(9) << it2_ts);
+    else
+    {
+      SVO_WARN_STREAM("ImuHandler: Not enough IMU measurements for t1=" << t1
+          << " t2=" << t2 << ". Buffer size=" << measurements_.size()
+          << ". Buffer front(ts)=" << measurements_.front().timestamp_
+          << " Buffer back(ts)=" << measurements_.back().timestamp_);
+    }
     return false;
   }
 
-  // If it2_idx == it1_idx: exactly one IMU measurement covers both t1 and t2.
-  // Include it so that getRelativeRotationPrior can integrate from t1 to t2 using this
-  // measurement's angular velocity (dt = t2 - delay - imu_ts, then R = exp(omega * dt)).
-  if (it2_idx == it1_idx)
+  // it1 = last measurement <= t1 (older)
+  // it2 = last measurement < t2 (newer)
+  // Require at least 2 measurements to integrate
+  if (it2 == it1 || std::distance(it2, it1) < 1)
   {
-    SVO_DEBUG_STREAM("ImuHandler: getMeasurements (single-meas): t1="
-        << std::fixed << std::setprecision(9) << t1
-        << " t2=" << std::setprecision(9) << t2
-        << " n=1 buf_sz=" << N);
-  }
-
-  const double gap = t2 - measurements_[it2_idx].timestamp_;
-  if (gap > imu_calib_.max_imu_delta_t)
-  {
-    SVO_WARN_STREAM("ImuHandler: Newest IMU measurement is too old. "
-        << "Gap: " << gap * 1000.0 << " ms. "
-        << "t2=" << t2 << " it2_ts=" << measurements_[it2_idx].timestamp_
-        << " it2_idx=" << it2_idx << " buf_sz=" << N);
+    SVO_WARN_STREAM("ImuHandler: Not enough IMU measurements for the time interval.");
     return false;
   }
 
-  // Copy [it1_idx, it2_idx+1] — inclusive of it2_idx.
-  // When it2_idx == it1_idx this gives exactly 1 measurement.
-  measurements.insert(measurements.begin(), measurements_.begin() + it1_idx, measurements_.begin() + it2_idx + 1);
-  SVO_DEBUG_STREAM("ImuHandler: getMeasurements OK t1=" << std::fixed << std::setprecision(9) << t1 << " t2=" << std::setprecision(9) << t2
-      << " n_meas=" << measurements.size()
-      << " buf_sz=" << N << " oldest_ts=" << std::setprecision(9) << measurements_.front().timestamp_
-      << " newest_ts=" << std::setprecision(9) << measurements_.back().timestamp_);
+  if (t2 - it2->timestamp_ > imu_calib_.max_imu_delta_t)
+  {
+    SVO_WARN_STREAM("ImuHandler: Newest IMU measurement is too old. Gap: "
+                    << (t2 - it2->timestamp_) * 1000.0 << " ms.");
+    return false;
+  }
+
+  // Copy measurements from it2 (newer) to it1 (older).
+  ++it1;
+  measurements.insert(measurements.begin(), it2, it1);
+  measurements.back().timestamp_ = t1;
+
+  if (delete_old_measurements)
+    measurements_.erase(it1, measurements_.end());
+
   return true;
 }
 
@@ -241,35 +208,19 @@ bool ImuHandler::getRelativeRotationPrior(
                        delete_old_measurements, measurements))
     return false;
 
-  // Allow single-measurement case: integrate angular velocity from old_cam_ts to new_cam_ts
-  // using the available IMU data. The last-iteration logic in the loop handles dt correctly.
-  if (measurements.empty())
-    return false;
-
-  // Integrate angular velocity from t1 to t2 (oldest to newest, forward).
-  // R_oldimu_newimu represents the rotation from IMU at old timestamp to IMU at new timestamp.
+  // Integrate angular velocity from t1 to t2 with bias correction and saturation.
   R_oldimu_newimu.setIdentity();
+  ImuMeasurements::reverse_iterator it = measurements.rbegin();
+  ImuMeasurements::reverse_iterator it_plus = measurements.rbegin();
+  ++it_plus;
 
-  // Forward iteration: oldest -> newest
-  ImuMeasurements::const_iterator it = measurements.begin();
-  ImuMeasurements::const_iterator it_next = measurements.begin();
-  ++it_next;
-
-  // Get bias from calibrator if available, otherwise fall back to static bias
-  const Eigen::Vector3d omega_bias = currentGyroBias();
-
-  for (; it != measurements.end(); ++it, ++it_next)
+  for (; it != measurements.rend(); ++it, ++it_plus)
   {
     double dt = 0.0;
-    if (it_next == measurements.end())
-    {
-      // Last measurement: integrate to the (corrected) camera timestamp
+    if (it_plus == measurements.rend())
       dt = new_cam_timestamp - imu_calib_.delay_imu_cam - it->timestamp_;
-    }
     else
-    {
-      dt = it_next->timestamp_ - it->timestamp_;
-    }
+      dt = it_plus->timestamp_ - it->timestamp_;
 
     if (dt <= 0.0 || dt > 0.5)
     {
@@ -277,7 +228,8 @@ bool ImuHandler::getRelativeRotationPrior(
       continue;
     }
 
-    Eigen::Vector3d omega_raw = it->angular_velocity_ - omega_bias;
+    const Eigen::Vector3d omega_raw = it->angular_velocity_ - omega_bias_;
+    // Apply gyroscope saturation limit
     Eigen::Vector3d omega_corrected = omega_raw;
     const double omega_norm = omega_corrected.norm();
     if (omega_norm > imu_calib_.saturation_omega_max)
@@ -292,63 +244,19 @@ bool ImuHandler::getRelativeRotationPrior(
     {
       Eigen::Quaterniond R_incr(Eigen::AngleAxisd(
           theta, omega_corrected.normalized()));
-      // Compose: first rotation (oldest) applied, then subsequent ones.
-      // R = R * R_incr: current accumulated rotation, then new increment.
       R_oldimu_newimu = R_oldimu_newimu * R_incr;
     }
   }
-
-  return true;
-}
-
-bool ImuHandler::getTransformedRotationPrior(
-    double old_cam_timestamp, double new_cam_timestamp,
-    Eigen::Quaterniond& R_cam_delta)
-{
-  Eigen::Quaterniond R_imu_delta;
-  if (!getRelativeRotationPrior(old_cam_timestamp, new_cam_timestamp, false, R_imu_delta))
-    return false;
-
-  // IMU rotation is in body frame; camera rotation is the inverse (conjugate).
-  // Note: this method is no longer called by vo_node — rotation prior is permanently
-  // disabled in SVO (direct methods cannot accept external rotation priors).
-  R_cam_delta = R_imu_delta;
   return true;
 }
 
 bool ImuHandler::addImuMeasurement(const ImuMeasurement& m)
 {
   ulock_t lock(measurements_mut_);
-  static int dbg_count = 0;
-  if (dbg_count < 3)
-  {
-    SVO_WARN_STREAM("ImuHandler: addImuMeasurement #" << dbg_count
-        << " ts=" << std::fixed << std::setprecision(9) << m.timestamp_
-        << " buf_size=" << measurements_.size());
-    ++dbg_count;
-  }
-  // push_back: front=oldest, back=newest (canonical chronological order for binary search)
-  measurements_.push_back(m);
+  measurements_.push_front(m);
   if (options_.temporal_stationary_check)
-    temporal_imu_window_.push_back(m);
-
-  // Feed raw omega to calibrator for inter-frame delta integration
-  feedOmegaToCalibrator(m.timestamp_, m.angular_velocity_);
-
+    temporal_imu_window_.push_front(m);
   return true;
-}
-
-void ImuHandler::feedOmegaToCalibrator(double timestamp, const Eigen::Vector3d& omega)
-{
-  if (calibrator_)
-    calibrator_->feedOmegaMeasurement(timestamp, omega);
-}
-
-Eigen::Vector3d ImuHandler::currentGyroBias() const
-{
-  if (calibrator_ && calibrator_->isReady())
-    return calibrator_->gyroBias();
-  return omega_bias_;
 }
 
 bool ImuHandler::getInitialAttitude(
@@ -392,158 +300,6 @@ void ImuHandler::reset()
   temporal_imu_window_.clear();
 }
 
-bool ImuHandler::getWindowedAccelerometerStats(
-    double window_sec,
-    double& accel_mean_norm,
-    double& accel_std_norm,
-    Eigen::Vector3d& accel_mean_vec) const
-{
-  ulock_t lock(measurements_mut_);
-
-  if (measurements_.empty())
-    return false;
-
-  // Find newest timestamp in buffer
-  const double newest_ts = measurements_.back().timestamp_;
-  const double oldest_allowed = newest_ts - window_sec;
-
-  // Collect samples within window
-  std::vector<double> accel_norms;
-  double sum_ax = 0.0, sum_ay = 0.0, sum_az = 0.0;
-  int count = 0;
-
-  for (const auto& m : measurements_)
-  {
-    if (m.timestamp_ < oldest_allowed)
-      break;
-    const double a_norm = m.linear_acceleration_.norm();
-    accel_norms.push_back(a_norm);
-    sum_ax += m.linear_acceleration_.x();
-    sum_ay += m.linear_acceleration_.y();
-    sum_az += m.linear_acceleration_.z();
-    ++count;
-  }
-
-  if (count < 5)
-    return false;
-
-  accel_mean_vec = Eigen::Vector3d(sum_ax, sum_ay, sum_az) / static_cast<double>(count);
-  accel_mean_norm = std::accumulate(accel_norms.begin(), accel_norms.end(), 0.0)
-                    / static_cast<double>(count);
-
-  // Compute standard deviation
-  double sq_sum = 0.0;
-  for (double n : accel_norms)
-    sq_sum += (n - accel_mean_norm) * (n - accel_mean_norm);
-  accel_std_norm = std::sqrt(sq_sum / static_cast<double>(count));
-
-  return true;
-}
-
-bool ImuHandler::getPoseIncrement(double last_timestamp, double cur_timestamp,
-                                 Eigen::Quaterniond& R_imu_last_from_imu_cur)
-{
-  ulock_t lock(measurements_mut_);
-
-  if (measurements_.empty())
-    return false;
-
-  // Find first measurement with timestamp >= last_timestamp
-  auto it = std::lower_bound(
-      measurements_.begin(), measurements_.end(), last_timestamp,
-      [](const ImuMeasurement& m, double t) { return m.timestamp_ < t; });
-
-  if (it == measurements_.end())
-    return false;
-
-  // Get bias (online or static)
-  const Eigen::Vector3d gyro_bias = currentGyroBias();
-
-  // Integrate from last_timestamp to cur_timestamp
-  Eigen::Quaterniond R_imu_delta = Eigen::Quaterniond::Identity();
-  double prev_t = last_timestamp;
-  Eigen::Vector3d prev_omega = it->angular_velocity_;
-
-  for (; it != measurements_.end(); ++it)
-  {
-    if (it->timestamp_ > cur_timestamp)
-      break;
-
-    double dt = it->timestamp_ - prev_t;
-    if (dt <= 0.0 || dt > imu_calib_.max_imu_delta_t)
-    {
-      prev_t = it->timestamp_;
-      prev_omega = it->angular_velocity_;
-      continue;
-    }
-
-    Eigen::Vector3d omega_corr = it->angular_velocity_ - gyro_bias;
-
-    // Normalize angle to avoid numerical issues for long integration
-    double omega_norm = omega_corr.norm();
-    if (omega_norm > 1e-8)
-    {
-      double angle = omega_norm * dt;
-      Eigen::Vector3d axis = omega_corr / omega_norm;
-      // Incremental rotation: q_new = q_old * exp(axis * angle)
-      R_imu_delta = R_imu_delta * Eigen::Quaterniond(
-          Eigen::AngleAxisd(angle, axis));
-    }
-
-    prev_t = it->timestamp_;
-    prev_omega = it->angular_velocity_;
-  }
-
-  // R_imu_last_from_imu_cur = inverse of R_imu_delta = conjugate
-  // (IMU at cur → IMU at last, same as original getRelativeRotationPrior)
-  R_imu_last_from_imu_cur = R_imu_delta.conjugate();
-  return true;
-}
-
-bool ImuHandler::getPoseAt(double timestamp,
-                           Eigen::Vector3d& omega_interp,
-                           Eigen::Vector3d& acc_interp,
-                           double& dt_last,
-                           double& dt_cur) const
-{
-  ulock_t lock(measurements_mut_);
-
-  if (measurements_.size() < 2)
-    return false;
-
-  // Find bracket: measurements_[i].timestamp_ <= timestamp < measurements_[i+1].timestamp_
-  ssize_t idx = -1;
-  for (ssize_t i = 0; i < static_cast<ssize_t>(measurements_.size()) - 1; ++i)
-  {
-    if (measurements_[i].timestamp_ <= timestamp &&
-        timestamp < measurements_[i + 1].timestamp_)
-    {
-      idx = i;
-      break;
-    }
-  }
-
-  if (idx < 0)
-    return false;
-
-  const ImuMeasurement& m_last = measurements_[static_cast<size_t>(idx)];
-  const ImuMeasurement& m_cur  = measurements_[static_cast<size_t>(idx + 1)];
-
-  double total_dt = m_cur.timestamp_ - m_last.timestamp_;
-  if (total_dt <= 0.0)
-    return false;
-
-  double alpha = (timestamp - m_last.timestamp_) / total_dt;
-  omega_interp = m_last.angular_velocity_ +
-                 alpha * (m_cur.angular_velocity_ - m_last.angular_velocity_);
-  acc_interp   = m_last.linear_acceleration_ +
-                 alpha * (m_cur.linear_acceleration_ - m_last.linear_acceleration_);
-  dt_last = timestamp - m_last.timestamp_;
-  dt_cur  = m_cur.timestamp_ - timestamp;
-
-  return true;
-}
-
 IMUTemporalStatus ImuHandler::checkTemporalStatus(const double time_sec)
 {
   if (!options_.temporal_stationary_check)
@@ -551,6 +307,8 @@ IMUTemporalStatus ImuHandler::checkTemporalStatus(const double time_sec)
     SVO_WARN_STREAM("ImuHandler: Stationary check is disabled.");
     return IMUTemporalStatus::kMoving;
   }
+
+  IMUTemporalStatus res = IMUTemporalStatus::kMoving;
 
   ulock_t lock(measurements_mut_);
   if (temporal_imu_window_.empty() ||
@@ -619,241 +377,6 @@ IMUTemporalStatus ImuHandler::checkTemporalStatus(const double time_sec)
       temporal_imu_window_.begin(), temporal_imu_window_.begin() + static_cast<ssize_t>(start_idx));
 
   return stationary ? IMUTemporalStatus::kStationary : IMUTemporalStatus::kMoving;
-}
-
-// =============================================================================
-// IMU ONLINE CALIBRATOR
-// Uses visual rotation as ground truth to estimate gyro bias and T_cam_imu
-// =============================================================================
-
-ImuOnlineCalibrator::ImuOnlineCalibrator()
-  : calibration_state_(CalibrationState::kWaitingForSecondFrame)
-  , R_cam_imu_(Eigen::Matrix3d::Identity())
-  , observations_()
-  , R_imu_last_omega_(Eigen::Quaterniond::Identity())
-  , last_obs_timestamp_(0.0)
-  , first_obs_(true)
-  , R_vis_last_(Eigen::Quaterniond::Identity())
-  , first_visual_obs_(true)
-  , first_omega_obs_(true)
-  , last_omega_ts_(0.0)
-{
-}
-
-void ImuOnlineCalibrator::observeVisualRotation(
-    const Eigen::Quaterniond& R_world_last,
-    const Eigen::Quaterniond& R_world_cur,
-    double timestamp)
-{
-  // Update last visual reference
-  if (first_visual_obs_)
-  {
-    R_vis_last_ = R_world_last;
-    first_visual_obs_ = false;
-    last_obs_timestamp_ = timestamp;
-    return;
-  }
-
-  // Update visual reference
-  Eigen::Quaterniond prev_vis = R_vis_last_;  // Save before overwriting
-  R_vis_last_ = R_world_cur;
-
-  // Get IMU delta from our rolling integration
-  if (!first_obs_)
-  {
-    Observation obs;
-    obs.timestamp = timestamp;
-    obs.R_vis_last = prev_vis;
-    obs.R_vis_cur = R_world_cur;
-    obs.R_imu_delta = R_imu_last_omega_;
-    obs.dt = timestamp - last_obs_timestamp_;
-
-    observations_.push_back(obs);
-    first_obs_ = false;
-  }
-  else
-  {
-    first_obs_ = false;
-  }
-  R_imu_last_omega_ = Eigen::Quaterniond::Identity();  // Reset for next inter-frame integration
-  last_obs_timestamp_ = timestamp;
-
-  // Remove old observations
-  const double now = timestamp;
-  observations_.erase(
-      std::remove_if(observations_.begin(), observations_.end(),
-          [now](const Observation& o) { return now - o.timestamp > kMaxObservationAge; }),
-      observations_.end());
-
-  // Transition state
-  if (calibration_state_ == CalibrationState::kWaitingForSecondFrame)
-  {
-    if (observations_.size() >= 2)
-      calibration_state_ = CalibrationState::kCollecting;
-  }
-
-  // Run estimation when we have enough data
-  if (calibration_state_ == CalibrationState::kCollecting)
-  {
-    if (observations_.size() >= kMinObservations)
-    {
-      runBiasEstimation();
-      runTcamImuEstimation();
-      calibration_state_ = CalibrationState::kReady;
-      SVO_WARN_STREAM("ImuOnlineCalibrator: calibration complete. "
-          << "gyro_bias=[" << omega_bias_.transpose() << "] rad/s");
-    }
-  }
-}
-
-Eigen::Vector3d ImuOnlineCalibrator::correctOmega(const Eigen::Vector3d& omega_raw) const
-{
-  return omega_raw - omega_bias_;
-}
-
-void ImuOnlineCalibrator::feedOmegaMeasurement(double timestamp, const Eigen::Vector3d& omega_raw)
-{
-  if (first_omega_obs_)
-  {
-    first_omega_obs_ = false;
-    last_omega_ts_ = timestamp;
-    return;
-  }
-
-  double dt = timestamp - last_omega_ts_;
-  last_omega_ts_ = timestamp;
-
-  if (dt <= 0.0 || dt > 0.5)
-    return;
-
-  // Integrate with current bias estimate into rolling buffer
-  Eigen::Vector3d omega = omega_raw - omega_bias_;
-  const double wn = omega.norm();
-  if (wn > 1e-8)
-  {
-    Eigen::Quaterniond dq(Eigen::AngleAxisd(wn * dt, omega.normalized()));
-    R_imu_last_omega_ = dq * R_imu_last_omega_;
-  }
-}
-
-void ImuOnlineCalibrator::runBiasEstimation()
-{
-  // Gyro bias estimation via least-squares on axis-angle residuals.
-  //
-  // For each observation, the IMU predicts:
-  //   R_imu_delta = exp((omega - omega_bias) * dt)
-  //
-  // The camera predicts:
-  //   R_vis_delta = R_cam_imu * R_imu_delta * R_cam_imu^T
-  //
-  // With T_cam_imu fixed (identity initially), we solve for omega_bias by
-  // minimizing the angular residual:
-  //   residual = angle(R_vis_delta * R_cam_imu * R_imu_delta^T * R_cam_imu^T)
-  //
-  // For small biases, the angular error is approximately:
-  //   error ≈ || (R_vis_delta * R_cam_imu) - I ||_so3^T * omega_bias * dt
-  //
-  // We use a simple gradient-descent approach with axis-angle representation.
-
-  if (observations_.empty()) return;
-
-  const Eigen::Matrix3d R_ci = R_cam_imu_;
-  const double lr = 0.5;  // Learning rate
-  const int max_iter = 50;
-  Eigen::Vector3d bias = omega_bias_;
-
-  for (int iter = 0; iter < max_iter; ++iter)
-  {
-    Eigen::Vector3d grad = Eigen::Vector3d::Zero();
-    double total_weight = 0.0;
-
-    for (const Observation& obs : observations_)
-    {
-      // Apply current bias to IMU delta
-      // We approximate: R_imu_corr = exp(-bias * dt) * R_imu_raw
-      // For small bias, use first-order: delta_R_corr = delta_R_raw * (I - [bias*dt]_×)
-      const double dt = obs.dt;
-      Eigen::Matrix3d R_imu_raw = obs.R_imu_delta.toRotationMatrix();
-      Eigen::Matrix3d R_vis_pred = R_ci * R_imu_raw * R_ci.transpose();
-      Eigen::Quaterniond q_vis_pred(R_vis_pred);
-
-      // Actual visual rotation
-      Eigen::Quaterniond q_vis_actual = obs.R_vis_cur.conjugate() * obs.R_vis_last;
-      Eigen::Matrix3d R_vis_actual = q_vis_actual.toRotationMatrix();
-
-      // Residual: R_res = R_vis_actual * R_vis_pred^T
-      Eigen::Matrix3d R_res = R_vis_actual * R_vis_pred.transpose();
-      Eigen::AngleAxisd aa_res(R_res);
-      double err_angle = aa_res.angle();
-      if (err_angle > M_PI) err_angle -= 2 * M_PI;
-      Eigen::Vector3d err_axis = aa_res.axis();
-      if (err_angle < 0) err_axis = -err_axis;
-
-      // Jacobian of angular error w.r.t. bias:
-      // For small dt, d(angle)/d(bias) ≈ -dt * axis_component
-      // Use absolute angle as scalar cost
-      const double weight = 1.0;
-      grad += weight * (-err_axis * dt) * err_angle;
-      total_weight += weight;
-    }
-
-    if (total_weight < 1e-6) break;
-    grad /= total_weight;
-
-    // Gradient descent step with step size decay
-    const double step_size = lr / (1.0 + iter * 0.1);
-    bias -= step_size * grad;
-
-    // Clamp bias to reasonable range (deg/s)
-    const double max_bias = 0.1;  // 0.1 rad/s = ~5.7 deg/s
-    for (int i = 0; i < 3; ++i)
-      bias(i) = std::max(-max_bias, std::min(max_bias, bias(i)));
-
-    omega_bias_ = bias;
-  }
-}
-
-void ImuOnlineCalibrator::runTcamImuEstimation()
-{
-  // T_cam_imu estimation: find R_cam_imu such that
-  //   R_cam_imu * R_imu_delta * R_cam_imu^T ≈ R_vis_delta
-  //
-  // This is an orthogonal Procrustes problem.
-  // We collect accumulated rotations and find the best rotation matrix.
-
-  if (observations_.size() < 3) return;
-
-  // Build accumulation matrices for Procrustes
-  Eigen::Matrix3d M = Eigen::Matrix3d::Zero();
-  for (const Observation& obs : observations_)
-  {
-    Eigen::Matrix3d R_imu_delta = obs.R_imu_delta.toRotationMatrix();
-    Eigen::Matrix3d R_vis_delta = (obs.R_vis_cur.conjugate() * obs.R_vis_last).toRotationMatrix();
-    M += R_vis_delta * R_imu_delta.transpose();
-  }
-
-  // SVD: M = U * S * V^T
-  // Optimal R = U * V^T (ensuring det(R) = +1)
-  Eigen::JacobiSVD<Eigen::Matrix3d> svd(M, Eigen::ComputeFullU | Eigen::ComputeFullV);
-  Eigen::Matrix3d R_opt = svd.matrixU() * svd.matrixV().transpose();
-
-  // Ensure proper rotation (det = +1)
-  if (R_opt.determinant() < 0)
-  {
-    Eigen::Matrix3d V_adj = svd.matrixV();
-    V_adj.col(2) *= -1;
-    R_opt = svd.matrixU() * V_adj.transpose();
-  }
-
-  // Only accept if the rotation is reasonable (no more than 90° from identity)
-  Eigen::AngleAxisd aa(R_opt);
-  double angle_deg = std::abs(aa.angle()) * 180.0 / M_PI;
-  if (angle_deg < 90.0)
-  {
-    R_cam_imu_ = R_opt;
-    SVO_WARN_STREAM("ImuOnlineCalibrator: T_cam_imu updated. "
-        << "angle_from_identity=" << angle_deg << "deg");
-  }
 }
 
 }  // namespace svo

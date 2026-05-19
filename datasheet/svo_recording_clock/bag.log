@@ -1,8 +1,0 @@
-stdin is not a terminal device. Keyboard handling disabled.[INFO] [1779083995.347629029] [rosbag2_storage]: Opened database '/home/lxy/asr_sdm_robo/datasheet/airground_rig_s3_ros2/airground_rig_s3_ros2.db3' for READ_ONLY.
-[INFO] [1779083995.347827895] [rosbag2_player]: Set rate to 1
-[INFO] [1779083995.357376357] [rosbag2_player]: Adding keyboard callbacks.
-[INFO] [1779083995.357458055] [rosbag2_player]: Press SPACE for Pause/Resume
-[INFO] [1779083995.357463936] [rosbag2_player]: Press CURSOR_RIGHT for Play Next Message
-[INFO] [1779083995.357468442] [rosbag2_player]: Press CURSOR_UP for Increase Rate 10%
-[INFO] [1779083995.357471737] [rosbag2_player]: Press CURSOR_DOWN for Decrease Rate 10%
-[INFO] [1779083995.358910429] [rosbag2_player]: Playback until timestamp: -1

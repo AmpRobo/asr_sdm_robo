@@ -81,12 +81,6 @@ protected:
   TrackingQuality tracking_quality_;    //!< An estimate of the tracking quality based on the number
                                         //!< of tracked features.
 
-  // IMU motion prior for SparseImgAlign (VIO extension)
-  bool have_motion_prior_ = false;  //!< Whether a motion prior from IMU is available
-  Sophus::SE3d T_newimu_lastimu_prior_;  //!< Transformation from last to new IMU frame
-  double img_align_prior_lambda_rot_ = 0.5;   //!< Weight of IMU rotation prior in SparseImgAlign
-  double img_align_prior_lambda_trans_ = 0.0;  //!< Weight of IMU translation prior (0 = pure visual)
-
   /// Before a frame is processed, this function is called.
   bool startFrameProcessingCommon(const double timestamp);
 
@@ -105,16 +99,6 @@ protected:
 
   /// Optimize some of the observed 3D points.
   virtual void optimizeStructure(FramePtr frame, size_t max_n_pts, int max_iter);
-
-  /// Compute IMU motion prior between last and new frame.
-  ///
-  /// Three-tier fallback:
-  /// 1. have_rotation_prior_ (external rotation) → use R_imu_world delta
-  /// 2. IMU gyro integration → integrate gyroscope data between frames
-  /// 3. Constant velocity (when lambda > 0) → T = Identity
-  ///
-  /// Populates T_newimu_lastimu_prior_ and sets have_motion_prior_ = true.
-  virtual void getMotionPrior();
 };
 
 }  

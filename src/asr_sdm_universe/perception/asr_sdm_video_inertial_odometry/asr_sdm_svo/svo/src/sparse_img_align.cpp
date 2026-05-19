@@ -67,64 +67,13 @@ SparseImgAlign::SparseImgAlign(
     Method method, bool display, bool verbose) :
         display_(display),
         max_level_(max_level),
-        min_level_(min_level),
-        have_imu_prior_(false)
+        min_level_(min_level)
 {
   n_iter_ = n_iter;
   n_iter_init_ = n_iter_;
   method_ = method;
   verbose_ = verbose;
-  eps_ = 0.000001;
-}
-
-void SparseImgAlign::setWeightedPrior(
-    const Sophus::SE3d& T_cur_ref_prior,
-    double lambda_rot,
-    double lambda_trans)
-{
-  have_imu_prior_ = true;
-  T_cur_ref_prior_ = T_cur_ref_prior;
-  prior_lambda_rot_ = lambda_rot;
-  prior_lambda_trans_ = lambda_trans;
-
-  // Activate the NLLSSolver's prior flag so applyPrior() gets called
-  // in every Gauss-Newton iteration.
-  setPrior(T_cur_ref_prior, Eigen::Matrix<double, 6, 6>::Zero());
-}
-
-void SparseImgAlign::applyPrior(const Sophus::SE3d& T_cur_from_ref)
-{
-  if (!have_imu_prior_)
-    return;
-
-  // Recompute the information matrix on the first iteration of each Gauss-Newton run.
-  // Scale by Hessian diagonal max so prior strength adapts to visual information.
-  if (iter_ == 0)
-  {
-    prior_I_.setZero();
-
-    double H_max_diag_trans = 0.0;
-    for (size_t j = 0; j < 3; ++j)
-      H_max_diag_trans = std::max(H_max_diag_trans, std::fabs(H_(j, j)));
-    prior_I_.block<3, 3>(0, 0) =
-        Eigen::Matrix3d::Identity() * prior_lambda_trans_ * H_max_diag_trans;
-
-    double H_max_diag_rot = 0.0;
-    for (size_t j = 3; j < 6; ++j)
-      H_max_diag_rot = std::max(H_max_diag_rot, std::fabs(H_(j, j)));
-    prior_I_.block<3, 3>(3, 3) =
-        Eigen::Matrix3d::Identity() * prior_lambda_rot_ * H_max_diag_rot;
-  }
-
-  // Regularize Hessian
-  H_.noalias() += prior_I_;
-
-  // Prior residual in se(3): log(T_prior^-1 * T_cur)
-  const Sophus::SE3d::Tangent se3_error =
-      (T_cur_ref_prior_.inverse() * T_cur_from_ref).log();
-
-  // Prior gradient contribution: Jres_ = -prior_I_ * residual (standard GN)
-  Jres_.noalias() -= prior_I_ * se3_error;
+  eps_ = 0.000001;  // Convergence threshold
 }
 
 /**
@@ -142,10 +91,6 @@ void SparseImgAlign::applyPrior(const Sophus::SE3d& T_cur_from_ref)
  */
 size_t SparseImgAlign::run(FramePtr ref_frame, FramePtr cur_frame)
 {
-  // Re-apply IMU prior after reset() since reset() clears have_prior_.
-  if (have_imu_prior_)
-    setPrior(T_cur_ref_prior_, Eigen::Matrix<double, 6, 6>::Zero());
-
   reset();
 
   if(ref_frame->fts_.empty())

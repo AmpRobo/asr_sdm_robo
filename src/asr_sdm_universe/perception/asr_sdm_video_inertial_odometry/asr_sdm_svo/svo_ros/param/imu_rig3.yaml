@@ -1,37 +1,15 @@
 # IMU ROS 参数 - Rig3 (单目相机 + IMU)
 # 此文件作为 ROS 2 --params-file 被 launch 加载
+# 注意：IMU 标定参数（delay_imu_cam, 噪声密度等）放在 imu_rig3_calib.yaml 中由代码直接读取
 
 /**:
   ros__parameters:
     imu_topic: "/imu/data"
     set_initial_attitude_from_gravity: true
 
-    # === IMU 标定参数（与 imu_rig3_calib.yaml 内容一致）===
-    imu_delay_imu_cam: 0.0
-    imu_max_imu_delta_t: 5.0
-    imu_acc_max: 200.0
-    imu_omega_max: 20.0
-    imu_gyro_noise_density: 0.0001
-    imu_acc_noise_density: 0.001
-    imu_gyro_bias_rw: 0.000001
-    imu_acc_bias_rw: 0.00001
-    imu_gravity_magnitude: 9.81
-    imu_rate: 200.0
-    imu_velocity_sigma: 0.1
-    imu_omega_bias_sigma: 0.01
-    imu_acc_bias_sigma: 0.1
-
-    # === IMU yaw 修正（已弃用，改用 yaw=0 让视觉前端建立航向）===
-    # 分析结论：IMU 内置四元数 yaw 不是固定值，会持续漂移。
-    # 新方案：只用重力对齐 Roll/Pitch，Yaw 设为 0，由 SVO 视觉前端建立。
-    # SVO 的 camera-down Rx(180°) 会自动对齐世界坐标系。
-    # imu_yaw_correction_deg: 0.0
-
-    # T_cam_imu: camera-to-IMU extrinsics (R,t)
-    # For downward-looking camera: camera Z points DOWN, IMU Z points UP (gravity)
-    # R_cam_imu rotates vectors from IMU frame to camera frame.
-    # Gravity in IMU frame = [0, 0, -9.81], in camera frame depends on mounting.
-    # Using identity as a starting point; online calibration will refine this.
+    # T_cam_imu: 4x4 矩阵（行主序），表示 T_imu_cam0（IMU 到相机的变换）
+    # 未标定时用单位矩阵。已标定时填写实际值（从 Kalibr 等工具获得）
+    # 格式: [R00,R01,R02,t0, R10,R11,R12,t1, R20,R21,R22,t2, 0,0,0,1]
     T_cam_imu:
       [1.0, 0.0, 0.0, 0.0,
        0.0, 1.0, 0.0, 0.0,
@@ -43,21 +21,3 @@
     imu_temporal_window_length_sec: 0.5
     stationary_acc_sigma_thresh: 0.0
     stationary_gyr_sigma_thresh: 0.0
-
-    # === IMU VIO prior weights for SparseImgAlign ===
-    # lambda_rot=0.5: moderate IMU pull on rotation (rpg/vio_mono.yaml default)
-    # lambda_trans=0.0: pure visual translation (recommended for monocular)
-    img_align_prior_lambda_rot: 0.5
-    img_align_prior_lambda_trans: 0.0
-
-    # === IMU VIO prior weight for pose optimizer (reprojected point BA) ===
-    # Follows rpg/imufusion convention: lambda > 0 pulls rotation toward IMU.
-    # Start with 0 (disabled) and increase if pose is noisy.
-    pose_optim_prior_lambda_rot: 0.0
-    pose_optim_prior_lambda_trans: 0.0
-
-    # === Zero-motion detection (accelerometer variance) ===
-    # If accel std dev < thresh over window, robot is stationary.
-    # stationary → skip IMU gyro prior (rotation already known from last frame)
-    zero_motion_accel_std_thresh: 0.05  # m/s²; typical for stationary robot
-    zero_motion_window_sec: 0.3         # look-back window for accel stats
