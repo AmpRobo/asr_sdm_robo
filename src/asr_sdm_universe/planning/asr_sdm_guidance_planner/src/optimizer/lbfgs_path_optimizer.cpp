@@ -67,7 +67,8 @@ std::vector<Eigen::Vector3d> LbfgsPathOptimizer::selectControlPoints(
 
 OptimizerResult LbfgsPathOptimizer::optimize(
   const std::vector<Eigen::Vector3d> & raw_path,
-  const VoxelEsdfMap & map) const
+  const VoxelEsdfMap & map,
+  const std::vector<CorridorSphere> * corridor) const
 {
   OptimizerResult result;
 
@@ -95,7 +96,7 @@ OptimizerResult LbfgsPathOptimizer::optimize(
     return result;
   }
 
-  const std::vector<Eigen::Vector3d> guide_path = selectControlPoints(raw_path);
+  const std::vector<Eigen::Vector3d> guide_path = (corridor != nullptr) ? raw_path : selectControlPoints(raw_path);
   const int variable_count = static_cast<int>(3 * (guide_path.size() - 2));
   std::vector<double> x(variable_count, 0.0);
 
@@ -121,6 +122,7 @@ OptimizerResult LbfgsPathOptimizer::optimize(
     const double obstacle_w = options_.obstacle_weight;
     const double guide_w = options_.guide_weight;
     const double safe_distance = options_.safe_distance;
+    const double corridor_w = options_.corridor_weight;
 
     for (std::size_t i = 1; i + 1 < path.size(); ++i) {
       const Eigen::Vector3d second_diff = path[i - 1] - 2.0 * path[i] + path[i + 1];
@@ -165,6 +167,31 @@ OptimizerResult LbfgsPathOptimizer::optimize(
         fx += obstacle_w * violation * violation;
         const Eigen::Vector3d grad_dist = map.gradient(p);
         grad_points[i] += -2.0 * obstacle_w * violation * grad_dist;
+      }
+    }
+
+
+
+    if (corridor != nullptr && corridor->size() + 1U == path.size() && corridor_w > 0.0) {
+      const auto add_corridor_penalty = [&, corridor_w](const std::size_t point_index, const CorridorSphere & sphere) {
+        if (!sphere.valid) {
+          return;
+        }
+        const Eigen::Vector3d diff = path[point_index] - sphere.center;
+        const double norm = diff.norm();
+        const double violation = norm - sphere.radius;
+        if (violation <= 0.0) {
+          return;
+        }
+        fx += corridor_w * violation * violation;
+        if (norm > 1.0e-9) {
+          grad_points[point_index] += 2.0 * corridor_w * violation * diff / norm;
+        }
+      };
+
+      for (std::size_t i = 1; i + 1 < path.size(); ++i) {
+        add_corridor_penalty(i, (*corridor)[i - 1U]);
+        add_corridor_penalty(i, (*corridor)[i]);
       }
     }
 

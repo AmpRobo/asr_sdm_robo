@@ -32,60 +32,55 @@ esdf_map:
     esdf_map.min_ray_length: 0.2
     esdf_map.max_ray_length: 5.0
 
-    # /esdf_map/esdf is still a 2D slice at this height.
+    # /esdf_map/esdf is a 2D ESDF slice at this height.
     esdf_map.esdf_slice_height: 0.5
     esdf_map.visualization_truncate_height: 3.0
     esdf_map.virtual_ceil_height: 3.0
 
-    # New 3D ESDF visualization topic: /esdf_map/esdf_3d
+    # Optional 3D ESDF visualization topic: /esdf_map/esdf_3d
     esdf_map.publish_esdf_3d: true
+    # Raw 3D signed ESDF distance topic for saving/planning: /esdf_map/esdf_distance
+    esdf_map.publish_esdf_distance: true
     esdf_map.esdf_3d_local_only: true
     esdf_map.esdf_3d_stride: 1
     esdf_map.esdf_3d_min_distance: 0.0
     esdf_map.esdf_3d_max_distance: 3.0
     esdf_map.esdf_3d_publish_negative_distance: true
 
-    esdf_map.publish_occupied_map_3d: true
-    esdf_map.occupied_map_3d_local_only: false
-    esdf_map.occupied_map_3d_use_inflated: true
-    esdf_map.occupied_map_3d_stride: 1
-    esdf_map.occupied_map_3d_alpha: 0.85
+    # Occupied cube mesh visualization topic: /esdf_map/occupied_map
+    esdf_map.publish_occupied_map: true
+    esdf_map.occupied_map_local_only: false
+    esdf_map.occupied_map_use_inflated: true
+    # TRIANGLE_LIST surface mesh. Larger mesh resolution connects sparse points into broader faces.
+    esdf_map.occupied_map_stride: 1
+    esdf_map.occupied_map_alpha: 0.85
+    esdf_map.occupied_map_mesh_resolution: 0.30
+    esdf_map.occupied_map_mesh_max_height_gap: 0.60
 
     esdf_map.show_occ_time: false
     esdf_map.show_esdf_time: false
     esdf_map.pose_type: 2
     esdf_map.frame_id: "world"
 
-    # Input mode:
-    #   esdf_topics: use /esdf_map/depth + /esdf_map/pose or /esdf_map/odom, and /esdf_map/cloud
-    #   vo_sparse: directly use VO pose + VO sparse map points, without the Python bridge
-    #   realsense_depth: reserved for depth-image input; it still needs synchronized pose/odom
-    esdf_map.input_mode: "vo_sparse"
+    # Input mode, choose exactly one:
+    #   vio   : use VIO pose + sparse VIO map points
+    #   depth : use depth image + VIO pose, no odometry topic is required
+    esdf_map.input_mode: "vio"
 
-    # Generic ESDF input topics. These keep the original /esdf_map/* interface configurable.
-    esdf_map.depth_topic: "/esdf_map/depth"
-    esdf_map.pose_topic: "/esdf_map/pose"
+    # Depth mode input. /pose is geometry_msgs/msg/PoseWithCovarianceStamped.
+    esdf_map.depth_topic: "/sensing/camera/realsense/depth"
+    esdf_map.pose_topic: "/localization/video_inertial_odom/pose"
+
+    # Reserved only for old external cloud/odom helpers; not used by the default vio/depth modes.
     esdf_map.odom_topic: "/esdf_map/odom"
-    esdf_map.cloud_topic: "/esdf_map/cloud"
+    esdf_map.cloud_topic: "/esdf_map/cloud_input"
 
-    # Direct VO sparse-point input. If your bag uses /localization/video_inertial_odom/points,
-    # change vo_points_topic to that topic.
-    esdf_map.vo_pose_topic: "/localization/video_inertial_odom/pose"
-    esdf_map.vo_points_topic: "/localization/video_inertial_odom/points"
-    esdf_map.vo_points_ns_filter: "pts"
-    esdf_map.vo_points_accumulate: true
+    # VIO sparse-point input.
+    esdf_map.vio_pose_topic: "/localization/video_inertial_odom/pose"
+    esdf_map.vio_points_topic: "/localization/video_inertial_odom/points"
+    esdf_map.vio_points_ns_filter: "pts"
+    esdf_map.vio_points_accumulate: true
 
-    # Optional offline fixed-map mode.
-    # false: original online ESDF behavior is unchanged.
-    # true : when input messages stop for final_map_input_timeout seconds, rebuild one global ESDF
-    #        from the current inflated occupancy map, freeze later input, and keep publishing fixed maps.
-    esdf_map.final_map_enable: true
-    esdf_map.final_map_input_timeout: 3.0
-    esdf_map.final_map_freeze_after_build: true
-    esdf_map.final_map_force_global_visualization: true
-    # For vo_sparse input, keep false because VO points are already written into occupancy_buffer_inflate_.
-    # For depth/raycast input, this can be set true to rebuild inflated_map from raw occupancy_buffer_.
-    esdf_map.final_map_rebuild_inflation_from_occupancy: false
 
     esdf_map.local_bound_inflate: 1.0
     esdf_map.local_map_margin: 1

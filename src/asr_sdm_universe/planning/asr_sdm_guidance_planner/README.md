@@ -1,106 +1,159 @@
 # asr_sdm_guidance_planner
 
-ROS 2 Jazzy package for fixed-map 3D trajectory planning.
+ROS 2 3D A* + Bubble-Planner-style sphere corridor + L-BFGS waypoint planner for a fixed inflated occupancy map and an externally computed ESDF map.
 
-The package is intentionally independent from `asr_sdm_esdf_map`. It reads the fixed inflated occupancy cloud from
-
-```sh
-/esdf_map/occupancy_inflate
-```
-
-then builds a planning-side 3D voxel map and ESDF. This avoids changing the ESDF mapping package and keeps the planner backend replaceable.
-
-## Pipeline
+The planner no longer recomputes ESDF internally. It uses:
 
 ```text
-/esdf_map/occupancy_inflate
-        ↓
-planning-side VoxelEsdfMap
-        ↓
-3D A*
-        ↓
-L-BFGS path smoothing with ESDF obstacle cost
-        ↓
-/planning/astar_path
-/planning/trajectory
-/planning/astar_path_marker
-/planning/trajectory_marker
+occupancy.bin or /esdf_map/occupancy_inflate
+  -> occupied voxel map for A* collision checking and RViz occupied-map mesh
+
+esdf.bin or /esdf_map/esdf_distance
+  -> external ESDF distance map for L-BFGS obstacle cost and gradient
 ```
 
-## RViz interaction
+`/esdf_map/esdf_distance` must be a `sensor_msgs/msg/PointCloud2` compatible with `pcl::PointXYZI`:
 
-Use RViz `Publish Point` twice:
+```cpp
+pt.x = pos(0);
+pt.y = pos(1);
+pt.z = pos(2);
+pt.intensity = dist;  // real ESDF distance, not normalized
+```
+
+## Binary map files
+
+Put the two binary files here before building/installing the package:
+
+```text
+asr_sdm_guidance_planner/maps/occupancy.bin
+asr_sdm_guidance_planner/maps/esdf.bin
+```
+
+The default config uses a package-relative directory:
+
+```yaml
+binary_map.directory: "maps"
+binary_map.occupancy_filename: "occupancy.bin"
+binary_map.esdf_filename: "esdf.bin"
+```
+
+After installation, this resolves to:
+
+```text
+install/asr_sdm_guidance_planner/share/asr_sdm_guidance_planner/maps
+```
+
+If you use `colcon build --symlink-install`, copying the `.bin` files into the source package `maps/` directory is usually enough. Without `--symlink-install`, rebuild or reinstall after copying the files.
+
+## Topic mode
+
+Set:
+
+```yaml
+map.source: "topic"
+```
+
+Then the node subscribes to both:
+
+```text
+/esdf_map/occupancy_inflate   sensor_msgs/msg/PointCloud2, occupied voxel centers
+/esdf_map/esdf_distance       sensor_msgs/msg/PointCloud2, x/y/z/intensity = ESDF distance
+```
+
+Planning is allowed only after both occupancy and ESDF are ready.
+
+## Main inputs
+
+```text
+Binary mode:
+  maps/occupancy.bin
+  maps/esdf.bin
+
+Topic mode:
+  /esdf_map/occupancy_inflate
+  /esdf_map/esdf_distance
+
+RViz/user selection:
+  /clicked_point
+  /planning/start
+  /planning/goal
+  /initialpose
+  /goal_pose
+```
+
+## Main outputs
+
+```text
+/planning/astar_path          nav_msgs/msg/Path, raw A* path
+/planning/path                nav_msgs/msg/Path, optimized waypoint polyline
+/planning/waypoints           nav_msgs/msg/Path, optimized waypoints inside the safe corridor
+/planning/safe_corridor       visualization_msgs/msg/MarkerArray, semi-transparent sphere corridor
+/planning/astar_path_marker   visualization_msgs/msg/Marker
+/planning/path_marker         visualization_msgs/msg/Marker
+/planning/start_goal_marker   visualization_msgs/msg/Marker
+/esdf_map/occupied_map        visualization_msgs/msg/Marker, TRIANGLE_LIST occupied-map mesh
+```
+
+## Run
+
+```bash
+cd ~/ros2_ws
+source /opt/ros/jazzy/setup.bash
+colcon build --packages-up-to asr_sdm_guidance_planner --symlink-install
+source install/setup.bash
+ros2 launch asr_sdm_guidance_planner astar_lbfgs_planner_launch.py
+```
+
+In RViz2, use `Publish Point` twice:
 
 ```text
 first click  -> start
 second click -> goal and plan
-third click  -> new start
-fourth click -> new goal and replan
 ```
 
-Alternative topic interfaces:
-
-```text
-/planning/start   geometry_msgs/msg/PointStamped
-/planning/goal    geometry_msgs/msg/PointStamped
-/initialpose      geometry_msgs/msg/PoseWithCovarianceStamped
-/goal_pose        geometry_msgs/msg/PoseStamped
-```
-
-For `2D Pose Estimate` and `2D Goal Pose`, the z value is set by
+## Important parameters
 
 ```yaml
+frame_id: "world"
+map.source: "binary"        # binary or topic
+binary_map.directory: "maps"
+binary_map.auto_bounds: false   # keep false to match asr_sdm_esdf_map mesh alignment
+map.resolution: 0.15
+visualization.ground_height: -1.0
+visualization.visualization_truncate_height: 3.0
+selection.clicked_point_use_msg_z: true
 selection.default_planning_z: 0.5
+selection.project_start_goal_to_safe: true
+selection.safe_point_search_radius: 1.5
+corridor.enabled: true
+corridor.safety_margin: 0.10
+corridor.min_radius: 0.10
+corridor.batch_sample_count: 80
+optimizer.safe_distance: 0.20
+optimizer.corridor_weight: 60.0
 ```
 
-## Build
-
-Put both packages under your workspace `src` directory:
-
-```sh
-asr_sdm_lbfgs_solver
-asr_sdm_guidance_planner
-```
-
-Then build:
-
-```sh
-cd /home/yunxiu/asr_sdm_robo
-source /opt/ros/jazzy/setup.bash
-colcon build --packages-up-to asr_sdm_guidance_planner \
-  --cmake-args -DCMAKE_BUILD_TYPE=Release \
-  --symlink-install
-source install/setup.bash
-```
-
-## Run with the fixed ESDF map
-
-First run the ESDF node with the final fixed map enabled:
-
-```yaml
-esdf_map.final_map_enable: true
-```
-
-Play the bag once, without `--loop`:
-
-```sh
-ros2 bag play /home/yunxiu/vo_esdf_inputs --rate 1.0
-```
-
-Wait until the ESDF node reports that the final fixed map is ready. Then start the planner:
-
-```sh
-ros2 launch asr_sdm_guidance_planner astar_lbfgs_planner_launch.py
-```
-
-In RViz2, set `Fixed Frame = world`, then add:
+For `/esdf_map/occupied_map` to render exactly like `asr_sdm_esdf_map`, keep these values consistent with `asr_sdm_esdf_map/config/esdf_map_config.yaml`:
 
 ```text
-/esdf_map/occupied_map_3d        Marker
-/planning/astar_path_marker      Marker
-/planning/trajectory_marker      Marker
-/planning/start_goal_marker      Marker
-/planning/astar_path             Path
-/planning/trajectory             Path
+map.resolution
+map.origin_x / map.origin_y / map.origin_z
+map.size_x / map.size_y / map.size_z
+visualization.ground_height
+visualization.visualization_truncate_height
+visualization.occupied_map_stride
+visualization.occupied_map_alpha
+visualization.occupied_map_mesh_resolution
 ```
 
+`binary_map.auto_bounds` is now `false` by default because auto-changing the map origin/size can make the coarse mesh blocks misalign with `asr_sdm_esdf_map`. Set it to `true` only if your bin files use different bounds and you accept different RViz mesh alignment.
+
+## Notes
+
+- A* collision checking uses only the inflated occupancy map and now only provides guide points.
+- The 3D safe corridor is generated as overlapping spheres. Each sphere radius is `ESDF_distance(center) - drone_radius - safety_margin`; the real sphere center is selected by BatchSample and scored by sphere volume plus adjacent overlap volume.
+- L-BFGS optimizes the corridor-initialized waypoints and adds a corridor penalty so the published `/planning/waypoints` stay inside the sphere corridor.
+- The `/esdf_map/occupied_map` Marker generation mirrors `SDFMap::publishOccupiedMap()` from `asr_sdm_esdf_map`: `TRIANGLE_LIST`, exposed cube faces only, height-based colors, `ground_height`, and `visualization_truncate_height` cropping.
+- The old internal `computeEsdf()` logic has been removed.
+- If the optimized waypoint path is unsafe or optimization fails, `/planning/path` and `/planning/waypoints` publish the corridor-initialized safe waypoints as fallback when `selection.use_optimized_only_if_safe: true`.

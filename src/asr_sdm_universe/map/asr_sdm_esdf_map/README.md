@@ -1,85 +1,69 @@
 # asr_sdm_esdf_map
-> Incremental ESDF Map for motion planning
 
-Euclidean Signed Distance Field (ESDF) is useful for online motion planning of aerial robots
-since it can easily query the distance_ and gradient information against obstacles.
-Fast incrementally built ESDF map is the bottleneck for conducting real-time motion planning.
-In this paper, we investigate this problem and propose a mapping system called *Fiesta* to build
-global ESDF map incrementally. By introducing two independent updating queues for inserting and
-deleting obstacles separately, and using Indexing Data Structures and Doubly Linked Lists for
-map maintenance, our algorithm updates as few as possible nodes using a BFS framework. Our ESDF
-map has high computational performance and produces near-optimal results.
-We show our method outperforms other up-to-date methods in term of performance and accuracy
-by both theory and experiments. We integrate Fiesta into a completed quadrotor system and validate
-it by both simulation and onboard experiments. We release our method as open-source software for the community. 
+Incremental ESDF map package for ROS 2.
 
-The paper of this method is submitted to the 2019 IEEE/RSJ International Conference on
-Intelligent Robots and Systems (IROS 2019).  The draft is shown on arxiv
-[here](https://arxiv.org/abs/1903.02144).
-
-## Installation
-### Required Library
-- Eigen3
-- PCL
-- OpenCV2
-- ROS2
-
-## Usage example
+## Launch
 
 ```sh
-ros2 launch asr_sdm_esdf_map cow_and_lady_launch.py
-ros2 bag play data.bag
+ros2 launch asr_sdm_esdf_map esdf_map_launch.py
 ```
 
-Cow and lady data set can be downloaded [here](http://robotics.ethz.ch/~asl-datasets/iros_2017_voxblox/data.bag).
-A `rviz` will be opened with the visualization of occupancy grid map and a slice of esdf map.
-
-_For more examples, usage and FAQ, please refer to the [Wiki][wiki].
-
-## Contributing
-
-1. Fork it (<https://github.com/hlx1996/Fiesta/fork>)
-2. Create your feature branch (`git checkout -b feature/fooBar`)
-3. Commit your changes (`git commit -am 'Add some fooBar'`)
-4. Push to the branch (`git push origin feature/fooBar`)
-5. Create a new Pull Request
-
-<!-- Markdown link & img_ dfn's -->
-[wiki]: https://github.com/hlx1996/Fiesta/wiki
-
-## Optional final fixed map
-
-The original online ESDF behavior is unchanged by default.
-To build one fixed global map after a bag finishes playing, enable:
+The input mode is selected in `config/esdf_map_config.yaml`:
 
 ```yaml
-esdf_map.final_map_enable: true
-esdf_map.final_map_input_timeout: 3.0
-esdf_map.final_map_freeze_after_build: true
-esdf_map.final_map_force_global_visualization: true
+esdf_map.input_mode: "vio"    # VIO sparse points + VIO pose
+# esdf_map.input_mode: "depth" # depth image + VIO pose
 ```
 
-Recommended bag playback for a final map:
+`vio` and `depth` are mutually exclusive. The node only subscribes to the topics needed by the selected mode.
 
-```sh
-ros2 bag play /home/yunxiu/vo_esdf_inputs --rate 1.0
+## Input modes
+
+### `vio`
+
+Uses sparse VIO map points and the VIO pose:
+
+```yaml
+esdf_map.vio_pose_topic: "/localization/video_inertial_odom/pose"
+esdf_map.vio_points_topic: "/localization/video_inertial_odom/points"
+esdf_map.vio_points_ns_filter: "pts"
+esdf_map.vio_points_accumulate: true
 ```
 
-Do not use `--loop` when generating the final fixed map. After the input messages stop for
-`final_map_input_timeout` seconds, the node rebuilds the global ESDF over the whole map and keeps
-publishing the fixed result on:
+### `depth`
+
+Uses the RealSense depth image and the existing VIO pose. No odometry topic is required:
+
+```yaml
+esdf_map.depth_topic: "/sensing/camera/realsense/depth"
+esdf_map.pose_topic: "/localization/video_inertial_odom/pose"
+```
+
+`/localization/video_inertial_odom/pose` is expected to be `geometry_msgs/msg/PoseWithCovarianceStamped`.
+The VIO sparse `/points` topic is not required in `depth` mode.
+
+## Output topics
 
 ```text
+/esdf_map/cloud
 /esdf_map/occupancy_inflate
-/esdf_map/occupied_map_3d
+/esdf_map/esdf
+/esdf_map/occupied_map
 /esdf_map/esdf_3d
+/esdf_map/esdf_distance
+/esdf_map/update_range
 ```
 
-For `input_mode: "vo_sparse"`, keep:
+`/esdf_map/esdf_3d` is kept as the RViz visualization topic. Its `intensity` is normalized from `abs(signed_distance)`, so it is not intended as the planner or binary-map source.
+
+`/esdf_map/esdf_distance` is published as a `sensor_msgs/msg/PointCloud2` using `pcl::PointXYZI`. The fields are `x y z intensity`, where `intensity` is the real signed ESDF distance in meters from `distance_buffer_all_`, without normalization and without `abs()`. Use this topic when saving `esdf.bin` for planning.
+
+`/esdf_map/occupied_map` is published as a `visualization_msgs/msg/Marker` with `TRIANGLE_LIST` mesh faces. The occupied cells are rendered as a cube-shaped surface mesh, so RViz2 shows square/cube occupied blocks while still using mesh triangles instead of `CUBE_LIST`. The marker alpha is set explicitly for RViz2, and `demo.rviz` enables the `occupied_map` marker namespace.
+
+
+Occupied map mesh parameters:
 
 ```yaml
-esdf_map.final_map_rebuild_inflation_from_occupancy: false
+esdf_map.occupied_map_mesh_resolution: 0.30
+esdf_map.occupied_map_mesh_max_height_gap: 0.60
 ```
-
-because VO sparse points are directly written into `occupancy_buffer_inflate_`. For depth/raycast
-input, it can be set to `true` if you want to rebuild the inflated map from the raw occupancy buffer.

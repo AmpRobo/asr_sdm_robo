@@ -2,13 +2,14 @@
 <package format="3">
   <name>asr_sdm_guidance_planner</name>
   <version>0.1.0</version>
-  <description>ROS 2 3D A* + L-BFGS trajectory planner over a fixed inflated ESDF/occupancy map.</description>
+  <description>ROS 2 3D A* + sphere corridor + L-BFGS waypoint planner over fixed inflated occupancy and external ESDF maps.</description>
   <maintainer email="carveyrtrail@163.com">Willianms</maintainer>
   <license>MIT</license>
 
   <buildtool_depend>ament_cmake</buildtool_depend>
 
   <depend>rclcpp</depend>
+  <depend>ament_index_cpp</depend>
   <depend>geometry_msgs</depend>
   <depend>nav_msgs</depend>
   <depend>sensor_msgs</depend>
@@ -16,6 +17,7 @@
   <depend>pcl_conversions</depend>
   <depend>asr_sdm_lbfgs_solver</depend>
   <depend>eigen</depend>
+  <exec_depend>rviz2</exec_depend>
 
 
   <test_depend>ament_lint_auto</test_depend>

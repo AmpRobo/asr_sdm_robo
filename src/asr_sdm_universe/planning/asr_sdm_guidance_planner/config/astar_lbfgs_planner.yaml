@@ -1,15 +1,45 @@
-astar_lbfgs_trajectory_planner:
+astar_lbfgs_path_planner:
   ros__parameters:
     frame_id: "world"
 
-    topics.map: "/esdf_map/occupancy_inflate"
+    topics.occupancy_map: "/esdf_map/occupancy_inflate"
+    topics.esdf_map: "/esdf_map/esdf_distance"
     topics.clicked_point: "/clicked_point"
     topics.start_point: "/planning/start"
     topics.goal_point: "/planning/goal"
     topics.initialpose: "/initialpose"
     topics.goal_pose: "/goal_pose"
+    topics.waypoints: "/planning/waypoints"
 
-    # Keep these consistent with asr_sdm_esdf_map/config/esdf_map_config.yaml.
+    # Default: use offline binary map files in this package's installed share/maps directory.
+    # Put occupancy.bin and esdf.bin into asr_sdm_guidance_planner/maps/ before building/installing.
+    # Set map.source to "topic" to subscribe to both live map topics instead.
+    map.source: "binary"
+    binary_map.directory: "maps"
+    binary_map.occupancy_filename: "occupancy.bin"
+    binary_map.esdf_filename: "esdf.bin"
+    binary_map.fallback_to_topic: true
+    # Keep fixed map origin/size by default so the mesh blocks align exactly with asr_sdm_esdf_map.
+    # Set true only if your bin files use different map bounds and you accept different RViz mesh alignment.
+    binary_map.auto_bounds: false
+    binary_map.auto_bounds_padding: 1.0
+
+    # Publish a cube-shaped mesh Marker from the loaded/planner occupancy map for RViz2.
+    visualization.publish_occupied_map: true
+    visualization.occupied_map_topic: "/esdf_map/occupied_map"
+    visualization.occupied_map_alpha: 0.85
+    visualization.occupied_map_stride: 1
+    visualization.occupied_map_mesh_resolution: 0.30
+    # Kept for parameter consistency with asr_sdm_esdf_map; current mesh face generation does not need it.
+    visualization.occupied_map_mesh_max_height_gap: 0.60
+    # These two values must match asr_sdm_esdf_map to make /esdf_map/occupied_map render identically.
+    visualization.ground_height: -1.0
+    visualization.visualization_truncate_height: 3.0
+    visualization.occupied_map_publish_period_sec: 2.0
+    visualization.corridor_marker_topic: "/planning/safe_corridor"
+    visualization.corridor_marker_alpha: 0.1
+
+    # map.resolution must match the saved map voxel resolution. origin/size are used only when binary_map.auto_bounds is false or topic mode is used.
     map.resolution: 0.15
     map.origin_x: -10.0
     map.origin_y: -10.0
@@ -18,27 +48,46 @@ astar_lbfgs_trajectory_planner:
     map.size_y: 20.0
     map.size_z: 5.0
 
-    # /esdf_map/occupancy_inflate only contains occupied voxels.
-    # For a fixed offline map, unknown voxels are treated as free by default.
+    # occupancy_inflate contains occupied voxel centers. esdf_distance contains x/y/z/intensity, where intensity is the real ESDF distance.
     map.unknown_as_occupied: false
     map.clear_before_integrate: true
-    map.auto_compute_esdf_on_map: true
-
-    # The fixed-map publisher may repeatedly publish the same cloud.
-    # This avoids recomputing the internal ESDF every visualization cycle.
-    map.skip_repeated_map_with_same_point_count: true
+    map.skip_repeated_occupancy_with_same_point_count: true
+    map.skip_repeated_esdf_with_same_point_count: true
 
     # RViz Publish Point usually provides a z value from the clicked 3D point.
     # If you use 2D Pose Estimate / 2D Goal Pose, default_planning_z is used.
     selection.clicked_point_use_msg_z: true
     selection.default_planning_z: 0.5
     selection.use_optimized_only_if_safe: true
+    # If the raw RViz click is too close to an obstacle or outside the ESDF-safe region,
+    # automatically use the nearest point with enough ESDF clearance for corridor generation.
+    selection.project_start_goal_to_safe: true
+    selection.safe_point_search_radius: 4.0
 
     astar.heuristic_weight: 1.0
     astar.extra_clearance: 0.0
     astar.max_expansions: 300000
     astar.nearest_free_search_radius: 10
     astar.allow_diagonal: true
+
+    # Bubble-Planner-style 3D Sphere-Shaped Corridor.
+    # A* only gives guide points. Real corridor sphere centers are selected by BatchSample + score.
+    corridor.enabled: true
+    corridor.batch_sample_count: 80
+    corridor.max_spheres: 80
+    # Radius formula: r = ESDF_distance(center) - drone_radius - safety_margin.
+    # occupancy_inflate/esdf_distance are already inflated externally, so drone_radius can stay 0.0.
+    corridor.drone_radius: 0.0
+    corridor.safety_margin: 0.2
+    corridor.min_radius: 0.2
+    corridor.max_radius: 6.0
+    corridor.min_overlap_volume: 0.00001
+    corridor.radius_weight: 1.0
+    corridor.overlap_weight: 4.0
+    corridor.sample_axis_scale: 0.3333333333333333
+    corridor.sample_lateral_scale: 2.0
+    corridor.random_seed: 7
+    corridor.deterministic_sampling: true
 
     optimizer.enabled: true
     optimizer.max_iterations: 120
@@ -49,8 +98,9 @@ astar_lbfgs_trajectory_planner:
     optimizer.obstacle_weight: 12.0
     optimizer.guide_weight: 0.08
 
-    # ESDF in asr_sdm_esdf_map is already computed from inflated occupancy.
-    # Keep this small to avoid double-inflating the robot radius.
+    # The ESDF input is already computed externally from inflated occupancy.
+    # Keep this small to avoid adding too much extra clearance beyond the inflated map.
     optimizer.safe_distance: 0.20
     optimizer.validity_check_step: 0.05
     optimizer.extra_clearance: 0.0
+    optimizer.corridor_weight: 60.0

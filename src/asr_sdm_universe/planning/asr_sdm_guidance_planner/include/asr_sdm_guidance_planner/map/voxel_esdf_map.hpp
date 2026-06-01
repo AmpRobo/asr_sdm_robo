@@ -1,5 +1,5 @@
-#ifndef ASR_SDM_TRAJECTORY_PLANNER_MAP_VOXEL_ESDF_MAP_HPP_
-#define ASR_SDM_TRAJECTORY_PLANNER_MAP_VOXEL_ESDF_MAP_HPP_
+#ifndef ASR_SDM_GUIDANCE_PLANNER_MAP_VOXEL_ESDF_MAP_HPP_
+#define ASR_SDM_GUIDANCE_PLANNER_MAP_VOXEL_ESDF_MAP_HPP_
 
 #include <asr_sdm_guidance_planner/common/types.hpp>
 
@@ -7,8 +7,6 @@
 #include <pcl/point_cloud.h>
 #include <pcl/point_types.h>
 
-#include <limits>
-#include <string>
 #include <vector>
 
 namespace asr_sdm_guidance_planner
@@ -30,11 +28,13 @@ public:
 
   void reset(const VoxelMapOptions & options);
   void clearOccupancy();
+  void clearEsdf();
   void integrateOccupiedCloud(const pcl::PointCloud<pcl::PointXYZ> & cloud);
-  void computeEsdf();
+  void integrateEsdfCloud(const pcl::PointCloud<pcl::PointXYZI> & cloud);
 
-  bool isReady() const { return initialized_ && has_occupancy_input_; }
-  bool hasEsdf() const { return has_esdf_; }
+  bool isReady() const { return initialized_ && has_occupancy_input_ && has_esdf_; }
+  bool hasOccupancy() const { return initialized_ && has_occupancy_input_; }
+  bool hasEsdf() const { return initialized_ && has_esdf_; }
 
   bool isInMap(const Eigen::Vector3d & position) const;
   bool isInMap(const GridIndex & index) const;
@@ -66,6 +66,8 @@ public:
   int voxelCount() const { return voxel_count_; }
   int occupiedCount() const { return occupied_count_; }
   int inputPointCount() const { return input_point_count_; }
+  int esdfInputPointCount() const { return esdf_input_point_count_; }
+  int esdfVoxelCount() const { return esdf_voxel_count_; }
 
 private:
   VoxelMapOptions options_;
@@ -73,16 +75,16 @@ private:
   int voxel_count_ = 0;
   int occupied_count_ = 0;
   int input_point_count_ = 0;
+  int esdf_input_point_count_ = 0;
+  int esdf_voxel_count_ = 0;
   bool initialized_ = false;
   bool has_occupancy_input_ = false;
   bool has_esdf_ = false;
 
   std::vector<unsigned char> occupied_;
   std::vector<double> distance_;
-
-  double distanceByAddress(int address) const;
 };
 
 }  // namespace asr_sdm_guidance_planner
 
-#endif  // ASR_SDM_TRAJECTORY_PLANNER_MAP_VOXEL_ESDF_MAP_HPP_
+#endif  // ASR_SDM_GUIDANCE_PLANNER_MAP_VOXEL_ESDF_MAP_HPP_

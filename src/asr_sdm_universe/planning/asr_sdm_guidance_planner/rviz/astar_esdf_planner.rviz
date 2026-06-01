@@ -1,17 +1,28 @@
 Panels:
   - Class: rviz_common/Displays
     Name: Displays
+  - Class: rviz_common/Selection
+    Name: Selection
 Visualization Manager:
   Class: ""
+  Global Options:
+    Background Color: 48; 48; 48
+    Fixed Frame: world
+    Frame Rate: 30
   Displays:
     - Class: rviz_default_plugins/Grid
       Enabled: true
       Name: Grid
+      Plane: XY
+      Cell Size: 1
+      Color: 160; 160; 164
     - Class: rviz_default_plugins/Marker
       Enabled: true
-      Name: occupied_map_3d
+      Name: occupied_map
       Topic:
-        Value: /esdf_map/occupied_map_3d
+        Value: /esdf_map/occupied_map
+        Reliability Policy: Reliable
+        Durability Policy: Transient Local
     - Class: rviz_default_plugins/Marker
       Enabled: true
       Name: astar_path_marker
@@ -19,12 +30,46 @@ Visualization Manager:
         Value: /planning/astar_path_marker
     - Class: rviz_default_plugins/Marker
       Enabled: true
-      Name: trajectory_marker
+      Name: path_marker
       Topic:
-        Value: /planning/trajectory_marker
+        Value: /planning/path_marker
     - Class: rviz_default_plugins/Marker
       Enabled: true
       Name: start_goal_marker
       Topic:
         Value: /planning/start_goal_marker
-  Fixed Frame: world
+    - Class: rviz_default_plugins/MarkerArray
+      Enabled: true
+      Name: safe_corridor_spheres
+      Topic:
+        Value: /planning/safe_corridor
+    - Class: rviz_default_plugins/Path
+      Enabled: true
+      Name: astar_path
+      Topic:
+        Value: /planning/astar_path
+    - Class: rviz_default_plugins/Path
+      Enabled: true
+      Name: path
+      Topic:
+        Value: /planning/path
+    - Class: rviz_default_plugins/Path
+      Enabled: true
+      Name: optimized_waypoints
+      Topic:
+        Value: /planning/waypoints
+  Tools:
+    - Class: rviz_default_plugins/Interact
+    - Class: rviz_default_plugins/MoveCamera
+    - Class: rviz_default_plugins/Select
+    - Class: rviz_default_plugins/Measure
+    - Class: rviz_default_plugins/SetInitialPose
+      Topic:
+        Value: /initialpose
+    - Class: rviz_default_plugins/SetGoal
+      Topic:
+        Value: /goal_pose
+    - Class: rviz_default_plugins/PublishPoint
+      Single click: true
+      Topic:
+        Value: /clicked_point

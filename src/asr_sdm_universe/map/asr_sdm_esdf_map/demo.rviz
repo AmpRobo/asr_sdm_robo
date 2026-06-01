@@ -78,17 +78,17 @@ Visualization Manager:
       Size (Pixels): 3
       Size (m): 0.0500000007
       Style: Squares
-      Topic: /asr_sdm_esdf_map/ESDFMap/occ_pc
+      Topic: /esdf_map/cloud
       Unreliable: false
       Use Fixed Frame: true
       Use rainbow: true
       Value: true
     - Class: rviz_default_plugins/Marker
       Enabled: true
-      Marker Topic: /asr_sdm_esdf_map/ESDFMap/slice
+      Marker Topic: /esdf_map/occupied_map
       Name: Marker
       Namespaces:
-        "": true
+        occupied_map: true
       Queue Size: 100
       Value: true
   Enabled: true

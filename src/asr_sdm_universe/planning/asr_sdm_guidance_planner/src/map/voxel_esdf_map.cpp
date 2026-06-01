@@ -3,8 +3,6 @@
 #include <algorithm>
 #include <cmath>
 #include <limits>
-#include <queue>
-#include <tuple>
 
 namespace asr_sdm_guidance_planner
 {
@@ -29,6 +27,8 @@ void VoxelEsdfMap::reset(const VoxelMapOptions & options)
 
   occupied_count_ = 0;
   input_point_count_ = 0;
+  esdf_input_point_count_ = 0;
+  esdf_voxel_count_ = 0;
   initialized_ = true;
   has_occupancy_input_ = false;
   has_esdf_ = false;
@@ -37,10 +37,16 @@ void VoxelEsdfMap::reset(const VoxelMapOptions & options)
 void VoxelEsdfMap::clearOccupancy()
 {
   std::fill(occupied_.begin(), occupied_.end(), 0);
-  std::fill(distance_.begin(), distance_.end(), kInf);
   occupied_count_ = 0;
   input_point_count_ = 0;
   has_occupancy_input_ = false;
+}
+
+void VoxelEsdfMap::clearEsdf()
+{
+  std::fill(distance_.begin(), distance_.end(), kInf);
+  esdf_input_point_count_ = 0;
+  esdf_voxel_count_ = 0;
   has_esdf_ = false;
 }
 
@@ -74,77 +80,40 @@ void VoxelEsdfMap::integrateOccupiedCloud(const pcl::PointCloud<pcl::PointXYZ> &
   }
 
   has_occupancy_input_ = true;
-  has_esdf_ = false;
 }
 
-void VoxelEsdfMap::computeEsdf()
+void VoxelEsdfMap::integrateEsdfCloud(const pcl::PointCloud<pcl::PointXYZI> & cloud)
 {
   if (!initialized_) {
-    return;
+    reset(options_);
   }
 
-  std::fill(distance_.begin(), distance_.end(), kInf);
-
-  using QueueItem = std::pair<double, int>;
-  std::priority_queue<QueueItem, std::vector<QueueItem>, std::greater<QueueItem>> open;
-
-  for (int address = 0; address < voxel_count_; ++address) {
-    if (occupied_[address]) {
-      distance_[address] = 0.0;
-      open.emplace(0.0, address);
-    }
+  if (options_.clear_before_integrate) {
+    clearEsdf();
   }
 
-  if (open.empty()) {
-    has_esdf_ = true;
-    return;
-  }
+  esdf_input_point_count_ = static_cast<int>(cloud.points.size());
 
-  std::vector<GridIndex> offsets;
-  offsets.reserve(26);
-  for (int dx = -1; dx <= 1; ++dx) {
-    for (int dy = -1; dy <= 1; ++dy) {
-      for (int dz = -1; dz <= 1; ++dz) {
-        if (dx == 0 && dy == 0 && dz == 0) {
-          continue;
-        }
-        offsets.push_back(GridIndex{dx, dy, dz});
-      }
-    }
-  }
-
-  while (!open.empty()) {
-    const auto [current_distance, address] = open.top();
-    open.pop();
-
-    if (current_distance > distance_[address] + 1.0e-12) {
+  for (const auto & point : cloud.points) {
+    if (!std::isfinite(point.x) || !std::isfinite(point.y) || !std::isfinite(point.z) ||
+        !std::isfinite(point.intensity))
+    {
       continue;
     }
 
-    GridIndex current;
-    if (!addressToIndex(address, current)) {
+    GridIndex index;
+    if (!worldToIndex(Eigen::Vector3d(point.x, point.y, point.z), index)) {
       continue;
     }
 
-    for (const auto & offset : offsets) {
-      GridIndex next{current.x + offset.x, current.y + offset.y, current.z + offset.z};
-      if (!isInMap(next)) {
-        continue;
-      }
-
-      const int next_address = toAddress(next);
-      const double step_cost = options_.resolution *
-        std::sqrt(static_cast<double>(offset.x * offset.x + offset.y * offset.y + offset.z * offset.z));
-      const double tentative = current_distance + step_cost;
-
-      if (tentative + 1.0e-12 < distance_[next_address]) {
-        distance_[next_address] = tentative;
-        open.emplace(tentative, next_address);
-      }
+    const int address = toAddress(index);
+    if (!std::isfinite(distance_[address])) {
+      ++esdf_voxel_count_;
     }
+    distance_[address] = static_cast<double>(point.intensity);
   }
 
-  has_esdf_ = true;
+  has_esdf_ = esdf_voxel_count_ > 0;
 }
 
 bool VoxelEsdfMap::isInMap(const Eigen::Vector3d & position) const
@@ -374,14 +343,6 @@ Eigen::Vector3d VoxelEsdfMap::gradient(const Eigen::Vector3d & position) const
     return Eigen::Vector3d::Zero();
   }
   return grad.normalized();
-}
-
-double VoxelEsdfMap::distanceByAddress(int address) const
-{
-  if (address < 0 || address >= voxel_count_) {
-    return options_.unknown_as_occupied ? 0.0 : kInf;
-  }
-  return distance_[address];
 }
 
 }  // namespace asr_sdm_guidance_planner

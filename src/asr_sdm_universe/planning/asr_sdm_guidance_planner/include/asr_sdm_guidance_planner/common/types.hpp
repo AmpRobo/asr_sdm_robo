@@ -1,5 +1,5 @@
-#ifndef ASR_SDM_TRAJECTORY_PLANNER_COMMON_TYPES_HPP_
-#define ASR_SDM_TRAJECTORY_PLANNER_COMMON_TYPES_HPP_
+#ifndef ASR_SDM_GUIDANCE_PLANNER_COMMON_TYPES_HPP_
+#define ASR_SDM_GUIDANCE_PLANNER_COMMON_TYPES_HPP_
 
 #include <Eigen/Core>
 
@@ -24,13 +24,10 @@ struct GridIndex
 struct PlanResult
 {
   bool success = false;
-  bool optimized = false;
-  bool optimized_path_safe = false;
   std::string message;
   std::vector<Eigen::Vector3d> raw_path;
-  std::vector<Eigen::Vector3d> trajectory;
 };
 
 }  // namespace asr_sdm_guidance_planner
 
-#endif  // ASR_SDM_TRAJECTORY_PLANNER_COMMON_TYPES_HPP_
+#endif  // ASR_SDM_GUIDANCE_PLANNER_COMMON_TYPES_HPP_

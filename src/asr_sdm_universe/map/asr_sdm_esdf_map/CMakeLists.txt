@@ -25,6 +25,7 @@ find_package(rclcpp REQUIRED)
 find_package(sensor_msgs REQUIRED)
 find_package(geometry_msgs REQUIRED)
 find_package(nav_msgs REQUIRED)
+find_package(std_msgs REQUIRED)
 find_package(visualization_msgs REQUIRED)
 find_package(cv_bridge REQUIRED)
 find_package(message_filters REQUIRED)
@@ -53,6 +54,7 @@ ament_target_dependencies(asr_sdm_esdf_map
   sensor_msgs
   geometry_msgs
   nav_msgs
+  std_msgs
   visualization_msgs
   cv_bridge
   message_filters
@@ -124,6 +126,7 @@ ament_export_dependencies(
   sensor_msgs
   geometry_msgs
   nav_msgs
+  std_msgs
   visualization_msgs
   cv_bridge
   message_filters

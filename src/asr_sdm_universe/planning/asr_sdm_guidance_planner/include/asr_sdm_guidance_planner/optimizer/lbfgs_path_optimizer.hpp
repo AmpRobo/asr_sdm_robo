@@ -1,7 +1,8 @@
-#ifndef ASR_SDM_TRAJECTORY_PLANNER_OPTIMIZER_LBFGS_PATH_OPTIMIZER_HPP_
-#define ASR_SDM_TRAJECTORY_PLANNER_OPTIMIZER_LBFGS_PATH_OPTIMIZER_HPP_
+#ifndef ASR_SDM_GUIDANCE_PLANNER_OPTIMIZER_LBFGS_PATH_OPTIMIZER_HPP_
+#define ASR_SDM_GUIDANCE_PLANNER_OPTIMIZER_LBFGS_PATH_OPTIMIZER_HPP_
 
 #include <asr_sdm_guidance_planner/map/voxel_esdf_map.hpp>
+#include <asr_sdm_guidance_planner/planner/sphere_corridor.hpp>
 
 #include <Eigen/Core>
 
@@ -24,6 +25,7 @@ struct LbfgsPathOptimizerOptions
   double safe_distance = 0.20;
   double validity_check_step = 0.05;
   double extra_clearance = 0.0;
+  double corridor_weight = 60.0;
 };
 
 struct OptimizerResult
@@ -42,7 +44,10 @@ public:
   void setOptions(const LbfgsPathOptimizerOptions & options) { options_ = options; }
   const LbfgsPathOptimizerOptions & options() const { return options_; }
 
-  OptimizerResult optimize(const std::vector<Eigen::Vector3d> & raw_path, const VoxelEsdfMap & map) const;
+  OptimizerResult optimize(
+    const std::vector<Eigen::Vector3d> & raw_path,
+    const VoxelEsdfMap & map,
+    const std::vector<CorridorSphere> * corridor = nullptr) const;
 
 private:
   LbfgsPathOptimizerOptions options_;
@@ -52,4 +57,4 @@ private:
 
 }  // namespace asr_sdm_guidance_planner
 
-#endif  // ASR_SDM_TRAJECTORY_PLANNER_OPTIMIZER_LBFGS_PATH_OPTIMIZER_HPP_
+#endif  // ASR_SDM_GUIDANCE_PLANNER_OPTIMIZER_LBFGS_PATH_OPTIMIZER_HPP_

@@ -191,8 +191,6 @@ PlanResult Astar3dPlanner::plan(
   }
 
   result.success = true;
-  result.trajectory = result.raw_path;
-
   std::ostringstream oss;
   oss << "A* success: " << result.raw_path.size() << " points, " << expansions << " expansions";
   result.message = oss.str();
