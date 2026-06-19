@@ -62,3 +62,6 @@ docs/vins_dataflow_analysis.md
 docs/svo_euroc_debug.md
 d435i_sparse1.csv
 d435i_original.csv
+
+# W2 D435i bag (4.1GB — keep on local disk, don't push)
+/datasheet/d435if_20260530_080612_resized/*.mcap
