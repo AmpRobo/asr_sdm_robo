@@ -23,6 +23,12 @@ std::string IMU_TOPIC;
 double ROW, COL;
 double TD, TR;
 
+// W3: sparse rotation prior parameters
+int    USE_SPARSE_R_PRIOR = 0;
+double SPARSE_R_LAMBDA    = 0.1;
+double SPARSE_R_CHI2_GATE  = 50.0;
+double SPARSE_R_ANGLE_GATE = 0.0872665;   // 5 deg default
+
 template <typename T>
 T readParam(rclcpp::Node::SharedPtr n, std::string name)
 {
@@ -132,6 +138,24 @@ void readParameters(rclcpp::Node::SharedPtr n)
     {
         TR = 0;
     }
-    
+
+    // W3: sparse rotation prior (optional, default 0/disabled)
+    if (fsSettings["use_sparse_r_prior"].empty())
+        USE_SPARSE_R_PRIOR = 0;
+    else
+    {
+        fsSettings["use_sparse_r_prior"] >> USE_SPARSE_R_PRIOR;
+        if (USE_SPARSE_R_PRIOR)
+        {
+            fsSettings["sparse_r_lambda"] >> SPARSE_R_LAMBDA;
+            fsSettings["sparse_r_chi2_gate"] >> SPARSE_R_CHI2_GATE;
+            fsSettings["sparse_r_angle_gate"] >> SPARSE_R_ANGLE_GATE;
+            RCLCPP_INFO(n->get_logger(),
+                        "Sparse rotation prior ENABLED: lambda=%.3f chi2_gate=%.1f angle_gate=%.2f deg",
+                        SPARSE_R_LAMBDA, SPARSE_R_CHI2_GATE,
+                        SPARSE_R_ANGLE_GATE * 180.0 / M_PI);
+        }
+    }
+
     fsSettings.release();
 }

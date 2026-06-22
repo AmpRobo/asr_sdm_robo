@@ -39,6 +39,12 @@ extern int ESTIMATE_TD;
 extern int ROLLING_SHUTTER;
 extern double ROW, COL;
 
+// W3: sparse rotation prior (sparse photometric alignment -> VINS BA)
+extern int    USE_SPARSE_R_PRIOR;
+extern double SPARSE_R_LAMBDA;
+extern double SPARSE_R_CHI2_GATE;
+extern double SPARSE_R_ANGLE_GATE;   // radians
+
 
 void readParameters(rclcpp::Node::SharedPtr n);
 

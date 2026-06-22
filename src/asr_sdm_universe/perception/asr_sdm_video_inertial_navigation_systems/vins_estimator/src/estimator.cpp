@@ -10,9 +10,23 @@ double            Estimator::latest_sparse_n_meas_ = 0.0;
 bool              Estimator::have_sparse_R_ = false;
 int               Estimator::n_sparse_stat_ = 0;
 
+// W3: per-frame sparse R ring buffer
+Eigen::Matrix3d   Estimator::sparse_R_buf_[(WINDOW_SIZE + 1)];
+double            Estimator::sparse_t_buf_[(WINDOW_SIZE + 1)];
+double            Estimator::sparse_chi2_buf_[(WINDOW_SIZE + 1)];
+bool              Estimator::have_sparse_R_buf_[(WINDOW_SIZE + 1)];
+
 Estimator::Estimator(): f_manager{Rs}
 {
     RCUTILS_LOG_INFO("init begins");
+    // W3: initialise sparse R ring buffer
+    for (int i = 0; i <= WINDOW_SIZE; ++i)
+    {
+        sparse_R_buf_[i] = Eigen::Matrix3d::Identity();
+        sparse_t_buf_[i] = 0.0;
+        sparse_chi2_buf_[i] = 0.0;
+        have_sparse_R_buf_[i] = false;
+    }
     clearState();
 }
 
@@ -45,6 +59,11 @@ void Estimator::clearState()
         if (pre_integrations[i] != nullptr)
             delete pre_integrations[i];
         pre_integrations[i] = nullptr;
+        // W3: reset sparse R ring buffer
+        sparse_R_buf_[i].setIdentity();
+        sparse_t_buf_[i] = 0.0;
+        sparse_chi2_buf_[i] = 0.0;
+        have_sparse_R_buf_[i] = false;
     }
 
     for (int i = 0; i < NUM_OF_CAM; i++)
@@ -160,6 +179,13 @@ void Estimator::processImage(const map<int, vector<pair<int, Eigen::Matrix<doubl
                     frame_count, angle_deg,
                     latest_sparse_chi2_, latest_sparse_n_meas_);
             }
+        }
+        // W3: cache per-frame sparse R for use in optimization()
+        if (frame_count <= WINDOW_SIZE) {
+            sparse_R_buf_[frame_count] = latest_sparse_R_;
+            sparse_t_buf_[frame_count] = latest_sparse_t_;
+            sparse_chi2_buf_[frame_count] = latest_sparse_chi2_;
+            have_sparse_R_buf_[frame_count] = have_sparse_R_;
         }
     }
 
@@ -799,6 +825,41 @@ void Estimator::optimization()
     RCUTILS_LOG_DEBUG("visual measurement count: %d", f_m_cnt);
     RCUTILS_LOG_DEBUG("prepare for ceres: %f", t_prepare.toc());
 
+    // W3: add sparse rotation prior factors for consecutive frame pairs
+    // that have a cached sparse R (written by processImage()).
+    // One factor per consecutive pair (k-1, k) in the window.
+    int n_sparse_factors = 0;
+    if (USE_SPARSE_R_PRIOR)
+    {
+        for (int k = 1; k <= frame_count; ++k)
+        {
+            if (!have_sparse_R_buf_[k])
+                continue;
+            Eigen::Matrix3d R_sparse = sparse_R_buf_[k];
+            double chi2 = sparse_chi2_buf_[k];
+            // W3.4: discard if chi2 or angle is out of gate
+            if (chi2 > SPARSE_R_CHI2_GATE)
+                continue;
+            // Angle between sparse and IMU: use R_imu for gate only
+            if (SPARSE_R_ANGLE_GATE > 0 && pre_integrations[k] != nullptr)
+            {
+                Eigen::Matrix3d R_imu = pre_integrations[k]->delta_q.toRotationMatrix();
+                Eigen::Matrix3d R_diff = R_sparse.transpose() * R_imu;
+                Eigen::AngleAxisd aa(R_diff);
+                if (aa.angle() > SPARSE_R_ANGLE_GATE)
+                    continue;
+            }
+            SparseRotationFactor *f_sparse = new SparseRotationFactor(R_sparse, SPARSE_R_LAMBDA);
+            problem.AddResidualBlock(f_sparse, nullptr,
+                                     para_Pose[k - 1], para_Pose[k]);
+            ++n_sparse_factors;
+        }
+        if (n_sparse_factors > 0 || frame_count >= 1)
+        {
+            RCUTILS_LOG_INFO("[W3] sparse rotation prior: %d factors added", n_sparse_factors);
+        }
+    }
+
     if(relocalization_info)
     {
         //printf("set relocalization factor! \n");
@@ -1156,6 +1217,18 @@ void Estimator::slideWindowOld()
     }
     else
         f_manager.removeBack();
+
+    // W3: shift sparse_R_buf_[] to stay aligned with the sliding window.
+    // After marginalizing frame 0, frame k becomes frame k-1.
+    for (int k = 1; k < WINDOW_SIZE; ++k)
+    {
+        sparse_R_buf_[k - 1] = sparse_R_buf_[k];
+        sparse_t_buf_[k - 1] = sparse_t_buf_[k];
+        sparse_chi2_buf_[k - 1] = sparse_chi2_buf_[k];
+        have_sparse_R_buf_[k - 1] = have_sparse_R_buf_[k];
+    }
+    // Mark the last slot as empty (will be filled by new frame)
+    have_sparse_R_buf_[WINDOW_SIZE] = false;
 }
 
 void Estimator::setReloFrame(double _frame_stamp, int _frame_index, vector<Vector3d> &_match_points, Vector3d _relo_t, Matrix3d _relo_r)
