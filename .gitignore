@@ -41,3 +41,27 @@ build_output.log
 
 # ROS 2 bag / recorded data
 /datasheet/airground_rig_s3_ros2/
+
+# Python caches
+__pycache__/
+*.pyc
+*.pyo
+
+# Reference code (cloned, not part of VINS changes)
+src/asr_sdm_universe/perception/asr_sdm_video_inertial_odometry/svo_vio_backend/
+src/asr_sdm_universe/perception/asr_sdm_video_inertial_odometry/asr_sdm_svo/svo/include/svo/vins_backend/
+src/asr_sdm_universe/perception/asr_sdm_video_inertial_navigation_systems/rpg_svo_pro_open/
+
+# Test build directory
+src/asr_sdm_universe/perception/asr_sdm_video_inertial_navigation_systems/feature_tracker/test/build/
+
+# Local development / debugging artifacts
+output_compare/
+docs/svo_vio_dataflow_analysis.md
+docs/vins_dataflow_analysis.md
+docs/svo_euroc_debug.md
+d435i_sparse1.csv
+d435i_original.csv
+
+# W2 D435i bag (4.1GB — keep on local disk, don't push)
+/datasheet/d435if_20260530_080612_resized/*.mcap

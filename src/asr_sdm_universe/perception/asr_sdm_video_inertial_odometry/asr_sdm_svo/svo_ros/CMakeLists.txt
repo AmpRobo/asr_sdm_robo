@@ -30,6 +30,7 @@ find_package(svo REQUIRED)
 find_package(asr_sdm_perception_msgs REQUIRED)
 find_package(vikit_common REQUIRED)
 find_package(vikit_ros REQUIRED)
+find_package(svo_vio_backend REQUIRED)
 
 find_package(OpenCV REQUIRED)
 find_package(Eigen3 REQUIRED)
@@ -76,7 +77,7 @@ ament_target_dependencies(svo_visualizer PUBLIC
 
 # Create Executables
 add_executable(vo src/vo_node.cpp)
-target_link_libraries(vo svo_visualizer)
+target_link_libraries(vo svo_visualizer svo_vio_backend::svo_vio_backend)
 ament_target_dependencies(vo
   rclcpp
   sensor_msgs

@@ -490,16 +490,20 @@ int main(int argc, char **argv)
     {
         ROW = fsSettings["image_height"];
         COL = fsSettings["image_width"];
-        // std::string pkg_path = ament_index_cpp::get_package_share_directory("pose_graph");
-        std::string support_path = fsSettings["support_path"];
         n->declare_parameter<std::string>("support_file", "");
+        std::string support_path;
         n->get_parameter("support_file", support_path);
-        string vocabulary_file = support_path + "/../support_files/brief_k10L6.bin";
+        if (support_path.empty()) {
+            // Fall back to ament index lookup if launch didn't pass the param.
+            const std::string pkg_path = ament_index_cpp::get_package_share_directory("config_pkg");
+            support_path = pkg_path + "/support_files";
+        }
+        string vocabulary_file = support_path + "/brief_k10L6.bin";
         cout << "vocabulary_file: " << vocabulary_file << endl;
         posegraph.loadVocabulary(vocabulary_file);
 
-        BRIEF_PATTERN_FILE = support_path + "/../support_files/brief_pattern.yml";
-        cout << "BRIEF_PATTERN_FILE" << BRIEF_PATTERN_FILE << endl;
+        BRIEF_PATTERN_FILE = support_path + "/brief_pattern.yml";
+        cout << "BRIEF_PATTERN_FILE: " << BRIEF_PATTERN_FILE << endl;
         m_camera = camodocal::CameraFactory::instance()->generateCameraFromYamlFile(config_file.c_str());
 
         fsSettings["image_topic"] >> IMAGE_TOPIC;        

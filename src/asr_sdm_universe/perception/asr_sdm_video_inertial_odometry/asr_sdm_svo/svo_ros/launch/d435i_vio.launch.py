@@ -103,6 +103,26 @@ def generate_launch_description():
         default_value='1',
         description='IMU preprocessing: 0=none, 1=collect+calibrate, 2=use calibration')
 
+    # Phase 2: VINS-compatible feature cloud (SVO -> vins_estimator)
+    publish_vins_features_arg = DeclareLaunchArgument(
+        'publish_vins_features',
+        default_value='true',
+        description='Emit sensor_msgs/PointCloud on vins_feature_topic for '
+                    'vins_estimator to consume (replaces svo_vio_backend)')
+    vins_feature_topic_arg = DeclareLaunchArgument(
+        'vins_feature_topic',
+        default_value='/feature_tracker/feature',
+        description='Topic name for VINS-compatible feature cloud '
+                    '(default matches what stock vins_estimator subscribes to)')
+    enable_vins_estimator_arg = DeclareLaunchArgument(
+        'enable_vins_estimator',
+        default_value='true',
+        description='Spawn stock vins_estimator node (Phase 2 VIO back-end)')
+    enable_vio_backend_arg = DeclareLaunchArgument(
+        'enable_vio_backend',
+        default_value='false',
+        description='Old in-house svo_vio_backend (Phase 1, kept for A/B testing)')
+
     # SVO VIO node
     # Loads d435i_camera.yaml which includes:
     #   - Camera intrinsics (Pinhole, 640x480, D435i RGB params)
@@ -159,6 +179,13 @@ def generate_launch_description():
                 # VIO: IMU preprocessing
                 'imu_preprocessing_mode': LaunchConfiguration('imu_preprocessing_mode'),
 
+                # VINS-compatible feature cloud (Phase 2: SVO→vins_estimator)
+                'publish_vins_features': LaunchConfiguration('publish_vins_features'),
+                'vins_feature_topic': LaunchConfiguration('vins_feature_topic'),
+
+                # Disable the old in-house svo_vio_backend (replaced by vins_estimator)
+                'enable_vio_backend': LaunchConfiguration('enable_vio_backend'),
+
                 # Visualization
                 'enable_visualization': True,
                 'publish_markers': True,
@@ -168,6 +195,44 @@ def generate_launch_description():
                 'publish_map_every_frame': False,
             },
         ],
+    )
+
+    # ====================================================================
+    # Stock VINS estimator (Phase 2: replaces svo_vio_backend)
+    # ====================================================================
+    # The SVO node above emits a VINS-compatible feature cloud on
+    # `vins_feature_topic` (default `/feature_tracker/feature`). This
+    # stock `vins_estimator` consumes it and runs the well-tested
+    # VINS sliding-window Ceres back-end.
+    #
+    # IMU topic is the same as SVO's. Camera intrinsics + IMU extrinsics
+    # are read from `realsense_d435i_config.yaml` (VINS config) which is
+    # already kept consistent with SVO's `d435i_camera.yaml`.
+    config_pkg_path = os.path.join(
+        os.path.dirname(get_package_share_directory('svo_ros')),
+        '..', '..', '..', '..', 'asr_sdm_universe', 'perception',
+        'asr_sdm_video_inertial_navigation_systems', 'config_pkg')
+    # Fallback: derive from get_package_share_directory of config_pkg directly
+    try:
+        config_pkg_share = get_package_share_directory('config_pkg')
+    except Exception:
+        config_pkg_share = config_pkg_path
+    vins_config_path = os.path.join(
+        config_pkg_share, 'config', 'realsense', 'realsense_d435i_config.yaml')
+
+    vins_estimator_node = Node(
+        package='vins_estimator',
+        executable='vins_estimator',
+        name='vins_estimator',
+        namespace='vins_estimator',
+        output='screen',
+        parameters=[{
+            'config_file': vins_config_path,
+            # SVO publishes to default `/feature_tracker/feature`; we
+            # do NOT spawn the stock feature_tracker node (it would
+            # compete with SVO for the image stream).
+        }],
+        condition=IfCondition(LaunchConfiguration('enable_vins_estimator')),
     )
 
     # RViz2 config path
@@ -230,6 +295,10 @@ def generate_launch_description():
         pose_optim_prior_lambda_trans_arg,
         zero_motion_accel_std_thresh_arg,
         imu_preprocessing_mode_arg,
+        publish_vins_features_arg,
+        vins_feature_topic_arg,
+        enable_vins_estimator_arg,
+        enable_vio_backend_arg,
 
         # Environment (RViz software rendering)
         env_libgl,
@@ -237,11 +306,11 @@ def generate_launch_description():
         env_gl_version,
         env_qt_gl,
 
-        # Nodes: VIO node + RViz + TF
-        # Note: No camera/imu republisher nodes — D435i bag publishes directly
-        # to /sensing/camera/realsense/color/image_raw and
-        # /sensing/camera/realsense/imu
+        # Nodes: SVO front-end (publishes VINS features) + VINS back-end
+        # Note: stock feature_tracker node is NOT spawned — SVO publishes
+        # the VINS-compatible feature cloud itself.
         svo_node,
+        vins_estimator_node,
         world_to_cam_tf,
         rviz_node,
     ])

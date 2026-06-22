@@ -18,6 +18,7 @@
 #include "factor/projection_factor.h"
 #include "factor/projection_td_factor.h"
 #include "factor/marginalization_factor.h"
+#include "factor/sparse_rotation_factor.h"
 
 #include <unordered_map>
 #include <queue>
@@ -137,4 +138,23 @@ class Estimator
     Vector3d relo_relative_t;
     Quaterniond relo_relative_q;
     double relo_relative_yaw;
+
+    // D2.1: sparse rotation result received from feature_tracker.
+    // Written by estimator_node.cpp (sparse_rot_callback).
+    // Read in processImage() to log angle residual vs IMU R.
+    static Eigen::Matrix3d latest_sparse_R_;
+    static double            latest_sparse_t_;
+    static double            latest_sparse_chi2_;
+    static double            latest_sparse_n_meas_;
+    static bool              have_sparse_R_;
+    static int               n_sparse_stat_;
+
+    // W3: per-frame sparse R ring buffer — stores R(k,k-1) for each
+    // frame that enters the sliding window so optimization() can build
+    // the factor from the cached R at known timestamps.
+    // Headers[k] holds the timestamp of frame k in the window.
+    static Eigen::Matrix3d   sparse_R_buf_[(WINDOW_SIZE + 1)];
+    static double            sparse_t_buf_[(WINDOW_SIZE + 1)];
+    static double            sparse_chi2_buf_[(WINDOW_SIZE + 1)];
+    static bool              have_sparse_R_buf_[(WINDOW_SIZE + 1)];
 };
