@@ -18,6 +18,7 @@ find_package(tf2_ros REQUIRED)
 find_package(camera_model REQUIRED)
 find_package(image_transport REQUIRED)
 find_package(ament_index_cpp REQUIRED)
+find_package(asr_sdm_perception_msgs REQUIRED)
 
 find_package(OpenCV 4 REQUIRED)
 find_package(Ceres REQUIRED)
@@ -46,7 +47,7 @@ add_executable(pose_graph
     src/ThirdParty/VocabularyBinary.cpp
     )
 
-ament_target_dependencies(pose_graph rclcpp rcpputils std_msgs sensor_msgs visualization_msgs geometry_msgs nav_msgs tf2 tf2_ros cv_bridge camera_model image_transport ament_index_cpp)
+ament_target_dependencies(pose_graph rclcpp rcpputils std_msgs sensor_msgs visualization_msgs geometry_msgs nav_msgs tf2 tf2_ros cv_bridge camera_model image_transport ament_index_cpp asr_sdm_perception_msgs)
 
 target_link_libraries(pose_graph ${OpenCV_LIBS} ${CERES_LIBRARIES}) 
 

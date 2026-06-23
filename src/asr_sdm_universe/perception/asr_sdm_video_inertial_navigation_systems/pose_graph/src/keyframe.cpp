@@ -35,6 +35,7 @@ KeyFrame::KeyFrame(double _time_stamp, int _index, Vector3d &_vio_T_w_i, Matrix3
 	has_fast_point = false;
 	loop_info << 0, 0, 0, 0, 0, 0, 0, 0;
 	sequence = _sequence;
+	has_sparse_R_ = false;
 	computeWindowBRIEFPoint();
 	computeBRIEFPoint();
 	if(!DEBUG_IMAGE)
@@ -70,6 +71,7 @@ KeyFrame::KeyFrame(double _time_stamp, int _index, Vector3d &_vio_T_w_i, Matrix3
 	keypoints = _keypoints;
 	keypoints_norm = _keypoints_norm;
 	brief_descriptors = _brief_descriptors;
+	has_sparse_R_ = false;
 }
 
 
@@ -256,6 +258,42 @@ void KeyFrame::PnPRANSAC(const vector<cv::Point2f> &matched_2d_old_norm,
 
 }
 
+
+// D2 W1: geometric consistency check using sparse_align rotation.
+//
+// Both cur_kf and old_kf may carry a sparse_align rotation (R_21 = cur_old).
+// We verify that PnP's estimate of R_old_cur is consistent with this
+// independent measurement by checking that the angular deviation is
+// below a threshold.
+//
+// R_pnp: PnP estimate of world -> old camera rotation.
+// R_cur_old_sparse: sparse_align rotation from cur -> old (camera frame).
+// Returns true if angle between PnP and sparse is < SPARSE_ANGLE_THRESH deg,
+// or if either frame lacks sparse data (pass-through).
+inline bool sparse_rotation_consistency_check(const Eigen::Matrix3d& R_pnp,
+                                              const Eigen::Matrix3d& R_cur_old_sparse,
+                                              bool has_cur_sparse, bool has_old_sparse)
+{
+    constexpr double SPARSE_ANGLE_THRESH = 20.0;  // degrees
+    constexpr double DEG_TO_RAD = M_PI / 180.0;
+
+    if (!has_cur_sparse || !has_old_sparse)
+        return true;  // no sparse data — fall back to PnP only
+
+    Eigen::Matrix3d R_pnp_old_cur = R_pnp.transpose();
+    double angle_diff = std::acos(std::min(1.0,
+        0.5 * (R_pnp_old_cur.trace() + R_cur_old_sparse.trace() - 2.0)));
+    double angle_deg = angle_diff / DEG_TO_RAD;
+
+    if (angle_deg > SPARSE_ANGLE_THRESH) {
+        printf("[SPARSE_VERIF] angle diff %.1f deg > %.0f deg -> REJECT\n",
+               angle_deg, SPARSE_ANGLE_THRESH);
+        return false;
+    }
+    printf("[SPARSE_VERIF] angle diff %.1f deg < %.0f deg -> PASS\n",
+           angle_deg, SPARSE_ANGLE_THRESH);
+    return true;
+}
 
 bool KeyFrame::findConnection(KeyFrame* old_kf)
 {
@@ -526,13 +564,30 @@ bool KeyFrame::findConnection(KeyFrame* old_kf)
 	                                 R_w_old_cam, t_w_old_cam,
 	                                 pts_w, obs_cur, obs_old,
 	                                 m_camera);
-	        geometric_ok = vr.verified;
-	        printf("[LOOP_VERIF] cur=%d old=%d tested=%d fwd_inliers=%d "
-	               "bwd_inliers=%d median=%.2fpx inlier_ratio=%.2f -> %s\n",
-	               index, old_kf->index, vr.n_tested, vr.n_inliers_forward,
-	               vr.n_inliers_backward, vr.median_residual_px,
-	               vr.inlier_ratio, vr.verified ? "PASS" : "REJECT");
-	    }
+        geometric_ok = vr.verified;
+        printf("[LOOP_VERIF] cur=%d old=%d tested=%d fwd_inliers=%d "
+               "bwd_inliers=%d median=%.2fpx inlier_ratio=%.2f -> %s\n",
+               index, old_kf->index, vr.n_tested, vr.n_inliers_forward,
+               vr.n_inliers_backward, vr.median_residual_px,
+               vr.inlier_ratio, vr.verified ? "PASS" : "REJECT");
+
+        // D2 W1: additional geometric gate using sparse_align rotation.
+        // sparse_R_ carries R between adjacent frames from feature_tracker.
+        // We check that the relative rotation implied by VIO poses is
+        // consistent with the sparse_align measurements.
+        if (geometric_ok && has_sparse_R_ && old_kf->has_sparse_R_) {
+            Eigen::Matrix3d R_old_cur_vio = old_kf->origin_vio_R.transpose() * origin_vio_R;
+            Eigen::Matrix3d R_consistency = old_kf->sparse_R_ * R_old_cur_vio;
+            double trace = R_consistency.trace();
+            double angle = std::acos(std::max(-1.0, std::min(1.0, (trace - 1.0) * 0.5)));
+            constexpr double SPARSE_ANGLE_THRESH = 25.0 * M_PI / 180.0;
+            bool sparse_ok = (angle < SPARSE_ANGLE_THRESH);
+            printf("[SPARSE_VERIF] cur=%d old=%d VIO-R-trace=%.3f angle=%.1f deg -> %s\n",
+                   index, old_kf->index, trace, angle * 180.0 / M_PI,
+                   sparse_ok ? "PASS" : "REJECT");
+            geometric_ok = geometric_ok && sparse_ok;
+        }
+    }
 
 	    if (abs(relative_yaw) < 30.0 && relative_t.norm() < 20.0 && geometric_ok)
 	    {
