@@ -100,5 +100,11 @@ public:
 	bool has_loop;
 	int loop_index;
 	Eigen::Matrix<double, 8, 1 > loop_info;
+
+	// D2 W1: sparse_align rotation for this keyframe.
+	// Populated by pose_graph_node from /feature_tracker/sparse_rot.
+	// Used in PnPRANSAC as rotation prior and in findConnection as geometric consistency check.
+	Eigen::Matrix3d sparse_R_ = Eigen::Matrix3d::Identity();
+	bool has_sparse_R_ = false;
 };
 
