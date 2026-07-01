@@ -47,14 +47,6 @@ __pycache__/
 *.pyc
 *.pyo
 
-# Reference code (cloned, not part of VINS changes)
-src/asr_sdm_universe/perception/asr_sdm_video_inertial_odometry/svo_vio_backend/
-src/asr_sdm_universe/perception/asr_sdm_video_inertial_odometry/asr_sdm_svo/svo/include/svo/vins_backend/
-src/asr_sdm_universe/perception/asr_sdm_video_inertial_navigation_systems/rpg_svo_pro_open/
-
-# Test build directory
-src/asr_sdm_universe/perception/asr_sdm_video_inertial_navigation_systems/feature_tracker/test/build/
-
 # Local development / debugging artifacts
 output_compare/
 docs/svo_vio_dataflow_analysis.md
