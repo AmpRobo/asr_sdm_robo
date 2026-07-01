@@ -21,10 +21,25 @@ find_package(ament_cmake REQUIRED)
 find_package(rclcpp REQUIRED)
 find_package(std_msgs REQUIRED)
 find_package(geometry_msgs REQUIRED)
+find_package(sensor_msgs REQUIRED)
 find_package(asr_sdm_control_msgs REQUIRED)
 find_package(asr_sdm_hardware_msgs REQUIRED)
 # find_package(periphery REQUIRED)
 find_package(Python3 REQUIRED COMPONENTS Interpreter Development NumPy)
+find_package(Matplot++ QUIET)
+if(NOT TARGET Matplot++::matplot)
+  set(MATPLOTPP_SOURCE_DIR "" CACHE PATH "Path to the Matplot++ source tree")
+  if(NOT MATPLOTPP_SOURCE_DIR)
+    message(FATAL_ERROR "Matplot++ was not found. Install Matplot++ so find_package(Matplot++) works, or configure with -DMATPLOTPP_SOURCE_DIR=/path/to/matplotplusplus.")
+  endif()
+  if(NOT EXISTS "${MATPLOTPP_SOURCE_DIR}/CMakeLists.txt")
+    message(FATAL_ERROR "MATPLOTPP_SOURCE_DIR must point to a Matplot++ source tree containing CMakeLists.txt: ${MATPLOTPP_SOURCE_DIR}")
+  endif()
+  set(MATPLOTPP_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
+  set(MATPLOTPP_BUILD_TESTS OFF CACHE BOOL "" FORCE)
+  set(MATPLOTPP_BUILD_INSTALLER OFF CACHE BOOL "" FORCE)
+  add_subdirectory("${MATPLOTPP_SOURCE_DIR}" ${CMAKE_CURRENT_BINARY_DIR}/matplotplusplus EXCLUDE_FROM_ALL)
+endif()
 # Find libgpiod
 # find_package(PkgConfig REQUIRED)
 # pkg_check_modules(GPIOD REQUIRED libgpiod)
@@ -32,13 +47,9 @@ find_package(Python3 REQUIRED COMPONENTS Interpreter Development NumPy)
 # further dependencies manually.
 # find_package(<dependency> REQUIRED)
 
-# find_library(MRAA_LIB NAMES mraa PATHS /usr/local/include)
-# find_library(PERIPHERY_LIB NAMES periphery PATHS /usr/local/include)
-
 include_directories(
   include
   # ${GPIOD_INCLUDE_DIRS}
-  /usr/local/include
 )
 
 # add_executable(mcp_can src/mcp_can.cpp)
@@ -58,7 +69,7 @@ target_link_libraries(asr_sdm_controller PUBLIC
 
 add_executable(front_unit_following_controller_test_2d
   test/front_unit_following_controller_test_2d.cpp
-  src/front_unit_following_controller.cpp
+  src/front_unit_following_controller_2d.cpp
 )
 target_link_libraries(front_unit_following_controller_test_2d PUBLIC
   Python3::Python
@@ -70,34 +81,73 @@ target_include_directories(front_unit_following_controller_test_2d PRIVATE
 # 抑制 vendored matplotlibcpp.h 中已弃用的 Python C API 警告
 target_compile_options(front_unit_following_controller_test_2d PRIVATE -Wno-deprecated-declarations)
 
-add_executable(realtime_front_unit_controller
-  src/realtime_front_unit_controller_node.cpp
-  src/front_unit_following_controller.cpp
+add_library(front_unit_following_controller_3d_core STATIC
+  src/front_unit_following_controller_3d.cpp
 )
-target_link_libraries(realtime_front_unit_controller PUBLIC
+target_include_directories(front_unit_following_controller_3d_core PUBLIC
+  ${CMAKE_CURRENT_SOURCE_DIR}/include
+)
+
+add_executable(front_unit_following_controller_test_3d
+  test/front_unit_following_controller_test_3d.cpp
+)
+target_link_libraries(front_unit_following_controller_test_3d PUBLIC
+  front_unit_following_controller_3d_core
+  Matplot++::matplot
+)
+
+add_executable(realtime_front_unit_controller_2d
+  src/realtime_front_unit_controller_2d_node.cpp
+  src/front_unit_following_controller_2d.cpp
+)
+target_link_libraries(realtime_front_unit_controller_2d PUBLIC
   ${asr_sdm_control_msgs_TARGETS}
   ${geometry_msgs_TARGETS}
   ${std_msgs_TARGETS}
   rclcpp::rclcpp
 )
 
-add_executable(realtime_controller_visualizer src/realtime_controller_visualizer_node.cpp)
-target_link_libraries(realtime_controller_visualizer PUBLIC
+add_executable(realtime_front_unit_controller_3d
+  src/realtime_front_unit_controller_3d_node.cpp
+)
+target_link_libraries(realtime_front_unit_controller_3d PUBLIC
+  front_unit_following_controller_3d_core
+  ${asr_sdm_control_msgs_TARGETS}
+  ${geometry_msgs_TARGETS}
+  ${std_msgs_TARGETS}
+  rclcpp::rclcpp
+)
+
+add_executable(realtime_controller_visualizer_2d src/realtime_controller_visualizer_2d_node.cpp)
+target_link_libraries(realtime_controller_visualizer_2d PUBLIC
   ${std_msgs_TARGETS}
   rclcpp::rclcpp
   Python3::Python
   Python3::NumPy
 )
-target_include_directories(realtime_controller_visualizer PRIVATE
+target_include_directories(realtime_controller_visualizer_2d PRIVATE
   ${CMAKE_CURRENT_SOURCE_DIR}/test
 )
-target_compile_options(realtime_controller_visualizer PRIVATE -Wno-deprecated-declarations)
+target_compile_options(realtime_controller_visualizer_2d PRIVATE -Wno-deprecated-declarations)
+
+add_executable(realtime_controller_visualizer_3d
+  src/realtime_controller_visualizer_3d_node.cpp
+)
+target_link_libraries(realtime_controller_visualizer_3d PUBLIC
+  front_unit_following_controller_3d_core
+  ${std_msgs_TARGETS}
+  rclcpp::rclcpp
+  Matplot++::matplot
+)
 
 install(TARGETS
   asr_sdm_controller
   front_unit_following_controller_test_2d
-  realtime_front_unit_controller
-  realtime_controller_visualizer
+  front_unit_following_controller_test_3d
+  realtime_front_unit_controller_2d
+  realtime_front_unit_controller_3d
+  realtime_controller_visualizer_2d
+  realtime_controller_visualizer_3d
   DESTINATION lib/${PROJECT_NAME}
 )
 

@@ -16,8 +16,7 @@ find_package(asr_sdm_control_msgs REQUIRED)
 # ament_auto_add_executable(asr_sdm_hardware_node src/asr_sdm_hardware_node.cpp src/uart2can.cpp)
 add_executable(asr_sdm_teleop_node src/asr_sdm_teleop_node.cpp)
 target_link_libraries(asr_sdm_teleop_node PUBLIC
-  ${asr_sdm_control_msgs_TARGETS}
-  ${asr_sdm_hardware_msgs_TARGETS}
+  ${geometry_msgs_TARGETS}
   ${std_msgs_TARGETS}
   ${sensor_msgs_TARGETS}
   rclcpp::rclcpp
