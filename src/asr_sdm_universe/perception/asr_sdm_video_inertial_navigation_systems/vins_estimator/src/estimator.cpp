@@ -1,4 +1,14 @@
 #include "estimator.h"
+#include <cmath>
+
+// D2.1: static members defined once per translation unit.
+// Written by estimator_node.cpp sparse_rot_callback; read by processImage().
+Eigen::Matrix3d Estimator::latest_sparse_R_ = Eigen::Matrix3d::Identity();
+double            Estimator::latest_sparse_t_ = 0.0;
+double            Estimator::latest_sparse_chi2_ = 0.0;
+double            Estimator::latest_sparse_n_meas_ = 0.0;
+bool              Estimator::have_sparse_R_ = false;
+int               Estimator::n_sparse_stat_ = 0;
 
 Estimator::Estimator(): f_manager{Rs}
 {
@@ -131,6 +141,27 @@ void Estimator::processImage(const map<int, vector<pair<int, Eigen::Matrix<doubl
     RCUTILS_LOG_DEBUG("Solving %d", frame_count);
     RCUTILS_LOG_DEBUG("number of feature: %d", f_manager.getFeatureCount());
     Headers[frame_count] = header;
+
+    // D2.1: compare sparse_align R vs IMU preintegrated R every 10 frames.
+    {
+        double cur_t = header.stamp.sec + header.stamp.nanosec * 1e-9;
+        if (have_sparse_R_ && pre_integrations[frame_count] != nullptr &&
+            std::fabs(cur_t - latest_sparse_t_) < 0.05) {
+            // IMU preintegrated rotation from the previous frame to this one.
+            Eigen::Matrix3d R_imu = pre_integrations[frame_count]->delta_q.toRotationMatrix();
+            // Angle between sparse and IMU rotations.
+            Eigen::Matrix3d R_diff = latest_sparse_R_.transpose() * R_imu;
+            Eigen::AngleAxisd aa(R_diff);
+            double angle_deg = aa.angle() * 180.0 / M_PI;
+            if ((++n_sparse_stat_) % 10 == 0) {
+                RCUTILS_LOG_INFO(
+                    "[D2_STAT] frame=%d sparse_vs_IMU_angle=%.3f deg "
+                    "chi2=%.1f n_meas=%.0f",
+                    frame_count, angle_deg,
+                    latest_sparse_chi2_, latest_sparse_n_meas_);
+            }
+        }
+    }
 
     ImageFrame imageframe(image, header.stamp.sec + header.stamp.nanosec*(1e-9));
     imageframe.pre_integration = tmp_pre_integration;

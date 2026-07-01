@@ -18,6 +18,7 @@ rosidl_generate_interfaces(${PROJECT_NAME}
   "msg/FeatureMeasurement.msg"
   "msg/CameraMeasurement.msg"
   "msg/TrackingInfo.msg"
+  "msg/SparseRot.msg"      # D2.1: sparse-align rotation from feature_tracker
   DEPENDENCIES std_msgs sensor_msgs geometry_msgs
 )
 

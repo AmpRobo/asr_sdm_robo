@@ -3,7 +3,7 @@
 #common parameters
 imu_topic: "/sensing/camera/realsense/imu"
 image_topic: "/sensing/camera/realsense/color/image_raw"
-output_path: "/home/lxy/output/"
+output_path: "/home/lxy/output/sparse1/"
 
 #camera calibration
 model_type: PINHOLE
@@ -66,7 +66,7 @@ g_norm: 9.805       # gravity magnitude
 loop_closure: 1                    # start loop closure
 fast_relocalization: 1             # useful in real-time and large project
 load_previous_pose_graph: 0        # load and reuse previous pose graph; load from 'pose_graph_save_path'
-pose_graph_save_path: "/home/lxy/output/pose_graph/" # save and load path
+pose_graph_save_path: "/home/lxy/output/pose_graph/sparse1/" # save and load path
 
 #unsynchronization parameters
 estimate_td: 1                      # online estimate time offset between camera and imu
@@ -80,3 +80,31 @@ rolling_shutter_tr: 0.033               # unit: s. rolling shutter read out time
 save_image: 1                   # save image in pose graph for visualization prupose; you can close this function by setting 0
 visualize_imu_forward: 0        # output imu forward propogation to achieve low latency and high frequence results
 visualize_camera_size: 0.4      # size of camera marker in RVIZ
+
+# W3: sparse rotation prior (sparse photometric align -> VINS BA)
+# Set use_sparse_r_prior to 1 to enable.  Requires feature_tracker to publish
+# /feature_tracker/sparse_rot with R (and chi2) for every frame pair.
+use_sparse_r_prior: 1
+sparse_r_lambda: 0.1        # λ — trade-off weight.  0.05=loose, 0.1=default, 0.5=strong
+sparse_r_chi2_gate: 50.0    # max sparse chi2 to accept (discard outliers)
+sparse_r_angle_gate: 0.087266    # ~5 deg in radians
+
+# Sparse image alignment (SVO-style semi-direct refinement in the front-end)
+# Runs a photometric Gauss-Newton over 4x4 patches on a 4-level image
+# pyramid; replaces the KLT output when alignment converges and falls back
+# to KLT otherwise. Requires IMU messages to provide a rotation prior.
+use_sparse_align: 1
+sparse_align_patch_size: 2
+sparse_align_max_level: 2
+sparse_align_min_level: 0
+sparse_align_max_iter: 4
+sparse_align_lambda_rot: 0.5
+sparse_align_lambda_trans: 0.0
+sparse_align_chi2_thresh: 50.0
+sparse_align_min_features: 30
+sparse_align_min_iter_for_ok: 1
+
+# Time delay pre-calibration (D2.2): estimate camera-IMU time offset online
+# using sparse align residuals. Set to 1 to enable. Default: 0 (off).
+# When enabled, td is estimated jointly with rotation prior quality.
+use_td_pre_calib: 1

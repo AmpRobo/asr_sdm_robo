@@ -137,4 +137,14 @@ class Estimator
     Vector3d relo_relative_t;
     Quaterniond relo_relative_q;
     double relo_relative_yaw;
+
+    // D2.1: sparse rotation result received from feature_tracker.
+    // Written by estimator_node.cpp (sparse_rot_callback).
+    // Read in processImage() to log angle residual vs IMU R.
+    static Eigen::Matrix3d latest_sparse_R_;
+    static double            latest_sparse_t_;
+    static double            latest_sparse_chi2_;
+    static double            latest_sparse_n_meas_;
+    static bool              have_sparse_R_;
+    static int               n_sparse_stat_;
 };

@@ -7,10 +7,13 @@
 #include <rclcpp/rclcpp.hpp>
 #include <cv_bridge/cv_bridge.hpp>
 #include <opencv2/opencv.hpp>
+#include <std_msgs/msg/float64.hpp>
 
 #include "estimator.h"
 #include "parameters.h"
 #include "utility/visualization.h"
+#include <asr_sdm_perception_msgs/msg/sparse_rot.hpp>
+#include <std_msgs/msg/float64.hpp>
 
 
 Estimator estimator;
@@ -143,15 +146,10 @@ void imu_callback(const sensor_msgs::msg::Imu::SharedPtr imu_msg)
         return;
     }
 
-    last_imu_t = imu_msg->header.stamp.sec+imu_msg->header.stamp.nanosec * (1e-9);
-
     m_buf.lock();
     imu_buf.push(imu_msg);
     m_buf.unlock();
     con.notify_one();
-
-
-    last_imu_t = imu_msg->header.stamp.sec+imu_msg->header.stamp.nanosec * (1e-9);
 
     {
         std::lock_guard<std::mutex> lg(m_state);
@@ -205,6 +203,37 @@ void relocalization_callback(const sensor_msgs::msg::PointCloud::SharedPtr point
     m_buf.lock();
     relo_buf.push(points_msg);
     m_buf.unlock();
+}
+
+// D2.2: receive td pre-calibration estimate from feature_tracker.
+// Writes to estimator.td; no BA change, just better initial guess.
+void td_estimate_callback(const std_msgs::msg::Float64::SharedPtr msg)
+{
+    if (!std::isfinite(msg->data)) return;
+    // Sanity gate: only accept within [-50ms, +50ms]
+    if (std::abs(msg->data) > 0.050) return;
+    std::lock_guard<std::mutex> lg(m_estimator);
+    estimator.td = msg->data;
+    RCLCPP_DEBUG(rclcpp::get_logger("vins_estimator"),
+                 "[TD_EST] estimator.td <- %.4f ms", msg->data * 1000.0);
+}
+
+
+void sparse_rot_callback(const asr_sdm_perception_msgs::msg::SparseRot::SharedPtr msg)
+{
+    if (!msg->success || msg->n_meas < 30) return;
+
+    Eigen::Matrix3d R;
+    R << msg->rot_mat[0], msg->rot_mat[1], msg->rot_mat[2],
+         msg->rot_mat[3], msg->rot_mat[4], msg->rot_mat[5],
+         msg->rot_mat[6], msg->rot_mat[7], msg->rot_mat[8];
+
+    std::lock_guard<std::mutex> lg(m_estimator);
+    Estimator::latest_sparse_R_      = R;
+    Estimator::latest_sparse_t_      = msg->stamp_sec;
+    Estimator::latest_sparse_chi2_   = msg->chi2;
+    Estimator::latest_sparse_n_meas_ = msg->n_meas;
+    Estimator::have_sparse_R_        = true;
 }
 
 // thread: visual-inertial odometry
@@ -358,6 +387,12 @@ int main(int argc, char **argv)
     auto sub_image = n->create_subscription<sensor_msgs::msg::PointCloud>("/feature_tracker/feature", rclcpp::QoS(rclcpp::KeepLast(2000)), feature_callback);
     auto sub_restart = n->create_subscription<std_msgs::msg::Bool>("/feature_tracker/restart", rclcpp::QoS(rclcpp::KeepLast(2000)), restart_callback);
     auto sub_relo_points = n->create_subscription<sensor_msgs::msg::PointCloud>("/pose_graph/match_points", rclcpp::QoS(rclcpp::KeepLast(2000)), relocalization_callback);
+    // D2.1: subscribe to sparse_align rotation from feature_tracker (launch remaps to /{ns}/sparse_rot)
+    auto sub_sparse_rot = n->create_subscription<asr_sdm_perception_msgs::msg::SparseRot>(
+        "/feature_tracker/sparse_rot", rclcpp::QoS(rclcpp::KeepLast(2000)), sparse_rot_callback);
+    // D2.2: subscribe to td pre-calibration from feature_tracker (launch remaps to /{ns}/td_estimate)
+    auto sub_td_estimate = n->create_subscription<std_msgs::msg::Float64>(
+        "/feature_tracker/td_estimate", rclcpp::QoS(rclcpp::KeepLast(100)), td_estimate_callback);
 
     std::thread measurement_process{process};
     rclcpp::spin(n);

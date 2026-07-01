@@ -16,6 +16,8 @@
 
 #include "parameters.h"
 #include "tic_toc.h"
+#include "sparse_img_align.h"
+#include "imu_preintegrate.h"
 
 using namespace std;
 using namespace camodocal;
@@ -47,6 +49,26 @@ class FeatureTracker
 
     void undistortedPoints();
 
+    // Sparse-image-align helpers. The node pushes IMU samples to imu_preint_
+    // and sets the rotation prior between (prev_time, cur_time) before
+    // calling readImage.
+    void addImuSample(double t,
+                      const Eigen::Vector3d& gyro,
+                      const Eigen::Vector3d& accel);
+    void setImuRotationPrior(const Eigen::Matrix3d& R_k_km1);
+    void pruneImuBuffer(double t_min);
+
+    // D2.1: expose last sparse-align result for the node to publish.
+    // Written by readImage() whenever USE_SPARSE_ALIGN && have_imu_prior_.
+    // Node reads trackerData[i].last_align_res_ after readImage returns.
+    vins_sparse::SparseAlignResult last_align_res_;
+    // Pure-vision (no IMU prior) alignment result.  Set by
+    // computeVisionOnlyRotation() if called.  Used by the front-end node
+    // to feed the td pre-calibrator.  See
+    // td_pre_calibrator/td_pre_calibrator.h for the use case.
+    vins_sparse::SparseAlignResult last_align_vision_res_;
+    bool has_align_vision_res_ = false;
+
     cv::Mat mask;
     cv::Mat fisheye_mask;
     cv::Mat prev_img, cur_img, forw_img;
@@ -61,6 +83,30 @@ class FeatureTracker
     camodocal::CameraPtr m_camera;
     double cur_time;
     double prev_time;
+
+    // Sparse image alignment state.
+    vins_sparse::ImuPreintegrator imu_preint_;
+    std::vector<cv::Mat> prev_pyr_;
+    std::vector<cv::Mat> saved_prev_pyr_;  // prev_pyr_ reused across frames
+    std::vector<cv::Mat> cur_pyr_;
+    Eigen::Matrix3d R_prev_cur_ = Eigen::Matrix3d::Identity();
+    bool have_imu_prior_ = false;
+
+    // Per-session sparse-align statistics (logged every 10 frames).
+    int n_sparse_frames_   = 0;
+    int n_sparse_success_  = 0;
+    int n_sparse_meas_sum_ = 0;
+    int n_frames_seen_     = 0;
+    int n_klt_for_align_sum_ = 0;
+    double n_sparse_chi2_sum_ = 0.0;
+    double n_sparse_time_sum_ = 0.0;
+
+    // Per-session KLT statistics (logged every 50 frames).
+    int n_klt_calls_       = 0;
+    int n_klt_w_           = 0;
+    int n_klt_l_           = 0;
+    int n_klt_sparse_prior_ = 0;
+    double n_klt_cost_sum_ = 0.0;
 
     static int n_id;
 };

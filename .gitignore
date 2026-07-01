@@ -41,3 +41,16 @@ build_output.log
 
 # ROS 2 bag / recorded data
 /datasheet/airground_rig_s3_ros2/
+
+# Python caches
+__pycache__/
+*.pyc
+*.pyo
+
+# Local development / debugging artifacts
+output_compare/
+docs/svo_vio_dataflow_analysis.md
+docs/vins_dataflow_analysis.md
+docs/svo_euroc_debug.md
+d435i_sparse1.csv
+d435i_original.csv

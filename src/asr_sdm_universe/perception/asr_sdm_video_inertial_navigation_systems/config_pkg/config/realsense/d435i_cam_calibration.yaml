@@ -1,0 +1,24 @@
+%YAML:1.0
+---
+# D435i color camera calibration (Euroc pinhole format)
+# Generated from CameraInfo topic: fx=453.0, fy=603.9, cx=330.6, cy=259.5
+# Image size: 640x480
+# Distortion: D435i color camera has minimal distortion; use zero as baseline.
+#             For accurate results, run Kalibr calibration with a checkerboard.
+
+model_type: PINHOLE
+camera_name: d435i_color
+image_width: 640
+image_height: 480
+
+distortion_parameters:
+   k1: 0.0
+   k2: 0.0
+   p1: 0.0
+   p2: 0.0
+
+projection_parameters:
+   fx: 453.0
+   fy: 603.9
+   cx: 330.6
+   cy: 259.5

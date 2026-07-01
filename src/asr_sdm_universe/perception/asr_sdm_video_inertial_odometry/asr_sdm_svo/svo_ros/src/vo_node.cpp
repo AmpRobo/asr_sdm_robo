@@ -5,6 +5,7 @@
 
 #include <sensor_msgs/msg/image.hpp>
 #include <sensor_msgs/msg/imu.hpp>
+#include <sensor_msgs/msg/point_cloud.hpp>
 #include <std_msgs/msg/string.hpp>
 
 #include <svo/config.h>
@@ -12,6 +13,8 @@
 #include <svo/frame_handler_mono.h>
 #include <svo/imu_preprocessor.h>
 #include <svo/imu_types.h>
+#include <svo/point.h>
+#include <svo/feature.h>
 #include <svo/map.h>
 #include <svo_ros/visualizer.h>
 #include <vikit/abstract_camera.h>
@@ -21,6 +24,8 @@
 #include <vikit/params_helper.h>
 #include <vikit/pinhole_camera.h>
 #include <vikit/user_input_thread.h>
+
+#include <svo_vio_backend/vio_backend.h>
 
 #include <atomic>
 #include <chrono>
@@ -50,6 +55,13 @@ private:
   void imuCb(const sensor_msgs::msg::Imu::ConstSharedPtr& msg);
   void remoteKeyCb(const std_msgs::msg::String::ConstSharedPtr& msg);
   void processUserActions();
+
+  // --- VINS-compatible feature cloud ---
+  // Pack the SVO Frame's mature (TYPE_GOOD) 3D point observations into a
+  // sensor_msgs/PointCloud that stock vins_estimator can consume directly.
+  void publishVinsFeatureCloud(
+      const svo::Frame& frame,
+      const std_msgs::msg::Header& image_header);
 
   // --- Core ---
   svo::FrameHandlerMono* vo_ = nullptr;
@@ -120,6 +132,35 @@ private:
   bool enable_frame_throttle_ = true;
   double target_fps_ = 15.0;
   double last_accepted_ts_ = 0.0;
+
+  // --- Tight-coupled VIO backend (Phase 1 integration) ---
+  // Runs in addition to the SVO frontend; receives every keyframe pose
+  // and runs a Ceres-based IMU optimization on a 10-frame sliding window.
+  std::unique_ptr<svo_vio_backend::VioBackend> vio_backend_;
+  bool enable_vio_backend_ = false;          // global on/off
+  bool vio_backend_publish_odometry_ = true; // publish /svo_vio/odometry
+  double vio_backend_last_optimize_ts_ = 0.0;
+  double vio_backend_optimize_period_ = 0.1; // throttle optimization to 10 Hz
+  Eigen::Matrix3d vio_ric_ = Eigen::Matrix3d::Identity();
+  Eigen::Vector3d vio_tic_ = Eigen::Vector3d::Zero();
+  rclcpp::Publisher<nav_msgs::msg::Odometry>::SharedPtr pub_odometry_;
+  double last_vio_pose_ts_ = 0.0;
+
+  // --- VINS-compatible feature publisher (Phase 2: replace svo_vio_backend) ---
+  // Emits sensor_msgs/PointCloud on `/feature_tracker/feature` so that
+  // a stock `vins_estimator` node can consume SVO-tracked features and
+  // run the well-tested VINS sliding-window Ceres back-end.
+  // Channel layout (matching VINS `feature_tracker_node`):
+  //   points[i]      = (x, y, 1)   normalized camera plane coords (un_pts)
+  //   channels[0][i] = id * NUM_OF_CAM + camera_id    (matches VINS encoding)
+  //   channels[1][i] = u (pixel x)
+  //   channels[2][i] = v (pixel y)
+  //   channels[3][i] = velocity_x (we send 0.0; only used by td estimator)
+  //   channels[4][i] = velocity_y (we send 0.0; only used by td estimator)
+  bool publish_vins_features_ = false;
+  rclcpp::Publisher<sensor_msgs::msg::PointCloud>::SharedPtr pub_feature_cloud_;
+  static constexpr int NUM_OF_CAM_FOR_FEATURE_ = 1;  // mono
+  uint64_t vins_feature_publish_count_ = 0;
 };
 
 // =============================================================================
@@ -326,6 +367,63 @@ VoNode::VoNode()
                 vk::getParam<double>(this, "pose_optim_prior_lambda_rot", 0.0),
                 vk::getParam<double>(this, "zero_motion_accel_std_thresh", 0.05));
   }
+
+  // ---------------------------------------------------------------------
+  // Tight-coupled VIO backend (Phase 1: VINS-style sliding-window Ceres
+  // optimization layered on top of the SVO frontend).
+  // ---------------------------------------------------------------------
+  enable_vio_backend_ = vk::getParam<bool>(this, "enable_vio_backend", false);
+  if (enable_vio_backend_)
+  {
+    vio_backend_ = std::make_unique<svo_vio_backend::VioBackend>();
+    // IMU noise — defaults match the D435i BMI055 if not overridden.
+    vio_backend_->setIMUNoise(
+        vk::getParam<double>(this, "vio_acc_n",       imu_calib_.acc_noise_density),
+        vk::getParam<double>(this, "vio_acc_w",       imu_calib_.acc_bias_random_walk_sigma),
+        vk::getParam<double>(this, "vio_gyr_n",       imu_calib_.gyro_noise_density),
+        vk::getParam<double>(this, "vio_gyr_w",       imu_calib_.gyro_bias_random_walk_sigma));
+    // Gravity (VINS convention: world Z up, gravity points down +Z).
+    vio_backend_->setGravity(Eigen::Vector3d(0.0, 0.0, imu_calib_.gravity_magnitude));
+    // IMU-Camera extrinsics: identity by default (matches SVO's T_cam_imu=0).
+    // vk::getParam doesn't support std::vector<double> well, so we use
+    // node->declare_parameter + get_parameter directly.
+    {
+      const std::vector<double> ric_default = {1, 0, 0, 0, 1, 0, 0, 0, 1};
+      if (!this->has_parameter("vio_ric")) this->declare_parameter("vio_ric", ric_default);
+      std::vector<double> ric_flat;
+      if (this->get_parameter("vio_ric", ric_flat) && ric_flat.size() == 9) {
+        vio_ric_ = Eigen::Map<const Eigen::Matrix<double, 3, 3, Eigen::RowMajor>>(
+            ric_flat.data());
+      } else {
+        vio_ric_ = Eigen::Matrix3d::Identity();
+      }
+    }
+    {
+      const std::vector<double> tic_default = {0, 0, 0};
+      if (!this->has_parameter("vio_tic")) this->declare_parameter("vio_tic", tic_default);
+      std::vector<double> tic_flat;
+      if (this->get_parameter("vio_tic", tic_flat) && tic_flat.size() == 3) {
+        vio_tic_ = Eigen::Vector3d(tic_flat[0], tic_flat[1], tic_flat[2]);
+      } else {
+        vio_tic_ = Eigen::Vector3d::Zero();
+      }
+    }
+    vio_backend_->setIMUExtrinsics(vio_ric_, vio_tic_);
+    vio_backend_->setMaxIterations(vk::getParam<int>(this, "vio_max_iterations", 8));
+    vio_backend_->setSolverTimeLimit(vk::getParam<double>(this, "vio_solver_time_limit", 0.04));
+    vio_backend_optimize_period_ = vk::getParam<double>(this, "vio_optimize_period", 0.1);
+    vio_backend_publish_odometry_ = vk::getParam<bool>(this, "vio_publish_odometry", true);
+    RCLCPP_INFO(this->get_logger(),
+                "VIO backend ENABLED: acc_n=%.4f gyr_n=%.4f acc_w=%.6f gyr_w=%.6f "
+                "gravity=%.3f opt_period=%.3fs",
+                imu_calib_.acc_noise_density, imu_calib_.gyro_noise_density,
+                imu_calib_.acc_bias_random_walk_sigma, imu_calib_.gyro_bias_random_walk_sigma,
+                imu_calib_.gravity_magnitude, vio_backend_optimize_period_);
+  }
+  else
+  {
+    RCLCPP_INFO(this->get_logger(), "VIO backend DISABLED (set enable_vio_backend:=true to enable)");
+  }
 }
 
 // =============================================================================
@@ -365,6 +463,147 @@ void VoNode::init()
         std::bind(&VoNode::imuCb, this, std::placeholders::_1));
     RCLCPP_INFO(this->get_logger(), "Subscribing to IMU: %s", imu_topic.c_str());
   }
+
+  // VIO backend tight-coupled odometry publisher
+  if (enable_vio_backend_ && vio_backend_publish_odometry_)
+  {
+    const std::string odom_topic = vk::getParam<std::string>(
+        this, "vio_odom_topic", "/svo_vio/odometry");
+    pub_odometry_ = create_publisher<nav_msgs::msg::Odometry>(
+        odom_topic, 10);
+    RCLCPP_INFO(this->get_logger(), "Publishing tight-coupled VIO odometry to: %s",
+                odom_topic.c_str());
+  }
+
+  // --- VINS-compatible feature cloud publisher (Phase 2) ---
+  // When enabled, the node will emit sensor_msgs/PointCloud on
+  // `vins_feature_topic` for stock `vins_estimator` to consume. The
+  // channel layout matches `feature_tracker_node` so the estimator
+  // can drop-in use it.
+  //
+  // We read the bool via `has_parameter` + `get_parameter` directly
+  // (NOT `vk::getParam<bool>`) because the param may have been
+  // pre-declared by the YAML loader with a different type, and
+  // LaunchConfiguration string→bool conversion can be brittle.
+  if (this->has_parameter("publish_vins_features"))
+  {
+    this->get_parameter("publish_vins_features", publish_vins_features_);
+  }
+  else
+  {
+    publish_vins_features_ = vk::getParam<bool>(this, "publish_vins_features", false);
+  }
+  if (publish_vins_features_)
+  {
+    const std::string feature_topic = vk::getParam<std::string>(
+        this, "vins_feature_topic", "/feature_tracker/feature");
+    // VINS estimator subscribes with RELIABLE + KeepLast(2000). Match
+    // exactly or messages will be dropped silently. SensorDataQoS is
+    // best-effort — would trigger the QoS warning we just saw.
+    rclcpp::QoS qos_feature(rclcpp::KeepLast(2000));
+    qos_feature.reliability(rclcpp::ReliabilityPolicy::Reliable);
+    qos_feature.durability(rclcpp::DurabilityPolicy::Volatile);
+    pub_feature_cloud_ = create_publisher<sensor_msgs::msg::PointCloud>(
+        feature_topic, qos_feature);
+    RCLCPP_INFO(this->get_logger(),
+                "VINS-compatible feature cloud ENABLED on: %s (QoS: RELIABLE/KeepLast(2000))",
+                feature_topic.c_str());
+  }
+}
+
+// =============================================================================
+// VINS-compatible feature cloud publisher
+//
+// Emits sensor_msgs/PointCloud with the exact channel layout that stock
+// `vins_estimator` (`estimator_node.cpp::feature_callback`) expects:
+//
+//   points[i]      = (x, y, 1)   normalized camera plane coords (un_pts)
+//   channels[0][i] = id * NUM_OF_CAM + camera_id  (VINS ID encoding)
+//   channels[1][i] = u (pixel x)
+//   channels[2][i] = v (pixel y)
+//   channels[3][i] = velocity_x   (we send 0.0; only used by td estimator)
+//   channels[4][i] = velocity_y   (we send 0.0; only used by td estimator)
+//
+// SVO `Feature::f` is the unit-bearing vector (f / f.z() gives normalized
+// plane coords), and `Feature::point->id_` is a stable global ID across
+// the whole SVO session. We only emit features whose 3D point has been
+// successfully triangulated (Point::TYPE_GOOD) — these are the ones with
+// reliable reprojection geometry that VINS sliding-window can triangulate
+// stably from a second view.
+//
+// We also publish the FIRST frame with an empty cloud (VINS estimator
+// skips the first message: it expects "no optical flow speed" on it).
+// =============================================================================
+void VoNode::publishVinsFeatureCloud(
+    const svo::Frame& frame,
+    const std_msgs::msg::Header& image_header)
+{
+  sensor_msgs::msg::PointCloud cloud;
+  cloud.header = image_header;
+  cloud.header.frame_id = "world";
+
+  sensor_msgs::msg::ChannelFloat32 id_channel;
+  sensor_msgs::msg::ChannelFloat32 u_channel;
+  sensor_msgs::msg::ChannelFloat32 v_channel;
+  sensor_msgs::msg::ChannelFloat32 vx_channel;
+  sensor_msgs::msg::ChannelFloat32 vy_channel;
+  id_channel.name  = "id";
+  u_channel.name   = "u";
+  v_channel.name   = "v";
+  vx_channel.name  = "velocity_x";
+  vy_channel.name  = "velocity_y";
+
+  size_t emitted = 0;
+  for (const svo::Feature* ftr : frame.fts_)
+  {
+    if (ftr == nullptr) continue;
+    const svo::Point* pt = ftr->point;
+    if (pt == nullptr) continue;             // not triangulated yet (seed)
+    if (pt->type_ != svo::Point::TYPE_GOOD) continue;  // skip CANDIDATE/UNKNOWN
+
+    // Normalized camera-plane coordinates: (x, y, 1) for VINS estimator.
+    // SVO `f` is the unit-bearing vector: divide by f.z() to get (x, y, 1).
+    const Eigen::Vector3d& f = ftr->f;
+    const double fz = f.z();
+    if (std::abs(fz) < 1e-6) continue;        // degenerate bearing vector
+
+    geometry_msgs::msg::Point32 p;
+    p.x = static_cast<float>(f.x() / fz);
+    p.y = static_cast<float>(f.y() / fz);
+    p.z = 1.0f;
+    cloud.points.push_back(p);
+
+    const int id_with_cam = pt->id_ * NUM_OF_CAM_FOR_FEATURE_ + 0; // mono
+    id_channel.values.push_back(static_cast<float>(id_with_cam));
+    u_channel.values.push_back(static_cast<float>(ftr->px.x()));
+    v_channel.values.push_back(static_cast<float>(ftr->px.y()));
+    vx_channel.values.push_back(0.0f);   // SVO does not expose LK velocity
+    vy_channel.values.push_back(0.0f);
+    ++emitted;
+  }
+
+  // VINS estimator skips its first message via the `init_feature` flag,
+  // so we MUST publish something every frame — even an empty cloud on
+  // the first frame is enough to advance that flag.
+  if (cloud.points.empty() && vins_feature_publish_count_ == 0)
+  {
+    RCLCPP_INFO_THROTTLE(this->get_logger(), *this->get_clock(), 2000,
+        "[VINS features] first frame: emitting empty cloud to advance "
+        "vins_estimator `init_feature` flag");
+  }
+
+  cloud.channels.push_back(id_channel);
+  cloud.channels.push_back(u_channel);
+  cloud.channels.push_back(v_channel);
+  cloud.channels.push_back(vx_channel);
+  cloud.channels.push_back(vy_channel);
+
+  pub_feature_cloud_->publish(cloud);
+  ++vins_feature_publish_count_;
+
+  RCLCPP_INFO_THROTTLE(this->get_logger(), *this->get_clock(), 2000,
+      "[VINS features] frame_id=%d n_fts=%zu (mature=%zu) cloud=%zux5",
+      frame.id_, frame.fts_.size(), emitted, cloud.points.size());
 }
 
 // =============================================================================
@@ -461,6 +700,22 @@ void VoNode::imuCb(const sensor_msgs::msg::Imu::ConstSharedPtr& msg)
           Eigen::Vector3d(msg->linear_acceleration.x,
                            msg->linear_acceleration.y,
                            msg->linear_acceleration.z)));
+
+  // Mirror the same IMU sample into the VIO backend's pre-integrator
+  // (tight-coupled Ceres sliding window). The VioBackend keeps its own
+  // independent buffer + preintegration; it does not block the SVO
+  // frontend's IMU prior path.
+  if (vio_backend_)
+  {
+    vio_backend_->addIMUMeasurement(
+        t,
+        Eigen::Vector3d(msg->linear_acceleration.x,
+                        msg->linear_acceleration.y,
+                        msg->linear_acceleration.z),
+        Eigen::Vector3d(msg->angular_velocity.x,
+                        msg->angular_velocity.y,
+                        msg->angular_velocity.z));
+  }
 
   // Feed raw IMU to preprocessor for data collection (mode 1)
   if (imu_preprocessing_mode_ == 1 && imu_preprocessor_)
@@ -609,6 +864,123 @@ void VoNode::run()
             last->timestamp_,
             last->T_f_w_.translation(),
             Eigen::Quaterniond(last->T_f_w_.rotationMatrix()));
+      }
+    }
+
+    // --- VINS-compatible feature cloud (Phase 2) ---
+    // Publish SVO-tracked features to a stock vins_estimator.
+    if (publish_vins_features_ && pub_feature_cloud_)
+    {
+      auto last = vo_->lastFrame();
+      if (last)
+      {
+        try
+        {
+          publishVinsFeatureCloud(*last, img->header);
+        }
+        catch (const std::exception& e)
+        {
+          RCLCPP_ERROR_THROTTLE(this->get_logger(), *this->get_clock(), 1000,
+              "[VINS features] EXCEPTION: %s", e.what());
+        }
+      }
+    }
+
+    // --- Tight-coupled VIO backend (Phase 1) ---
+    // Feed the most recent frame pose to the sliding-window optimizer
+    // whenever SVO marks a new keyframe, then run the IMU Ceres solve
+    // (throttled) and republish the body-in-world pose.
+    if (vio_backend_)
+    {
+      auto last = vo_->lastFrame();
+      if (last && (vo_->stage() == svo::FrameHandlerBase::STAGE_DEFAULT_FRAME ||
+                   vo_->stage() == svo::FrameHandlerBase::STAGE_SECOND_FRAME))
+      {
+        try
+        {
+        // T_f_w_ = transform from world to frame (= inverse of body-in-world)
+        // Pass R, p of T_w_b to the backend.
+        Eigen::Matrix3d R_w_b = last->T_f_w_.rotationMatrix().transpose();
+        Eigen::Vector3d p_w_b = -R_w_b * last->T_f_w_.translation();
+
+        if (last->isKeyframe())
+        {
+          RCLCPP_INFO_THROTTLE(this->get_logger(), *this->get_clock(), 2000,
+              "[VIO backend] addKeyFrame ts=%.3f window=%d", timestamp,
+              vio_backend_->getWindowFrameCount());
+          // NOTE: We do NOT pass the raw Frame pointer to the VioBackend
+          // because `last` is a temporary boost::shared_ptr<Frame> alias
+          // whose target is owned by the SVO map. The VioBackend does not
+          // dereference the pointer (only R, p, timestamp are used), so
+          // passing nullptr is safe.
+          vio_backend_->addKeyFrame(nullptr,
+                                    last->timestamp_, R_w_b, p_w_b);
+
+          // Throttle optimization to keep frontend responsive
+          if (timestamp - vio_backend_last_optimize_ts_ > vio_backend_optimize_period_)
+          {
+            const auto t0 = std::chrono::steady_clock::now();
+            const bool ok = vio_backend_->optimize();
+            const auto t1 = std::chrono::steady_clock::now();
+            const double dt_ms =
+                std::chrono::duration<double, std::milli>(t1 - t0).count();
+            if (ok)
+            {
+              RCLCPP_INFO_THROTTLE(this->get_logger(), *this->get_clock(), 2000,
+                  "[VIO backend] optimize OK | window=%d | dt=%.1fms",
+                  vio_backend_->getWindowFrameCount(), dt_ms);
+            }
+            else
+            {
+              RCLCPP_WARN_THROTTLE(this->get_logger(), *this->get_clock(), 2000,
+                  "[VIO backend] optimize returned false | window=%d",
+                  vio_backend_->getWindowFrameCount());
+            }
+            vio_backend_last_optimize_ts_ = timestamp;
+          }
+        }
+
+        // Always publish current body-in-world pose (use the SVO pose
+        // directly; once the window is full the optimized pose converges
+        // to the same trajectory but is more drift-free).
+        Eigen::Matrix4d T_w_b;
+        if (vio_backend_->getCurrentPose(T_w_b) && pub_odometry_)
+        {
+          nav_msgs::msg::Odometry odom;
+          odom.header.stamp = rclcpp::Time(timestamp);
+          odom.header.frame_id = "world";
+          odom.child_frame_id = "body";
+          odom.pose.pose.position.x = T_w_b(0, 3);
+          odom.pose.pose.position.y = T_w_b(1, 3);
+          odom.pose.pose.position.z = T_w_b(2, 3);
+          Eigen::Quaterniond q(T_w_b.block<3, 3>(0, 0));
+          q.normalize();
+          odom.pose.pose.orientation.x = q.x();
+          odom.pose.pose.orientation.y = q.y();
+          odom.pose.pose.orientation.z = q.z();
+          odom.pose.pose.orientation.w = q.w();
+          // Identity covariance: backend does not yet estimate this
+          for (int i = 0; i < 36; ++i) odom.pose.covariance[i] = 0.0;
+          odom.pose.covariance[0]  = 0.01;
+          odom.pose.covariance[7]  = 0.01;
+          odom.pose.covariance[14] = 0.01;
+          odom.pose.covariance[21] = 0.05;
+          odom.pose.covariance[28] = 0.05;
+          odom.pose.covariance[35] = 0.05;
+          pub_odometry_->publish(odom);
+          last_vio_pose_ts_ = timestamp;
+        }
+        }  // try
+        catch (const std::exception& e)
+        {
+          RCLCPP_ERROR_THROTTLE(this->get_logger(), *this->get_clock(), 1000,
+              "[VIO backend] EXCEPTION: %s", e.what());
+        }
+        catch (...)
+        {
+          RCLCPP_ERROR_THROTTLE(this->get_logger(), *this->get_clock(), 1000,
+              "[VIO backend] UNKNOWN EXCEPTION");
+        }
       }
     }
 

@@ -21,6 +21,7 @@
 #include "pose_graph.h"
 #include "utility/CameraPoseVisualization.h"
 #include "parameters.h"
+#include <asr_sdm_perception_msgs/msg/sparse_rot.hpp>   // D2 W1
 #define SKIP_FIRST_CNT 10
 using namespace std;
 
@@ -65,6 +66,11 @@ std::string VINS_RESULT_PATH;
 CameraPoseVisualization cameraposevisual(1, 0, 0, 1);
 Eigen::Vector3d last_t(-100, -100, -100);
 double last_image_time = -1;
+
+// D2 W1: cache for sparse_align rotation results.
+// Keyed by timestamp (seconds); used to populate KeyFrame::sparse_R_.
+std::map<double, Eigen::Matrix3d> sparse_rot_cache;
+std::mutex m_sparse_rot;
 
 void new_sequence()
 {
@@ -216,7 +222,7 @@ void vio_callback(const nav_msgs::msg::Odometry::ConstPtr pose_msg)
     Vector3d vio_t_cam;
     Quaterniond vio_q_cam;
     vio_t_cam = vio_t + vio_q * tic;
-    vio_q_cam = vio_q * qic;        
+    vio_q_cam = vio_q * qic;
 
     if (!VISUALIZE_IMU_FORWARD)
     {
@@ -288,6 +294,28 @@ void extrinsic_callback(const nav_msgs::msg::Odometry::ConstPtr pose_msg)
                       pose_msg->pose.pose.orientation.y,
                       pose_msg->pose.pose.orientation.z).toRotationMatrix();
     m_process.unlock();
+}
+
+// D2 W1: subscribe to /feature_tracker/sparse_rot published by the sparse1
+// feature_tracker pipeline.  Store successful alignment results keyed by
+// timestamp so they can be attached to the corresponding KeyFrame.
+void sparse_rot_callback(const asr_sdm_perception_msgs::msg::SparseRot::SharedPtr msg)
+{
+    if (!msg->success || msg->n_meas < 30) return;
+
+    Eigen::Matrix3d R;
+    R << msg->rot_mat[0], msg->rot_mat[1], msg->rot_mat[2],
+         msg->rot_mat[3], msg->rot_mat[4], msg->rot_mat[5],
+         msg->rot_mat[6], msg->rot_mat[7], msg->rot_mat[8];
+
+    std::lock_guard<std::mutex> lg(m_sparse_rot);
+    sparse_rot_cache[msg->stamp_sec] = R;
+    // Prune old entries to avoid unbounded growth.
+    if (sparse_rot_cache.size() > 2000) {
+        auto it = sparse_rot_cache.begin();
+        std::advance(it, sparse_rot_cache.size() - 1000);
+        sparse_rot_cache.erase(sparse_rot_cache.begin(), it);
+    }
 }
 
 void process()
@@ -411,7 +439,17 @@ void process()
                 }
 
                 KeyFrame* keyframe = new KeyFrame(pose_msg->header.stamp.sec+pose_msg->header.stamp.nanosec * (1e-9), frame_index, T, R, image,
-                                   point_3d, point_2d_uv, point_2d_normal, point_id, sequence);   
+                                   point_3d, point_2d_uv, point_2d_normal, point_id, sequence);
+                // D2 W1: attach cached sparse_align rotation to this keyframe.
+                {
+                    std::lock_guard<std::mutex> lg(m_sparse_rot);
+                    auto it = sparse_rot_cache.find(pose_msg->header.stamp.sec + pose_msg->header.stamp.nanosec * (1e-9));
+                    if (it != sparse_rot_cache.end()) {
+                        keyframe->sparse_R_ = it->second;
+                        keyframe->has_sparse_R_ = true;
+                        sparse_rot_cache.erase(it);
+                    }
+                }
                 m_process.lock();
                 start_flag = 1;
                 posegraph.addKeyFrame(keyframe, 1);
@@ -490,16 +528,20 @@ int main(int argc, char **argv)
     {
         ROW = fsSettings["image_height"];
         COL = fsSettings["image_width"];
-        // std::string pkg_path = ament_index_cpp::get_package_share_directory("pose_graph");
-        std::string support_path = fsSettings["support_path"];
         n->declare_parameter<std::string>("support_file", "");
+        std::string support_path;
         n->get_parameter("support_file", support_path);
-        string vocabulary_file = support_path + "/../support_files/brief_k10L6.bin";
+        if (support_path.empty()) {
+            // Fall back to ament index lookup if launch didn't pass the param.
+            const std::string pkg_path = ament_index_cpp::get_package_share_directory("config_pkg");
+            support_path = pkg_path + "/support_files";
+        }
+        string vocabulary_file = support_path + "/brief_k10L6.bin";
         cout << "vocabulary_file: " << vocabulary_file << endl;
         posegraph.loadVocabulary(vocabulary_file);
 
-        BRIEF_PATTERN_FILE = support_path + "/../support_files/brief_pattern.yml";
-        cout << "BRIEF_PATTERN_FILE" << BRIEF_PATTERN_FILE << endl;
+        BRIEF_PATTERN_FILE = support_path + "/brief_pattern.yml";
+        cout << "BRIEF_PATTERN_FILE: " << BRIEF_PATTERN_FILE << endl;
         m_camera = camodocal::CameraFactory::instance()->generateCameraFromYamlFile(config_file.c_str());
 
         fsSettings["image_topic"] >> IMAGE_TOPIC;        
@@ -544,6 +586,9 @@ int main(int argc, char **argv)
     auto sub_extrinsic = n->create_subscription<nav_msgs::msg::Odometry>("/vins_estimator/extrinsic", rclcpp::QoS(rclcpp::KeepLast(2000)), extrinsic_callback);
     auto sub_point = n->create_subscription<sensor_msgs::msg::PointCloud>("/vins_estimator/keyframe_point", rclcpp::QoS(rclcpp::KeepLast(2000)), point_callback);
     auto sub_relo_relative_pose = n->create_subscription<nav_msgs::msg::Odometry>("/vins_estimator/relo_relative_pose", rclcpp::QoS(rclcpp::KeepLast(2000)), relo_relative_pose_callback);
+    // D2 W1: subscribe to /feature_tracker/sparse_rot for loop-closure geometric verification.
+    auto sub_sparse_rot = n->create_subscription<asr_sdm_perception_msgs::msg::SparseRot>(
+        "/feature_tracker/sparse_rot", rclcpp::QoS(rclcpp::KeepLast(2000)), sparse_rot_callback);
 
     pub_match_img = n->create_publisher<sensor_msgs::msg::Image>("match_image", 1000);
     pub_camera_pose_visual = n->create_publisher<visualization_msgs::msg::MarkerArray>("camera_pose_visual", 1000);

@@ -21,7 +21,7 @@ def generate_launch_description():
     # Define the node
     feature_tracker_node = Node(
         package='feature_tracker',
-        executable='feature_tracker',
+        executable='feature_tracker_node',
         name='feature_tracker',
         namespace='feature_tracker',
         output='screen',

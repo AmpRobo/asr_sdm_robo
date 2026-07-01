@@ -240,10 +240,19 @@ FrameHandlerBase::UpdateResult FrameHandlerMono::processFrame()
     Eigen::Quaterniond R_imu_delta;
     if (imu_handler_->getPoseIncrement(last_imu_timestamp_, new_frame_->timestamp_, R_imu_delta))
     {
-      // Predict rotation: R_cam_world(new) = R_imu_delta * R_cam_world(last)
-      // Camera rotation is the inverse of IMU rotation in world frame.
+      // Predict rotation: R_cam_world(new) = R_cam_world(last) * R_imu_delta
+      // R_imu_delta from getPoseIncrement is the IMU-body rotation from the
+      // last IMU measurement to the current (R_imu_body_cur_from_imu_body_last).
+      // With R_cam_imu ≈ identity (D435i factory < 1deg), composing it on the
+      // right of the previous cam-world rotation yields the predicted
+      // world-to-cam rotation at the new timestamp. PREVIOUSLY the code
+      // conjugate()'d R_imu_delta, which inverted the predicted rotation and
+      // pushed sparse image alignment away from the true motion — that
+      // accumulated drift caused SVO to lose tracking after ~5 seconds on
+      // the D435i bag. See Phase 2 analysis in
+      // docs/vins_dataflow_analysis.md.
       const Eigen::Matrix3d R_last = last_frame_->T_f_w_.rotationMatrix();
-      const Eigen::Matrix3d R_new = R_last * R_imu_delta.conjugate().toRotationMatrix();
+      const Eigen::Matrix3d R_new = R_last * R_imu_delta.toRotationMatrix();
       new_frame_->T_f_w_ = SE3(R_new, last_frame_->T_f_w_.translation());
     }
     else
@@ -628,11 +637,15 @@ void FrameHandlerMono::getMotionPrior()
     if (imu_handler_->getPoseIncrement(last_imu_timestamp_,
                                       new_frame_->timestamp_, R_imu_delta))
     {
-      // R_imu_delta: rotation from last IMU to new IMU frame.
-      // For SparseImgAlign prior: T_newimu_lastimu_prior_ = exp(R_imu_delta), t=0
-      // (inverse of what we need for initial pose, but correct for prior).
+      // R_imu_delta: IMU-body rotation from last measurement to current.
+      // SparseImgAlign's prior expects "T_cur_from_ref" (T new FROM last), so
+      // we feed it R_imu_delta directly. PREVIOUSLY the code conjugate()'d
+      // R_imu_delta, which inverted the prior and pushed image alignment
+      // *away* from the IMU-predicted rotation — this was the root cause of
+      // SVO losing tracking after ~5 seconds on the D435i bag. The same
+      // fix is applied to the initial-pose prediction above.
       T_newimu_lastimu_prior_ = Sophus::SE3d(
-          Sophus::SO3d(R_imu_delta.conjugate().toRotationMatrix()),
+          Sophus::SO3d(R_imu_delta.toRotationMatrix()),
           Eigen::Vector3d::Zero());
       have_motion_prior_ = true;
       return;

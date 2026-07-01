@@ -15,6 +15,7 @@ find_package(geometry_msgs REQUIRED)
 find_package(cv_bridge REQUIRED)
 find_package(camera_model REQUIRED)
 find_package(image_transport REQUIRED)
+find_package(asr_sdm_perception_msgs REQUIRED)   # D2.1: SparseRot.msg
 
 find_package(OpenCV 4 REQUIRED)
 
@@ -26,18 +27,24 @@ include_directories(
   ${EIGEN3_INCLUDE_DIR}
 )
 
-add_executable(feature_tracker
+add_executable(feature_tracker_node
     src/feature_tracker_node.cpp
     src/parameters.cpp
     src/feature_tracker.cpp
+    src/imu_preintegrate.cpp
+    src/sparse_img_align.cpp
+    src/td_pre_calibrator/td_pre_calibrator.cpp
     )
 
-ament_target_dependencies(feature_tracker rclcpp rcpputils std_msgs sensor_msgs geometry_msgs cv_bridge camera_model image_transport)
-target_link_libraries(feature_tracker ${OpenCV_LIBS})
+ament_target_dependencies(feature_tracker_node
+  rclcpp rcpputils std_msgs sensor_msgs geometry_msgs
+  cv_bridge camera_model image_transport asr_sdm_perception_msgs
+)
+target_link_libraries(feature_tracker_node ${OpenCV_LIBS})
 
 # Install nodes
 install(
-  TARGETS feature_tracker
+  TARGETS feature_tracker_node
   DESTINATION lib/${PROJECT_NAME}
 )
 

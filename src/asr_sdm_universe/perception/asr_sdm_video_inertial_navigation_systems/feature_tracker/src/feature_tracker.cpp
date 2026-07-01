@@ -1,5 +1,8 @@
 #include "feature_tracker.h"
 
+#include "half_sample.h"
+#include "td_pre_calibrator/td_pre_calibrator.h"
+
 int FeatureTracker::n_id = 0;
 
 bool inBorder(const cv::Point2f &pt)
@@ -31,6 +34,28 @@ void reduceVector(vector<int> &v, vector<uchar> status)
 
 FeatureTracker::FeatureTracker()
 {
+}
+
+void FeatureTracker::addImuSample(double t,
+                                  const Eigen::Vector3d& gyro,
+                                  const Eigen::Vector3d& accel)
+{
+    vins_sparse::ImuSample s;
+    s.t = t;
+    s.gyro = gyro;
+    s.accel = accel;
+    imu_preint_.add(s);
+}
+
+void FeatureTracker::setImuRotationPrior(const Eigen::Matrix3d& R_k_km1)
+{
+    R_prev_cur_ = R_k_km1;
+    have_imu_prior_ = true;
+}
+
+void FeatureTracker::pruneImuBuffer(double t_min)
+{
+    imu_preint_.pruneOld(t_min);
 }
 
 void FeatureTracker::setMask()
@@ -105,12 +130,153 @@ void FeatureTracker::readImage(const cv::Mat &_img, double _cur_time)
 
     forw_pts.clear();
 
+    // ------------------------------------------------------------------
+    // Sparse image alignment (SVO-style semi-direct pose estimation).
+    //
+    // Goal: provide a *frame-to-frame* rotation/translation estimate
+    // from the photometric residual, then use it to shrink the KLT
+    // search window. The KLT start points stay where they are (in the
+    // previous frame) -- the SVO trick is purely a tighter pyramid +
+    // window, not a KLT start-point transformation, because OpenCV's
+    // calcOpticalFlowPyrLK cannot accept a transformed starting pixel
+    // that lives in the *current* frame (it would converge to itself
+    // when searching cur_img for cur_img).
+    //
+    // This is the SVO trick that lets the front end run an order of
+    // magnitude cheaper than full-pyramid large-window KLT: a 5x5
+    // single-level KLT run on a photometrically-predicted image costs
+    // ~3% of a 21x21 three-level KLT.
+    // ------------------------------------------------------------------
+    cv::Size klt_win(21, 21);
+    int klt_level = 3;
+    bool used_sparse = false;
+
+    if (cur_pts.size() > 0 && USE_SPARSE_ALIGN && have_imu_prior_ &&
+        !prev_img.empty())
+    {
+        TicToc t_a;
+        const int n_levels = SPARSE_ALIGN_MAX_LEVEL + 1;
+
+        // Reuse the previous frame's pyramid from the last call (we
+        // saved it as prev_pyr_ at the end of the previous readImage).
+        // Only build the pyramid for the *current* image.
+        prev_pyr_ = saved_prev_pyr_;  // carry over from prior frame
+        if (static_cast<int>(prev_pyr_.size()) != n_levels) {
+            // First frame or n_levels changed; rebuild both.
+            vins_sparse::buildHalfSamplePyramid(prev_img, n_levels, prev_pyr_);
+        }
+        vins_sparse::buildHalfSamplePyramid(img, n_levels, cur_pyr_);
+
+        // Build bearings for cur_pts in the previous frame.
+        std::vector<Eigen::Vector3d> ref_bearings;
+        ref_bearings.reserve(cur_pts.size());
+        for (size_t i = 0; i < cur_pts.size(); ++i) {
+            Eigen::Vector2d a(cur_pts[i].x, cur_pts[i].y);
+            Eigen::Vector3d b;
+            m_camera->liftProjective(a, b);
+            double nrm = b.norm();
+            if (nrm < 1e-9) ref_bearings.emplace_back(0.0, 0.0, 1.0);
+            else            ref_bearings.push_back(b / nrm);
+        }
+
+        vins_sparse::SparseAlignOptions opt;
+        opt.patch_size      = SPARSE_ALIGN_PATCH_SIZE;
+        opt.min_level       = SPARSE_ALIGN_MIN_LEVEL;
+        opt.max_level       = SPARSE_ALIGN_MAX_LEVEL;
+        opt.max_iter        = SPARSE_ALIGN_MAX_ITER;
+        opt.lambda_rot      = SPARSE_ALIGN_LAMBDA_ROT;
+        opt.lambda_trans    = SPARSE_ALIGN_LAMBDA_TRANS;
+        opt.chi2_thresh     = SPARSE_ALIGN_CHI2_THRESH;
+        opt.min_features    = SPARSE_ALIGN_MIN_FEATURES;
+        opt.min_iter_for_ok = SPARSE_ALIGN_MIN_ITER_FOR_OK;
+        opt.fx              = FX;
+        opt.fy              = FY;
+        opt.cx              = CX;
+        opt.cy              = CY;
+        opt.image_width     = COL;
+        opt.image_height    = ROW;
+
+        // ----- (a) WITH IMU prior (the production path) -----
+        auto align_res = vins_sparse::sparseAlign(
+            prev_pyr_, cur_pyr_, cur_pts, ref_bearings,
+            R_prev_cur_, Eigen::Vector3d::Zero(), opt);
+
+        // D2.1: stash for the node to publish.
+        last_align_res_ = align_res;
+
+        // ----- (b) D2.2: PURE-VISION re-alignment for the td pre-calib.
+        //  Same pyr, same ref_pts, but lambda_rot=0 and R_prior=Identity.
+        //  The result R_vision is the rotation the camera would estimate
+        //  if the IMU were not biased by a wrong td.  We run this only
+        //  when the user enabled the calibrator (default off; cheap if on).
+        if (USE_TD_PRE_CALIB) {
+            vins_sparse::SparseAlignOptions opt_v = opt;
+            opt_v.lambda_rot   = 0.0;
+            opt_v.lambda_trans = 0.0;
+            last_align_vision_res_ = vins_sparse::sparseAlign(
+                prev_pyr_, cur_pyr_, cur_pts, ref_bearings,
+                Eigen::Matrix3d::Identity(), Eigen::Vector3d::Zero(), opt_v);
+            has_align_vision_res_ = true;
+        } else {
+            has_align_vision_res_ = false;
+        }
+
+        // Stats logging.
+        ++n_sparse_frames_;
+        if (align_res.success) ++n_sparse_success_;
+        n_sparse_meas_sum_   += align_res.n_meas;
+        n_sparse_chi2_sum_   += align_res.final_chi2;
+        n_sparse_time_sum_   += t_a.toc();
+        n_klt_for_align_sum_ += (int)cur_pts.size();
+
+        if ((++n_frames_seen_ % 10) == 0) {
+            double mean_chi2  = n_sparse_meas_sum_ > 0
+                                ? n_sparse_chi2_sum_ / n_sparse_frames_ : 0.0;
+            double mean_nmeas = n_sparse_frames_ > 0
+                                ? (double)n_sparse_meas_sum_ / n_sparse_frames_ : 0.0;
+            double mean_time  = n_sparse_frames_ > 0
+                                ? n_sparse_time_sum_ / n_sparse_frames_ : 0.0;
+            double succ_rate  = n_sparse_frames_ > 0
+                                ? 100.0 * n_sparse_success_ / n_sparse_frames_ : 0.0;
+            double mean_klt   = n_sparse_frames_ > 0
+                                ? (double)n_klt_for_align_sum_ / n_sparse_frames_ : 0.0;
+            RCUTILS_LOG_INFO(
+                "[SPARSE_STATS] frames=%d/%d success_rate=%.1f%% "
+                "mean_nmeas=%.0f mean_chi2=%.2f mean_time=%.2fms mean_klt=%.1f",
+                n_sparse_frames_, n_frames_seen_, succ_rate,
+                mean_nmeas, mean_chi2, mean_time, mean_klt);
+        }
+
+        // SVO-style window/level decision: the better the photometric
+        // fit, the smaller the KLT search window can be. We use the
+        // KLT start points unchanged (cur_pts in the previous frame's
+        // pixel coordinates) but shrink the KLT pyramid + window.
+        if (align_res.success && align_res.n_meas >= SPARSE_ALIGN_MIN_FEATURES) {
+            const double chi2 = align_res.final_chi2;
+            if (chi2 < 5.0) {
+                klt_win   = cv::Size(5, 5);
+                klt_level = 1;
+            } else if (chi2 < 15.0) {
+                klt_win   = cv::Size(9, 9);
+                klt_level = 1;
+            } else {
+                klt_win   = cv::Size(15, 15);
+                klt_level = 2;
+            }
+            used_sparse = true;
+        }
+    }
+
     if (cur_pts.size() > 0)
     {
         TicToc t_o;
         vector<uchar> status;
         vector<float> err;
-        cv::calcOpticalFlowPyrLK(cur_img, forw_img, cur_pts, forw_pts, status, err, cv::Size(21, 21), 3);
+        // KLT start points are always cur_pts (in the previous frame).
+        // The window/level come from sparse_align's confidence when
+        // available, else fall back to the original 21x21 / 3 levels.
+        cv::calcOpticalFlowPyrLK(cur_img, forw_img, cur_pts, forw_pts,
+                                  status, err, klt_win, klt_level);
 
         for (int i = 0; i < int(forw_pts.size()); i++)
             if (status[i] && !inBorder(forw_pts[i]))
@@ -121,7 +287,27 @@ void FeatureTracker::readImage(const cv::Mat &_img, double _cur_time)
         reduceVector(ids, status);
         reduceVector(cur_un_pts, status);
         reduceVector(track_cnt, status);
-        RCUTILS_LOG_DEBUG("temporal optical flow costs: %fms", t_o.toc());
+        RCUTILS_LOG_DEBUG("temporal optical flow costs: %fms "
+                          "(win=%dx%d lvls=%d sparse_prior=%d)",
+                          t_o.toc(), klt_win.width, klt_win.height,
+                          klt_level, (int)used_sparse);
+
+        // Aggregate KLT cost for periodic logging.
+        n_klt_calls_++;
+        n_klt_cost_sum_ += t_o.toc();
+        n_klt_w_  += klt_win.width;
+        n_klt_l_  += klt_level;
+        n_klt_sparse_prior_ += (int)used_sparse;
+        if ((n_klt_calls_ % 50) == 0) {
+            double mean_cost = n_klt_cost_sum_ / n_klt_calls_;
+            double mean_w    = (double)n_klt_w_ / n_klt_calls_;
+            double mean_l    = (double)n_klt_l_ / n_klt_calls_;
+            double prior_pct = 100.0 * n_klt_sparse_prior_ / n_klt_calls_;
+            RCUTILS_LOG_INFO(
+                "[KLT_STATS] frames=%d mean_cost=%.2fms mean_win=%.1f "
+                "mean_lvls=%.2f sparse_prior=%.1f%%",
+                n_klt_calls_, mean_cost, mean_w, mean_l, prior_pct);
+        }
     }
 
     for (auto &n : track_cnt)
@@ -129,8 +315,7 @@ void FeatureTracker::readImage(const cv::Mat &_img, double _cur_time)
 
     if (PUB_THIS_FRAME)
     {
-        rejectWithF();
-        RCUTILS_LOG_DEBUG("set mask begins");
+        rejectWithF();        RCUTILS_LOG_DEBUG("set mask begins");
         TicToc t_m;
         setMask();
         RCUTILS_LOG_DEBUG("set mask costs %fms", t_m.toc());
@@ -164,6 +349,8 @@ void FeatureTracker::readImage(const cv::Mat &_img, double _cur_time)
     cur_img = forw_img;
     cur_pts = forw_pts;
     undistortedPoints();
+    // Save the current image's pyramid as next frame's previous pyramid.
+    saved_prev_pyr_ = cur_pyr_;
     prev_time = cur_time;
 }
 

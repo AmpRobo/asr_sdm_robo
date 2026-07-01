@@ -5,9 +5,15 @@
 #include <sensor_msgs/msg/point_cloud.hpp>
 #include <sensor_msgs/msg/imu.hpp>
 #include <std_msgs/msg/bool.hpp>
+#include <std_msgs/msg/float64.hpp>
 #include <cv_bridge/cv_bridge.hpp>
+#include <cmath>
+#include <limits>
 
 #include "feature_tracker.h"
+#include "imu_preintegrate.h"
+#include "td_pre_calibrator/td_pre_calibrator.h"
+#include <asr_sdm_perception_msgs/msg/sparse_rot.hpp>
 
 #define SHOW_UNDISTORTION 0
 
@@ -18,13 +24,48 @@ queue<sensor_msgs::msg::Image::ConstPtr> img_buf;
 rclcpp::Publisher<sensor_msgs::msg::PointCloud>::SharedPtr pub_img;
 rclcpp::Publisher<sensor_msgs::msg::Image>::SharedPtr pub_match;
 rclcpp::Publisher<std_msgs::msg::Bool>::SharedPtr pub_restart;
+rclcpp::Publisher<asr_sdm_perception_msgs::msg::SparseRot>::SharedPtr pub_sparse_rot;
+rclcpp::Publisher<std_msgs::msg::Float64>::SharedPtr pub_td_estimate;   // D2.2
+rclcpp::Subscription<sensor_msgs::msg::Imu>::SharedPtr sub_imu;
 
 FeatureTracker trackerData[NUM_OF_CAM];
+vins_sparse::TdPreCalibrator td_calib[NUM_OF_CAM];   // D2.2
 double first_image_time;
 int pub_count = 1;
 bool first_image_flag = true;
 double last_image_time = 0;
 bool init_pub = 0;
+
+// D2.2: gyro history (1 s rolling) shared across cameras.
+std::vector<vins_sparse::GyroSample> g_gyro_buf;
+constexpr double kGyroWindowSec = 1.0;
+
+static void pruneGyroBufLocked(double t_min) {
+    size_t k = 0;
+    while (k < g_gyro_buf.size() && g_gyro_buf[k].t < t_min) ++k;
+    if (k > 0) g_gyro_buf.erase(g_gyro_buf.begin(),
+                                g_gyro_buf.begin() + (long)k);
+}
+
+void imu_callback(const sensor_msgs::msg::Imu::SharedPtr imu_msg)
+{
+    double t = imu_msg->header.stamp.sec +
+               imu_msg->header.stamp.nanosec * 1e-9;
+    Eigen::Vector3d gyro(imu_msg->angular_velocity.x,
+                         imu_msg->angular_velocity.y,
+                         imu_msg->angular_velocity.z);
+    Eigen::Vector3d accel(imu_msg->linear_acceleration.x,
+                          imu_msg->linear_acceleration.y,
+                          imu_msg->linear_acceleration.z);
+    for (int i = 0; i < NUM_OF_CAM; ++i) {
+        trackerData[i].addImuSample(t, gyro, accel);
+        // Keep ~1 second of IMU history for sparse-align priors.
+        trackerData[i].pruneImuBuffer(t - 1.0);
+    }
+    // D2.2: keep a *raw* gyro history for the td pre-calibrator.
+    g_gyro_buf.push_back({t, gyro.x(), gyro.y(), gyro.z()});
+    pruneGyroBufLocked(t - kGyroWindowSec);
+}
 
 void img_callback(const sensor_msgs::msg::Image::SharedPtr img_msg)
 {
@@ -84,6 +125,36 @@ void img_callback(const sensor_msgs::msg::Image::SharedPtr img_msg)
     // cv::imshow("img", show_img);
     // cv::waitKey(0);
     TicToc t_r;
+
+    // Build per-frame IMU rotation priors before readImage so that
+    // sparse-align has a warm start between consecutive frames.
+    {
+        double cur_t = img_msg->header.stamp.sec +
+                       img_msg->header.stamp.nanosec * 1e-9;
+        if (last_image_time > 0.0 && USE_SPARSE_ALIGN) {
+            for (int i = 0; i < NUM_OF_CAM; ++i) {
+                Eigen::Matrix3d R_prior = trackerData[i].imu_preint_
+                    .integrateRotation(last_image_time, cur_t);
+                trackerData[i].setImuRotationPrior(R_prior);
+            }
+        }
+        // D2.2: stage gyro samples inside the calibrator's per-frame
+        // window.  We do this *before* readImage so the calibrator's
+        // solve() can use the same buffer the align used.
+        if (USE_SPARSE_ALIGN && USE_TD_PRE_CALIB && last_image_time > 0.0) {
+            for (int i = 0; i < NUM_OF_CAM; ++i) {
+                if (!td_calib[i].beginFrame(last_image_time, cur_t)) {
+                    continue;   // dt too small
+                }
+                for (const auto& s : g_gyro_buf) {
+                    if (s.t < last_image_time) continue;
+                    if (s.t > cur_t) break;
+                    td_calib[i].addGyro(s.t, s.wx, s.wy, s.wz);
+                }
+            }
+        }
+    }
+
     for (int i = 0; i < NUM_OF_CAM; i++)
     {
         RCUTILS_LOG_DEBUG("processing camera %d", i);
@@ -103,6 +174,38 @@ void img_callback(const sensor_msgs::msg::Image::SharedPtr img_msg)
 #if SHOW_UNDISTORTION
         trackerData[i].showUndistortion("undistrotion_" + std::to_string(i));
 #endif
+    }
+
+    // D2.2: solve for td using the pure-vision align result.  We do this
+    // after readImage() so we can pull `last_align_vision_res_` for each
+    // camera.  Solve once per camera, then publish the median / first.
+    if (USE_SPARSE_ALIGN && USE_TD_PRE_CALIB && pub_td_estimate) {
+        double last_td = std::numeric_limits<double>::quiet_NaN();
+        double last_cost = std::numeric_limits<double>::quiet_NaN();
+        for (int i = 0; i < NUM_OF_CAM; ++i) {
+            if (!trackerData[i].has_align_vision_res_) continue;
+            const auto& v = trackerData[i].last_align_vision_res_;
+            if (!v.success || v.n_meas < 30) continue;
+            td_calib[i].setVisionRotation(v.R_k_kminus1);
+            double cost = 0.0;
+            double td = td_calib[i].solve(&cost);
+            if (std::isfinite(td)) {
+                last_td   = td;
+                last_cost = cost;
+                if (td_calib[i].numSolves() % 20 == 0) {
+                    RCUTILS_LOG_INFO(
+                        "[TD_PRE_CALIB] cam=%d solve#%d td=%.4fms cost=%.4fdeg mean_td=%.4fms",
+                        i, td_calib[i].numSolves(),
+                        td * 1000.0, cost * 180.0 / M_PI,
+                        td_calib[i].meanTd() * 1000.0);
+                }
+            }
+        }
+        if (std::isfinite(last_td)) {
+            std_msgs::msg::Float64 msg;
+            msg.data = last_td;
+            pub_td_estimate->publish(msg);
+        }
     }
 
     for (unsigned int i = 0;; i++)
@@ -171,6 +274,32 @@ void img_callback(const sensor_msgs::msg::Image::SharedPtr img_msg)
         else
             pub_img->publish(*feature_points);
 
+        // D2.1: publish sparse-align rotation result for the SPARSE1 pipeline.
+        // Skips frames where alignment failed or had too few measurements.
+        // Payload: asr_sdm_perception_msgs::SparseRot (row-major rot_mat[9], success, chi2, n_meas, iterations, stamp_sec)
+        if (USE_SPARSE_ALIGN && pub_sparse_rot != nullptr) {
+            for (int i = 0; i < NUM_OF_CAM; ++i) {
+                const auto& res = trackerData[i].last_align_res_;
+                // Gate: success == true AND n_meas >= 30
+                if (!res.success || res.n_meas < 30) continue;
+
+                asr_sdm_perception_msgs::msg::SparseRot msg;
+                msg.header = img_msg->header;
+                msg.header.frame_id = "world";
+                const Eigen::Matrix3d& R = res.R_k_kminus1;
+                for (int r = 0; r < 3; ++r)
+                    for (int c = 0; c < 3; ++c)
+                        msg.rot_mat[r * 3 + c] = R(r, c);
+                msg.success     = res.success;
+                msg.chi2        = static_cast<float>(res.final_chi2);
+                msg.n_meas      = res.n_meas;
+                msg.iterations   = res.iterations;
+                msg.stamp_sec   = img_msg->header.stamp.sec +
+                                  img_msg->header.stamp.nanosec * 1e-9;
+                pub_sparse_rot->publish(msg);
+            }
+        }
+
         if (SHOW_TRACK)
         {
             ptr = cv_bridge::cvtColor(ptr, sensor_msgs::image_encodings::BGR8);
@@ -236,9 +365,24 @@ int main(int argc, char **argv)
 
     auto sub_img = n->create_subscription<sensor_msgs::msg::Image>(IMAGE_TOPIC, rclcpp::QoS(rclcpp::KeepLast(100)), img_callback);
 
+    if (USE_SPARSE_ALIGN) {
+        sub_imu = n->create_subscription<sensor_msgs::msg::Imu>(
+            IMU_TOPIC, rclcpp::SensorDataQoS(), imu_callback);
+        RCLCPP_INFO(n->get_logger(),
+                    "Sparse image alignment enabled, subscribing to IMU %s",
+                    IMU_TOPIC.c_str());
+    }
+
     pub_img = n->create_publisher<sensor_msgs::msg::PointCloud>("feature", 1000);
     pub_match = n->create_publisher<sensor_msgs::msg::Image>("feature_img",1000);
     pub_restart = n->create_publisher<std_msgs::msg::Bool>("restart",1000);
+    pub_sparse_rot = n->create_publisher<asr_sdm_perception_msgs::msg::SparseRot>("sparse_rot", 1000);
+    if (USE_SPARSE_ALIGN && USE_TD_PRE_CALIB) {
+        pub_td_estimate = n->create_publisher<std_msgs::msg::Float64>(
+            "td_estimate", 100);
+        RCLCPP_INFO(n->get_logger(),
+                    "td pre-calibrator enabled, publishing /td_estimate");
+    }
     /*
     if (SHOW_TRACK)
         cv::namedWindow("vis", cv::WINDOW_NORMAL);
