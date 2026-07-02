@@ -18,6 +18,12 @@ rclcpp::Publisher<nav_msgs::msg::Odometry>::SharedPtr pub_keyframe_pose;
 rclcpp::Publisher<sensor_msgs::msg::PointCloud>::SharedPtr pub_keyframe_point;
 rclcpp::Publisher<nav_msgs::msg::Odometry>::SharedPtr pub_extrinsic;
 
+// PointCloud2 publishers produced via pcl_conversions::toROSMsg from
+// pcl::PointCloud<pcl::PointXYZ>. No hand-packed PointCloud2 fields anywhere.
+rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr pub_point_cloud2;
+rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr pub_margin_cloud2;
+rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr pub_keyframe_point2;
+
 CameraPoseVisualization cameraposevisual(0, 1, 0, 1);
 CameraPoseVisualization keyframebasevisual(0.0, 0.0, 1.0, 1.0);
 static double sum_of_path = 0;
@@ -41,6 +47,9 @@ void registerPub(rclcpp::Node::SharedPtr n)
     pub_keyframe_point = n->create_publisher<sensor_msgs::msg::PointCloud>("keyframe_point", 1000);
     pub_extrinsic = n->create_publisher<nav_msgs::msg::Odometry>("extrinsic", 1000);
     pub_relo_relative_pose=  n->create_publisher<nav_msgs::msg::Odometry>("relo_relative_pose", 1000);
+    pub_point_cloud2       = n->create_publisher<sensor_msgs::msg::PointCloud2>("point_cloud2",     1000);
+    pub_margin_cloud2      = n->create_publisher<sensor_msgs::msg::PointCloud2>("history_cloud2",   1000);
+    pub_keyframe_point2    = n->create_publisher<sensor_msgs::msg::PointCloud2>("keyframe_point2",  1000);
 
     br = std::make_shared<tf2_ros::TransformBroadcaster>(n);
 
@@ -251,7 +260,14 @@ void pubPointCloud(const Estimator &estimator, const std_msgs::msg::Header &head
     point_cloud.header = header;
     loop_point_cloud.header = header;
 
+    // Build the matching PointCloud2 via pcl_conversions; the same loop body
+    // populates both the legacy PointCloud and a pcl::PointCloud<pcl::PointXYZ>
+    // so we never hand-pack PointCloud2 fields.
+    pcl::PointCloud<pcl::PointXYZ> active_cloud;
+    pcl::PointCloud<pcl::PointXYZ> margin_pcl_cloud;
 
+    size_t active_count = 0;
+    size_t margin_count = 0;
     for (auto &it_per_id : estimator.f_manager.feature)
     {
         int used_num;
@@ -269,8 +285,23 @@ void pubPointCloud(const Estimator &estimator, const std_msgs::msg::Header &head
         p.y = w_pts_i(1);
         p.z = w_pts_i(2);
         point_cloud.points.push_back(p);
+
+        pcl::PointXYZ pt;
+        pt.x = static_cast<float>(w_pts_i(0));
+        pt.y = static_cast<float>(w_pts_i(1));
+        pt.z = static_cast<float>(w_pts_i(2));
+        active_cloud.points.push_back(pt);
+        ++active_count;
+        ++margin_count;
     }
+    active_cloud.width = static_cast<uint32_t>(active_count);
+    active_cloud.height = 1;
+    active_cloud.is_dense = true;
+    sensor_msgs::msg::PointCloud2 active_msg;
+    pcl::toROSMsg(active_cloud, active_msg);
+    active_msg.header = header;
     pub_point_cloud->publish(point_cloud);
+    pub_point_cloud2->publish(active_msg);
 
 
     // pub margined potin
@@ -278,7 +309,7 @@ void pubPointCloud(const Estimator &estimator, const std_msgs::msg::Header &head
     margin_cloud.header = header;
 
     for (auto &it_per_id : estimator.f_manager.feature)
-    { 
+    {
         int used_num;
         used_num = it_per_id.feature_per_frame.size();
         if (!(used_num >= 2 && it_per_id.start_frame < WINDOW_SIZE - 2))
@@ -286,7 +317,7 @@ void pubPointCloud(const Estimator &estimator, const std_msgs::msg::Header &head
         //if (it_per_id->start_frame > WINDOW_SIZE * 3.0 / 4.0 || it_per_id->solve_flag != 1)
         //        continue;
 
-        if (it_per_id.start_frame == 0 && it_per_id.feature_per_frame.size() <= 2 
+        if (it_per_id.start_frame == 0 && it_per_id.feature_per_frame.size() <= 2
             && it_per_id.solve_flag == 1 )
         {
             int imu_i = it_per_id.start_frame;
@@ -298,9 +329,22 @@ void pubPointCloud(const Estimator &estimator, const std_msgs::msg::Header &head
             p.y = w_pts_i(1);
             p.z = w_pts_i(2);
             margin_cloud.points.push_back(p);
+
+            pcl::PointXYZ pt;
+            pt.x = static_cast<float>(w_pts_i(0));
+            pt.y = static_cast<float>(w_pts_i(1));
+            pt.z = static_cast<float>(w_pts_i(2));
+            margin_pcl_cloud.points.push_back(pt);
         }
     }
+    margin_pcl_cloud.width = static_cast<uint32_t>(margin_count);
+    margin_pcl_cloud.height = 1;
+    margin_pcl_cloud.is_dense = true;
+    sensor_msgs::msg::PointCloud2 margin_msg;
+    pcl::toROSMsg(margin_pcl_cloud, margin_msg);
+    margin_msg.header = header;
     pub_margin_cloud->publish(margin_cloud);
+    pub_margin_cloud2->publish(margin_msg);
 }
 
 
@@ -400,6 +444,12 @@ void pubKeyframe(const Estimator &estimator)
 
         sensor_msgs::msg::PointCloud point_cloud;
         point_cloud.header = estimator.Headers[WINDOW_SIZE - 2];
+        // Buffer used to build the matching PointCloud2 via pcl_conversions;
+        // we drop the per-feature 2D channel here because pcl::PointXYZ has no
+        // slot for it. Consumers that need image coordinates should keep using
+        // the legacy `keyframe_point` topic; new consumers use `keyframe_point2`.
+        pcl::PointCloud<pcl::PointXYZ> keyframe_pcl;
+        size_t keyframe_count = 0;
         for (auto &it_per_id : estimator.f_manager.feature)
         {
             int frame_size = it_per_id.feature_per_frame.size();
@@ -424,10 +474,24 @@ void pubKeyframe(const Estimator &estimator)
                 p_2d.values.push_back(it_per_id.feature_per_frame[imu_j].uv.y());
                 p_2d.values.push_back(it_per_id.feature_id);
                 point_cloud.channels.push_back(p_2d);
+
+                pcl::PointXYZ pt;
+                pt.x = static_cast<float>(w_pts_i(0));
+                pt.y = static_cast<float>(w_pts_i(1));
+                pt.z = static_cast<float>(w_pts_i(2));
+                keyframe_pcl.points.push_back(pt);
+                ++keyframe_count;
             }
 
         }
+        keyframe_pcl.width  = static_cast<uint32_t>(keyframe_count);
+        keyframe_pcl.height = 1;
+        keyframe_pcl.is_dense = true;
+        sensor_msgs::msg::PointCloud2 keyframe_msg;
+        pcl::toROSMsg(keyframe_pcl, keyframe_msg);
+        keyframe_msg.header = estimator.Headers[WINDOW_SIZE - 2];
         pub_keyframe_point->publish(point_cloud);
+        pub_keyframe_point2->publish(keyframe_msg);
     }
 }
 

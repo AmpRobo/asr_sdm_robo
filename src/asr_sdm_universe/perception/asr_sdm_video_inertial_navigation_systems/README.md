@@ -168,9 +168,13 @@ source install/setup.bash
 colcon build --packages-select feature_tracker
 
 # b) 干净环境 / 第一次构建：把 VINS 完整链全部 build
+#    asr_sdm_vio_marker_adapter 是 VIO→ESDF 的桥接节点
+#    (PointCloud->Marker, Odometry->PoseWithCovarianceStamped)
+#    —— d435i_combined.launch.py 启动时需要它
 colcon build --packages-up-to camera_model feature_tracker \
                                  vins_estimator pose_graph \
-                                 benchmark_publisher ar_demo config_pkg
+                                 benchmark_publisher ar_demo config_pkg \
+                                 asr_sdm_vio_marker_adapter
 
 # 2) launch（同时跑 ORIGINAL + SPARSE1，对比用）
 ros2 launch src/asr_sdm_universe/perception/asr_sdm_video_inertial_navigation_systems/vins_estimator/launch/d435i_combined.launch.py enable_sparse1:=1

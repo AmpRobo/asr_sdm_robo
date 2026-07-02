@@ -19,6 +19,9 @@ find_package(cv_bridge REQUIRED)
 find_package(camera_model REQUIRED)
 find_package(image_transport REQUIRED)
 find_package(asr_sdm_perception_msgs REQUIRED)   # D2.1: SparseRot.msg
+find_package(PCL REQUIRED QUIET COMPONENTS common)
+find_package(pcl_msgs REQUIRED)
+find_package(pcl_conversions REQUIRED)
 
 find_package(OpenCV 4 REQUIRED)
 find_package(Ceres REQUIRED)
@@ -50,9 +53,10 @@ add_executable(vins_estimator
     src/initial/initial_ex_rotation.cpp
     )
 
-ament_target_dependencies(vins_estimator rclcpp rcpputils std_msgs sensor_msgs visualization_msgs geometry_msgs nav_msgs tf2 tf2_ros cv_bridge camera_model image_transport asr_sdm_perception_msgs)
+ament_target_dependencies(vins_estimator rclcpp rcpputils std_msgs sensor_msgs visualization_msgs geometry_msgs nav_msgs tf2 tf2_ros cv_bridge camera_model image_transport asr_sdm_perception_msgs pcl_msgs pcl_conversions)
 
-target_link_libraries(vins_estimator ${OpenCV_LIBS} ${CERES_LIBRARIES}) 
+target_compile_options(vins_estimator PUBLIC ${PCL_CFLAGS_OTHER})
+target_link_libraries(vins_estimator ${OpenCV_LIBS} ${CERES_LIBRARIES} ${PCL_COMMON_LIBRARIES} ${PCL_IO_LIBRARIES})
 
 # Install nodes
 install(
