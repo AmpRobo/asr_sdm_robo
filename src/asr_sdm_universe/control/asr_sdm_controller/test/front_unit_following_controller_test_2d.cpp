@@ -1,4 +1,4 @@
-#include "asr_sdm_controller/front_unit_following_controller.hpp"
+#include "asr_sdm_controller/front_unit_following_controller_2d.hpp"
 #include "asr_sdm_controller/robot_model.hpp"
 #include "third_party/matplotlibcpp.h"
 

@@ -709,34 +709,63 @@ void plot3(const std::vector<Numeric> &x,
                          PyString_FromString(it->second.c_str()));
   }
 
-  PyObject *fig_args = PyTuple_New(1);
   PyObject* fig = nullptr;
-  PyTuple_SetItem(fig_args, 0, PyLong_FromLong(fig_number));
-  PyObject *fig_exists =
-    PyObject_CallObject(detail::_interpreter::get().s_python_function_fignum_exists, fig_args);
-  if (!PyObject_IsTrue(fig_exists)) {
-    fig = PyObject_CallObject(detail::_interpreter::get().s_python_function_figure,
-      detail::_interpreter::get().s_python_empty_tuple);
+  if (fig_number <= 0) {
+    PyObject *pyplot_name = PyString_FromString("matplotlib.pyplot");
+    PyObject *pyplot = PyImport_Import(pyplot_name);
+    Py_DECREF(pyplot_name);
+    if (!pyplot) throw std::runtime_error("Error loading module matplotlib.pyplot!");
+
+    PyObject *gcf = PyObject_GetAttrString(pyplot, "gcf");
+    if (!gcf) throw std::runtime_error("No gcf");
+    fig = PyObject_CallObject(gcf, detail::_interpreter::get().s_python_empty_tuple);
+
+    Py_DECREF(gcf);
+    Py_DECREF(pyplot);
   } else {
-    fig = PyObject_CallObject(detail::_interpreter::get().s_python_function_figure,
-      fig_args);
+    PyObject *fig_args = PyTuple_New(1);
+    PyTuple_SetItem(fig_args, 0, PyLong_FromLong(fig_number));
+    PyObject *fig_exists =
+      PyObject_CallObject(detail::_interpreter::get().s_python_function_fignum_exists, fig_args);
+    if (!PyObject_IsTrue(fig_exists)) {
+      fig = PyObject_CallObject(detail::_interpreter::get().s_python_function_figure,
+        detail::_interpreter::get().s_python_empty_tuple);
+    } else {
+      fig = PyObject_CallObject(detail::_interpreter::get().s_python_function_figure,
+        fig_args);
+    }
+    Py_DECREF(fig_exists);
+    Py_DECREF(fig_args);
   }
   if (!fig) throw std::runtime_error("Call to figure() failed.");
 
-  PyObject *gca_kwargs = PyDict_New();
-  PyDict_SetItemString(gca_kwargs, "projection", PyString_FromString("3d"));
+  PyObject *axes = PyObject_GetAttrString(fig, "axes");
+  if (!axes) throw std::runtime_error("No axes list");
 
-  PyObject *gca = PyObject_GetAttrString(fig, "gca");
-  if (!gca) throw std::runtime_error("No gca");
-  Py_INCREF(gca);
-  PyObject *axis = PyObject_Call(
-      gca, detail::_interpreter::get().s_python_empty_tuple, gca_kwargs);
+  PyObject *axis = nullptr;
+  const Py_ssize_t axis_count = PySequence_Size(axes);
+  if (axis_count > 0) {
+    axis = PySequence_GetItem(axes, axis_count - 1);
+  } else {
+    PyObject *subplot_args = PyTuple_New(1);
+    PyTuple_SetItem(subplot_args, 0, PyLong_FromLong(111));
 
+    PyObject *subplot_kwargs = PyDict_New();
+    PyObject *projection = PyString_FromString("3d");
+    PyDict_SetItemString(subplot_kwargs, "projection", projection);
+    Py_DECREF(projection);
+
+    PyObject *add_subplot = PyObject_GetAttrString(fig, "add_subplot");
+    if (!add_subplot) throw std::runtime_error("No add_subplot");
+    axis = PyObject_Call(add_subplot, subplot_args, subplot_kwargs);
+
+    Py_DECREF(add_subplot);
+    Py_DECREF(subplot_args);
+    Py_DECREF(subplot_kwargs);
+  }
+
+  Py_DECREF(axes);
   if (!axis) throw std::runtime_error("No axis");
-  Py_INCREF(axis);
-
-  Py_DECREF(gca);
-  Py_DECREF(gca_kwargs);
 
   PyObject *plot3 = PyObject_GetAttrString(axis, "plot");
   if (!plot3) throw std::runtime_error("No 3D line plot");

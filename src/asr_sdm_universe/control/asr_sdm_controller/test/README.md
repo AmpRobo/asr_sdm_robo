@@ -1,49 +1,37 @@
-# front_unit_following_controller_test_2d
+# front-unit-following 离线仿真测试
 
-## 目录结构
-
-```
-test/
-├── README.md
-├── front_unit_following_controller_test_2d.cpp
-└── third_party/
-    ├── matplotlibcpp.h          # vendored from matplotlib-cpp
-    └── LICENSE.matplotlibcpp
-```
-
-## 依赖
-
-- Python 3 开发包（`Python3::Python`）+ NumPy（`Python3::NumPy`）
-- 运行时：`python3-matplotlib`、`python3-tk`（或其它可用的 matplotlib 后端）
-- 图形界面（`$DISPLAY` 可用）
-
-Ubuntu 24.04 上安装：
-
-```bash
-sudo apt install python3-dev python3-numpy python3-matplotlib python3-tk
-```
+该目录包含 2D 和 3D 前端跟随控制器的离线仿真程序。
 
 ## 编译
 
-在工作空间根目录 `~/asr_sdm_robo` 执行：
-
 ```bash
-
+cd ~/asr_sdm_robo
 colcon build --packages-up-to asr_sdm_controller
+source install/setup.bash
 ```
 
-## 运行
+## 启动 2D 离线仿真
 
 ```bash
-source install/setup.bash
 ros2 run asr_sdm_controller front_unit_following_controller_test_2d
 ```
 
-预期效果：弹出 1000×760 窗口，含 2×2 子图
+关闭弹出的绘图窗口或按 `Ctrl+C` 退出。
 
-1. 头部 / 三关节 / 尾部轨迹 + 当前 body
-2. 当前 body shape
-3. 三关节角 `phi1/phi2/phi3` 随时间曲线
-4. 头部命令 `v` / `omega` 曲线
+## 启动 3D 离线仿真
 
- `Ctrl+C` 或关闭窗口退出。
+```bash
+ros2 run asr_sdm_controller front_unit_following_controller_test_3d
+```
+
+关闭弹出的绘图窗口或按 `Ctrl+C` 退出。
+
+## 文件作用
+
+| 文件 | 作用 |
+|---|---|
+| `front_unit_following_controller_test_2d.cpp` | 运行 2D 前端跟随离线仿真，并绘制头部、关节、尾部轨迹和关节角曲线。 |
+| `front_unit_following_controller_test_3d.cpp` | 运行 3D 前端跟随离线仿真，并绘制空间 body 轨迹、关节角和跟随误差。 |
+| `third_party/matplotlibcpp.h` | 2D 测试使用的 matplotlib C++ 封装头文件。 |
+| `third_party/LICENSE.matplotlibcpp` | matplotlibcpp 的许可证文件。 |
+| `README.md` | 当前说明文档。 |
