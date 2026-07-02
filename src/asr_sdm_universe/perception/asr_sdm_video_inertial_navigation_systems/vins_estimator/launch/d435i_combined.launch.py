@@ -204,21 +204,6 @@ def _launch_pipelines(context, *args, **kwargs):
                     remappings=pg_remaps,
                 ),
             ]),
-            # Bridge VIO output → ESDF-map input.
-            # Lives outside the <ns> group so its output topics are at the
-            # absolute paths ESDF expects (/localization/video_inertial_odom/*).
-            # Input subscriptions are remapped from the C++ absolute names
-            # to the pipeline namespaced names.
-            Node(
-                package='asr_sdm_vio_marker_adapter',
-                executable='marker_adapter_node',
-                name='vio_marker_adapter',
-                output='screen',
-                remappings=[
-                    ('/vins_estimator/keyframe_point', f'/{ns}/keyframe_point'),
-                    ('/vins_estimator/odometry',        f'/{ns}/odometry'),
-                ],
-            ),
         ]
 
     if enable_original == '1':

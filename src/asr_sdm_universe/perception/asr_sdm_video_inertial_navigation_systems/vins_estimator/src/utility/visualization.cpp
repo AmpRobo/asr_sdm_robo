@@ -24,6 +24,13 @@ rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr pub_point_cloud2;
 rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr pub_margin_cloud2;
 rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr pub_keyframe_point2;
 
+// ESDF-map bridge topics. These use *absolute* topic names so the launch file
+// can leave them alone and ESDF (which subscribes to
+// /localization/video_inertial_odom/{points,pose}) consumes them directly,
+// without needing a separate adapter node.
+rclcpp::Publisher<visualization_msgs::msg::Marker>::SharedPtr pub_keyframe_marker;
+rclcpp::Publisher<geometry_msgs::msg::PoseWithCovarianceStamped>::SharedPtr pub_odom_pose_cov;
+
 CameraPoseVisualization cameraposevisual(0, 1, 0, 1);
 CameraPoseVisualization keyframebasevisual(0.0, 0.0, 1.0, 1.0);
 static double sum_of_path = 0;
@@ -50,6 +57,11 @@ void registerPub(rclcpp::Node::SharedPtr n)
     pub_point_cloud2       = n->create_publisher<sensor_msgs::msg::PointCloud2>("point_cloud2",     1000);
     pub_margin_cloud2      = n->create_publisher<sensor_msgs::msg::PointCloud2>("history_cloud2",   1000);
     pub_keyframe_point2    = n->create_publisher<sensor_msgs::msg::PointCloud2>("keyframe_point2",  1000);
+    // ESDF-map bridge topics (absolute names — do NOT namespace via __ns).
+    pub_keyframe_marker    = n->create_publisher<visualization_msgs::msg::Marker>(
+        "/localization/video_inertial_odom/points", 1000);
+    pub_odom_pose_cov      = n->create_publisher<geometry_msgs::msg::PoseWithCovarianceStamped>(
+        "/localization/video_inertial_odom/pose", 1000);
 
     br = std::make_shared<tf2_ros::TransformBroadcaster>(n);
 
@@ -141,6 +153,24 @@ void pubOdometry(const Estimator &estimator, const std_msgs::msg::Header &header
         odometry.twist.twist.linear.y = estimator.Vs[WINDOW_SIZE].y();
         odometry.twist.twist.linear.z = estimator.Vs[WINDOW_SIZE].z();
         pub_odometry->publish(odometry);
+
+        // ESDF-map bridge: Odometry -> PoseWithCovarianceStamped, copied
+        // directly into ESDF's expected topic. VINS does not publish a
+        // covariance; fill the diagonal with a small constant that
+        // represents the typical VIO drift (1e-2 m², 1e-4 rad²). Any
+        // downstream filter can still override these values.
+        geometry_msgs::msg::PoseWithCovarianceStamped pose_cov;
+        pose_cov.header = header;
+        pose_cov.header.frame_id = "world";
+        pose_cov.pose.pose = odometry.pose.pose;
+        for (int i = 0; i < 36; ++i) pose_cov.pose.covariance[i] = 0.0;
+        pose_cov.pose.covariance[0]  = 1e-2;
+        pose_cov.pose.covariance[7]  = 1e-2;
+        pose_cov.pose.covariance[14] = 1e-2;
+        pose_cov.pose.covariance[21] = 1e-4;
+        pose_cov.pose.covariance[28] = 1e-4;
+        pose_cov.pose.covariance[35] = 1e-4;
+        pub_odom_pose_cov->publish(pose_cov);
 
         geometry_msgs::msg::PoseStamped pose_stamped;
         pose_stamped.header = header;
@@ -492,6 +522,33 @@ void pubKeyframe(const Estimator &estimator)
         keyframe_msg.header = estimator.Headers[WINDOW_SIZE - 2];
         pub_keyframe_point->publish(point_cloud);
         pub_keyframe_point2->publish(keyframe_msg);
+
+        // ESDF-map bridge: rebuild a POINTS Marker from the same PCL buffer
+        // (pcl::PointXYZ is converted back to geometry_msgs::Point here).
+        visualization_msgs::msg::Marker marker;
+        marker.header = keyframe_msg.header;
+        marker.header.frame_id = "world";
+        marker.ns = "pts";
+        marker.id = 0;
+        marker.type = visualization_msgs::msg::Marker::POINTS;
+        marker.action = visualization_msgs::msg::Marker::ADD;
+        marker.scale.x = 0.05;
+        marker.scale.y = 0.05;
+        marker.scale.z = 0.05;
+        marker.color.a = 1.0;
+        marker.color.r = 1.0;
+        marker.color.g = 1.0;
+        marker.color.b = 1.0;
+        marker.points.reserve(keyframe_pcl.points.size());
+        for (const auto &pt : keyframe_pcl.points)
+        {
+            geometry_msgs::msg::Point gp;
+            gp.x = pt.x;
+            gp.y = pt.y;
+            gp.z = pt.z;
+            marker.points.push_back(gp);
+        }
+        pub_keyframe_marker->publish(marker);
     }
 }
 

@@ -12,6 +12,7 @@
 #include <nav_msgs/msg/path.hpp>
 #include <nav_msgs/msg/odometry.hpp>
 #include <geometry_msgs/msg/point_stamped.h>
+#include <geometry_msgs/msg/pose_with_covariance_stamped.hpp>
 #include <visualization_msgs/msg/marker.h>
 #include <tf2_ros/transform_broadcaster.h>
 #include <tf2/LinearMath/Quaternion.h>
@@ -41,6 +42,9 @@ extern nav_msgs::msg::Path path;
 extern rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr pub_point_cloud2;
 extern rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr pub_margin_cloud2;
 extern rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr pub_keyframe_point2;
+// ESDF-map bridge publishers — see visualization.cpp for details.
+extern rclcpp::Publisher<visualization_msgs::msg::Marker>::SharedPtr pub_keyframe_marker;
+extern rclcpp::Publisher<geometry_msgs::msg::PoseWithCovarianceStamped>::SharedPtr pub_odom_pose_cov;
 
 void registerPub(rclcpp::Node::SharedPtr n);
 

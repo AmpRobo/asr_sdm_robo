@@ -173,8 +173,7 @@ colcon build --packages-select feature_tracker
 #    —— d435i_combined.launch.py 启动时需要它
 colcon build --packages-up-to camera_model feature_tracker \
                                  vins_estimator pose_graph \
-                                 benchmark_publisher ar_demo config_pkg \
-                                 asr_sdm_vio_marker_adapter
+                                 benchmark_publisher ar_demo config_pkg 
 
 # 2) launch（同时跑 ORIGINAL + SPARSE1，对比用）
 ros2 launch src/asr_sdm_universe/perception/asr_sdm_video_inertial_navigation_systems/vins_estimator/launch/d435i_combined.launch.py enable_sparse1:=1
