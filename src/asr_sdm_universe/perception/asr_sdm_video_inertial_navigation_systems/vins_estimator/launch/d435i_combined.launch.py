@@ -39,6 +39,7 @@ SPARSE_SECTION_BODY = (
 
 
 def _materialize_config(context, *args, **kwargs):
+    config_pkg_path = get_package_share_directory('config_pkg')
     base_path = context.perform_substitution(
         PathJoinSubstitution([
             get_package_share_directory('config_pkg'),
@@ -69,9 +70,10 @@ def _materialize_config(context, *args, **kwargs):
         'pose_graph_save_path: "/home/lxy/output/pose_graph/"',
         'pose_graph_save_path: "/home/lxy/output/pose_graph/sparse1/"', 1)
 
-    os.makedirs('/tmp/vins_d435i_configs', exist_ok=True)
-    original_cfg = '/tmp/vins_d435i_configs/realsense_d435i_original.yaml'
-    sparse1_cfg = '/tmp/vins_d435i_configs/realsense_d435i_sparse1.yaml'
+    output_cfg_dir = os.path.join(config_pkg_path, 'config/realsense')
+    os.makedirs(output_cfg_dir, exist_ok=True)
+    original_cfg = os.path.join(output_cfg_dir, 'realsense_d435i_original.yaml')
+    sparse1_cfg = os.path.join(output_cfg_dir, 'realsense_d435i_sparse1.yaml')
     with open(original_cfg, 'w') as f:
         f.write(original_text)
     with open(sparse1_cfg, 'w') as f:
@@ -92,9 +94,11 @@ def _launch_pipelines(context, *args, **kwargs):
 
     config_pkg_path = get_package_share_directory('config_pkg')
     cfg_original = context.launch_configurations.get(
-        '__vins_cfg_original', '/tmp/vins_d435i_configs/realsense_d435i_original.yaml')
+        '__vins_cfg_original',
+        os.path.join(config_pkg_path, 'config/realsense/realsense_d435i_original.yaml'))
     cfg_sparse1 = context.launch_configurations.get(
-        '__vins_cfg_sparse1', '/tmp/vins_d435i_configs/realsense_d435i_sparse1.yaml')
+        '__vins_cfg_sparse1',
+        os.path.join(config_pkg_path, 'config/realsense/realsense_d435i_sparse1.yaml'))
 
     actions = []
 
