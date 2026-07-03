@@ -62,10 +62,8 @@ void readParameters(rclcpp::Node::SharedPtr &n)
     {
         RCLCPP_ERROR_STREAM(n->get_logger(), "ERROR: Wrong path to settings");
     }
-    // config_pkg_share points to <pkg>/share/config_pkg
-    // d435i_cam_calibration.yaml is at: config_pkg_share/config/realsense/
-    // Try config_pkg_share first, then fall back to vins_folder for backwards
-    // compatibility with the original d435i_combined.launch.py.
+    // config_pkg_share points to <pkg>/share/config_pkg. Used to resolve
+    // auxiliary files (e.g. fisheye_mask.jpg). Optional: pass via launch param.
     std::string config_pkg_share;
     config_pkg_share = readParam<std::string>(n, "config_pkg_share");
     if (config_pkg_share.empty()) {
@@ -100,12 +98,18 @@ void readParameters(rclcpp::Node::SharedPtr &n)
     CY = pp["cy"];
     FOCAL_LENGTH = static_cast<int>(0.5 * (FX + FY));
 
-    // Load camera intrinsics from the Euroc-format calibration file.
-    // The main config_file is a VINS YAML (wrong format for camodocal).
-    // The calibration file is at config_pkg_share/config/realsense/d435i_cam_calibration.yaml
-    std::string calib_path = config_pkg_share + "/config/realsense/d435i_cam_calibration.yaml";
-    RCLCPP_INFO_STREAM(n->get_logger(), "calibration_file: " << calib_path);
-    CAM_NAMES.push_back(calib_path);
+    // Resolve camera calibration file for camodocal.
+    // Default: reuse the main config_file, which is expected to be a camodocal-
+    // compatible OpenCV YAML (model_type + distortion_parameters +
+    // projection_parameters + image_width/height). Extra VINS fields are
+    // ignored by camodocal. Override with launch param `camera_calibration_file`
+    // to point at a separate calibration yaml if desired.
+    std::string calib_file = readParam<std::string>(n, "camera_calibration_file");
+    if (calib_file.empty()) {
+        calib_file = config_file;
+    }
+    RCLCPP_INFO_STREAM(n->get_logger(), "calibration_file: " << calib_file);
+    CAM_NAMES.push_back(calib_file);
 
     // Sparse image alignment parameters (all optional, default off).
     auto readInt = [&](const char* key, int default_v) {
@@ -139,7 +143,6 @@ void readParameters(rclcpp::Node::SharedPtr &n)
 
     WINDOW_SIZE = 20;
     STEREO_TRACK = false;
-    FOCAL_LENGTH = 460;
     PUB_THIS_FRAME = false;
 
     if (FREQ == 0)

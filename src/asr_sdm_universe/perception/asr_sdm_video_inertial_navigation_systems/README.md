@@ -217,3 +217,66 @@ ros2 launch src/asr_sdm_universe/perception/asr_sdm_video_inertial_navigation_sy
 砍掉一半、深度砍掉 1/3；sparse 自身额外 ~1ms/帧的代价换来的是更稳的 KLT 起点
 预测，是为后续在快速运动场景下使用更激进 KLT 窗、或者把 sparse R publish 给
 VINS 当帧间 R 先验（方向 B）打基础的中间步骤。
+
+# 10. 统一启动入口 `vins_launch.py`
+
+`vins_estimator/launch/vins_launch.py` 是一条不带 D435i 偏见的一键启动入口：
+- 同一份 launch 既能跑 EuRoC 也能跑 D435i / 自定义 rosbag / mcap。
+- 通过 `config_file` 参数指定数据集对应的 VINS yaml（image_topic / imu_topic /
+  `model_type` + `distortion_parameters` + `projection_parameters` +
+  `image_width/height` 都从这一份 yaml 读）。
+- `enable_sparse:=1` 切到第 9 节描述的 SVO-style sparse photometric alignment
+  前端；`enable_sparse:=0` 走原始 KLT 路线。
+- 启动时会把 `config_file` 拷贝到 `install/config_pkg/share/config_pkg/config/`
+  下，必要时追加 `# Sparse image alignment` 小节（已有则覆盖），
+  之后用这份 materialized yaml 喂给 feature_tracker / vins_estimator / pose_graph。
+
+## 10.1 用法
+
+```bash
+# 直接使用默认 EuRoC 配置
+ros2 launch vins_estimator vins_launch.py enable_sparse:=1
+
+# 或者显式指定其他数据集
+ros2 launch vins_estimator vins_launch.py \
+  config_file:=/path/to/config_pkg/config/realsense/realsense_d435i_config.yaml \
+  enable_sparse:=1
+```
+
+## 10.2 相机校准文件选择
+
+`feature_tracker` 内部用 camodocal 解析相机内参 + 畸变。
+解析来源由 launch 参数 `camera_calibration_file` 控制：
+
+- **不传**（默认）：使用 `config_file` 本身作为校准文件。前提是这份 yaml
+  是 camodocal 兼容的 OpenCV YAML（`model_type` + `distortion_parameters` +
+  `projection_parameters` + `image_width`/`image_height`），其他 VINS
+  字段（`imu_topic`、`extrinsicRotation` 等）会被 camodocal 静默忽略。
+  EuRoC / D435i 自带的 `euroc_config.yaml` / `realsense_d435i_config.yaml`
+  都满足此要求。
+- **显式传入**：把它指向单独的校准 yaml 即可。
+
+> **历史 bug 修复**：之前 `feature_tracker` 内部把校准文件硬编码为
+> `config_pkg/config/realsense/d435i_cam_calibration.yaml`，导致换数据集时
+> feature_tracker 仍然用 D435i 的 640×480 内参（fx=453 / fy=603.9 / k1=0）
+> 处理 EuRoC 752×480 灰度图，几何完全错位、轨迹瞬间漂到几十米外。
+> 该硬编码已删除，由 `camera_calibration_file` launch 参数替代。
+
+## 10.3 启动示例
+
+```bash
+# EuRoC
+ros2 launch vins_estimator vins_launch.py enable_sparse:=1
+ros2 bag play /path/to/MH_01_easy_ros2
+
+# D435i
+ros2 launch vins_estimator vins_launch.py \
+  config_file:=$YOUR_WS/src/.../config_pkg/config/realsense/realsense_d435i_config.yaml \
+  enable_sparse:=1
+ros2 bag play /path/to/d435i.mcap --rate 1.0
+```
+
+注意：所有节点默认落在 `/sparse1` namespace 下（与默认 rviz 配置匹配），
+公共话题如 `/sparse1/odometry` / `/sparse1/path`。
+
+由于程序整体架构有变化，原来的命令已经不能使用，请使用最新的命令
