@@ -10,6 +10,9 @@
 #include <QFileInfo>
 #include <QUrl>
 #include <Qt>
+#include <QColor>
+#include <QColorDialog>
+#include <QFileDialog>
 
 #include <algorithm>
 #include <chrono>
@@ -627,6 +630,29 @@ QString RosUiBridge::defaultPlotRecordingPath() const
     QDir().mkpath(directory);
     const QString stamp = QDateTime::currentDateTime().toString(QStringLiteral("yyyyMMdd_HHmmss"));
     return directory + QStringLiteral("/plot_") + stamp;
+}
+
+QString RosUiBridge::pickExistingDirectory(const QString &title, const QString &startDir)
+{
+    QString initialDir = normalizeLocalPath(startDir);
+    if (initialDir.isEmpty()) {
+        initialDir = QDir::homePath();
+    } else {
+        const QFileInfo info(initialDir);
+        initialDir = info.isDir() ? info.absoluteFilePath() : info.absolutePath();
+    }
+
+    return QFileDialog::getExistingDirectory(nullptr, title, initialDir);
+}
+
+QString RosUiBridge::pickColor(const QString &title, const QString &initialColor)
+{
+    const QColor initial(initialColor);
+    const QColor selected = QColorDialog::getColor(
+        initial.isValid() ? initial : QColor(QStringLiteral("#3794ff")),
+        nullptr,
+        title);
+    return selected.isValid() ? selected.name(QColor::HexRgb) : QString();
 }
 
 QString RosUiBridge::normalizeLocalPath(const QString &filePath)

@@ -1,4 +1,4 @@
-#include <QGuiApplication>
+#include <QApplication>
 #include <QQmlApplicationEngine>
 #include <QUrl>
 #include <qqml.h>
@@ -10,7 +10,7 @@
 int main(int argc, char *argv[])
 {
     rclcpp::init(argc, argv);
-    QGuiApplication app(argc, argv);
+    QApplication app(argc, argv);
 
     RosUiBridge bridge;
     qmlRegisterSingletonInstance("RosUi", 1, 0, "RosUi", &bridge);

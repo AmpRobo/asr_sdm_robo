@@ -156,6 +156,8 @@ public:
     Q_INVOKABLE void setPlaybackCurrentTimeMs(double currentTimeMs);
     Q_INVOKABLE void setPlaybackSpeed(double speed);
     Q_INVOKABLE void setPlaybackPlaying(bool playing);
+    Q_INVOKABLE QString pickExistingDirectory(const QString &title, const QString &startDir = QString());
+    Q_INVOKABLE QString pickColor(const QString &title, const QString &initialColor = QString());
 
 signals:
     void rosStatusChanged();

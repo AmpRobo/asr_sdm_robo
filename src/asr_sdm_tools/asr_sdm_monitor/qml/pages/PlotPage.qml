@@ -1,7 +1,6 @@
 import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
-import QtQuick.Dialogs
 import RosUi 1.0
 import "../components"
 import "../utils/I18n.js" as I18n
@@ -47,7 +46,6 @@ Item {
         yShowTickLabels: true
     })
     property var displayedPlotSamples: []
-    property int colorDialogSeriesIndex: -1
 
     readonly property int baseFontSize: 16
     readonly property double defaultSeriesLineWidth: 1.0
@@ -107,27 +105,6 @@ Item {
         visible: false
         text: root.longestSeriesLabelText
         font.pixelSize: root.baseFontSize
-    }
-
-    FolderDialog {
-        id: recordedFolderDialog
-        title: I18n.t(root.language, "selectRecordedBag")
-        onAccepted: {
-            root.recordedPath = selectedFolder.toString()
-            RosUi.openRecordedPlotFile(root.recordedPath)
-        }
-    }
-
-    ColorDialog {
-        id: seriesColorDialog
-        title: I18n.t(root.language, "color")
-        selectedColor: root.colorDialogSeriesIndex >= 0 && root.colorDialogSeriesIndex < root.ySeries.length
-                       ? root.ySeries[root.colorDialogSeriesIndex].color
-                       : root.defaultSeriesColor(0)
-        onAccepted: {
-            if (root.colorDialogSeriesIndex >= 0)
-                root.setSeriesColor(root.colorDialogSeriesIndex, selectedColor.toString())
-        }
     }
 
     function defaultPlotSettings() {
@@ -796,7 +773,15 @@ Item {
                                     label: I18n.t(root.language, "open")
                                     selected: false
                                     appPalette: root.appPalette
-                                    onClicked: recordedFolderDialog.open()
+                                    onClicked: {
+                                        const folder = RosUi.pickExistingDirectory(
+                                            I18n.t(root.language, "selectRecordedBag"),
+                                            root.recordedPath)
+                                        if (folder.length > 0) {
+                                            root.recordedPath = folder
+                                            RosUi.openRecordedPlotFile(root.recordedPath)
+                                        }
+                                    }
                                 }
 
                                 SelectableButton {
@@ -1278,8 +1263,11 @@ Item {
                                                 anchors.fill: parent
                                                 cursorShape: Qt.PointingHandCursor
                                                 onClicked: {
-                                                    root.colorDialogSeriesIndex = seriesCard.seriesIndex
-                                                    seriesColorDialog.open()
+                                                    const color = RosUi.pickColor(
+                                                        I18n.t(root.language, "color"),
+                                                        seriesCard.seriesData.color)
+                                                    if (color.length > 0)
+                                                        root.setSeriesColor(seriesCard.seriesIndex, color)
                                                 }
                                             }
                                         }

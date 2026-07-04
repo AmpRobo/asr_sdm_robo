@@ -12,7 +12,7 @@ find_package(sensor_msgs REQUIRED)
 find_package(geometry_msgs REQUIRED)
 find_package(std_msgs REQUIRED)
 find_package(rosbag2_cpp REQUIRED)
-find_package(Qt6 REQUIRED COMPONENTS Core Gui Qml Quick QuickControls2)
+find_package(Qt6 REQUIRED COMPONENTS Core Gui Widgets Qml Quick QuickControls2)
 
 
 qt_standard_project_setup()
@@ -60,6 +60,7 @@ target_include_directories(${PROJECT_NAME} PRIVATE
 target_link_libraries(${PROJECT_NAME} PRIVATE
   Qt6::Core
   Qt6::Gui
+  Qt6::Widgets
   Qt6::Qml
   Qt6::Quick
   Qt6::QuickControls2
@@ -75,7 +76,6 @@ target_link_libraries(${PROJECT_NAME} PRIVATE
 if(TARGET rosbag2_cpp::rosbag2_cpp)
   target_link_libraries(${PROJECT_NAME} PRIVATE rosbag2_cpp::rosbag2_cpp)
 endif()
-
 
 install(TARGETS ${PROJECT_NAME}
   RUNTIME DESTINATION lib/${PROJECT_NAME}
