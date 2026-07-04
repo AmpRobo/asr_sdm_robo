@@ -6,7 +6,7 @@ Panels:
       Expanded:
         - /Status1
         - /original1
-        - /sparse11
+        - /localization1
       Splitter Ratio: 0.5
     Tree Height: 285
   - Class: rviz_common/Selection
@@ -193,7 +193,7 @@ Visualization Manager:
       Name: ORIGINAL (sparse=0)
 
     # =====================================================================
-    # SPARSE1 pipeline (namespace = /sparse1), green trajectory
+    # Localization pipeline (namespace = /localization), green trajectory
     # =====================================================================
     - Class: rviz_common/Group
       Displays:
@@ -209,7 +209,7 @@ Visualization Manager:
             Durability Policy: Volatile
             History Policy: Keep Last
             Reliability Policy: Reliable
-            Value: /sparse1/feature_img
+            Value: /localization/feature_img
           Value: true
         - Class: rviz_default_plugins/Image
           Enabled: true
@@ -223,7 +223,7 @@ Visualization Manager:
             Durability Policy: Volatile
             History Policy: Keep Last
             Reliability Policy: Reliable
-            Value: /sparse1/match_image
+            Value: /localization/match_image
           Value: true
         - Class: rviz_default_plugins/MarkerArray
           Enabled: true
@@ -236,7 +236,7 @@ Visualization Manager:
             Durability Policy: Volatile
             History Policy: Keep Last
             Reliability Policy: Reliable
-            Value: /sparse1/camera_pose_visual
+            Value: /localization/camera_pose_visual
           Value: true
         - Alpha: 1
           Autocompute Intensity Bounds: true
@@ -267,7 +267,7 @@ Visualization Manager:
             Durability Policy: Volatile
             History Policy: Keep Last
             Reliability Policy: Reliable
-            Value: /sparse1/keyframe_point
+            Value: /localization/keyframe_point
           Use Fixed Frame: true
           Use rainbow: true
           Value: true
@@ -296,7 +296,7 @@ Visualization Manager:
             Durability Policy: Volatile
             History Policy: Keep Last
             Reliability Policy: Reliable
-            Value: /sparse1/path
+            Value: /localization/path
           Value: true
         - Alpha: 1
           Buffer Length: 1
@@ -323,7 +323,7 @@ Visualization Manager:
             Durability Policy: Volatile
             History Policy: Keep Last
             Reliability Policy: Reliable
-            Value: /sparse1/pose_graph_path
+            Value: /localization/pose_graph_path
           Value: true
         - Class: rviz_default_plugins/MarkerArray
           Enabled: true
@@ -335,10 +335,10 @@ Visualization Manager:
             Durability Policy: Volatile
             History Policy: Keep Last
             Reliability Policy: Reliable
-            Value: /sparse1/pose_graph
+            Value: /localization/pose_graph
           Value: true
       Enabled: true
-      Name: SPARSE1 (sparse=1)
+      Name: LOCALIZATION (sparse=1)
   Enabled: true
   Global Options:
     Background Color: 48; 48; 48

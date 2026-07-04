@@ -18,6 +18,7 @@
   <depend>camera_model</depend>
   <depend>image_transport</depend>
   <depend>asr_sdm_perception_msgs</depend>   <!-- D2.1: SparseRot.msg -->
+  <exec_depend>vins_estimator</exec_depend>   <!-- shared launch config presets -->
 
   <test_depend>ament_lint_auto</test_depend>
   <test_depend>ament_lint_common</test_depend>

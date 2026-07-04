@@ -1,110 +1,71 @@
-%YAML:1.0
+/**:
+  ros__parameters:
+    # topics / output
+    imu_topic: "/sensing/camera/realsense/imu"
+    image_topic: "/sensing/camera/realsense/color/image_raw"
+    output_path: "output/sparse1"
+    pose_graph_save_path: "output/pose_graph/sparse1"
 
-#common parameters
-imu_topic: "/sensing/camera/realsense/imu"
-image_topic: "/sensing/camera/realsense/color/image_raw"
-output_path: "/home/lxy/output/sparse1/"
+    # OpenCV-format camera calibration (camodocal); path set by launch
+    camera_calibration_file: ""
 
-#camera calibration
-model_type: PINHOLE
-camera_name: camera
-image_width: 640
-image_height: 480
-distortion_parameters:
-   k1: 0.0
-   k2: 0.0
-   p1: 0.0
-   p2: 0.0
-projection_parameters:
-   fx: 4.529725341796875e+02
-   fy: 6.038680013020833e+02
-   cx: 3.305947570800781e+02
-   cy: 2.594551798502604e+02
+    # image geometry (must match realsense_d435i_cam_calibration.yaml)
+    image_width: 640
+    image_height: 480
+    projection_fx: 452.9725341796875
+    projection_fy: 603.8680013020833
+    projection_cx: 330.5947570800781
+    projection_cy: 259.4551798502604
 
-# Extrinsic parameter between IMU and Camera.
-estimate_extrinsic: 1   # 0  Have an accurate extrinsic parameters. We will trust the following imu^R_cam, imu^T_cam, don't change it.
-                        # 1  Have an initial guess about extrinsic parameters. We will optimize around your initial guess.
-                        # 2  Don't know anything about extrinsic parameters. You don't need to give R,T. We will try to calibrate it. Do some rotation movement at beginning.
-# D435i approximate extrinsics: IMU frame to Color Camera frame
-# Rotation from camera frame to imu frame, imu^R_cam
-extrinsicRotation: !!opencv-matrix
-   rows: 3
-   cols: 3
-   dt: d
-   data: [ 1.0,  0.0,  0.0,
-           0.0,  1.0,  0.0,
-           0.0,  0.0,  1.0]
-#Translation from camera frame to imu frame, imu^T_cam
-extrinsicTranslation: !!opencv-matrix
-   rows: 3
-   cols: 1
-   dt: d
-   data: [0.0, 0.0, 0.0]
+    # feature tracker
+    max_cnt: 150
+    min_dist: 25
+    freq: 10
+    F_threshold: 1.0
+    show_track: 1
+    equalize: 0
+    fisheye: 0
 
-#feature traker paprameters
-max_cnt: 150            # max feature number in feature tracking
-min_dist: 25            # min distance between two features
-freq: 10                # frequence (Hz) of publish tracking result. At least 10Hz for good estimation. If set 0, the frequence will be same as raw image
-F_threshold: 1.0        # ransac threshold (pixel)
-show_track: 1           # publish tracking image as topic
-equalize: 0             # if image is too dark or light, trun on equalize to find enough features
-fisheye: 0              # if using fisheye, trun on it. A circle mask will be loaded to remove edge noisy points
+    # sparse align (enabled by default for D435i)
+    use_sparse_align: 1
+    use_td_pre_calib: 1
+    sparse_align_patch_size: 2
+    sparse_align_max_level: 2
+    sparse_align_min_level: 0
+    sparse_align_max_iter: 4
+    sparse_align_lambda_rot: 0.5
+    sparse_align_lambda_trans: 0.0
+    sparse_align_chi2_thresh: 50.0
+    sparse_align_min_features: 30
+    sparse_align_min_iter_for_ok: 1
 
-#optimization parameters
-max_solver_time: 0.04  # max solver itration time (ms), to guarantee real time
-max_num_iterations: 8   # max solver itrations, to guarantee real time
-keyframe_parallax: 10.0 # keyframe selection threshold (pixel)
+    # estimator / imu
+    max_solver_time: 0.04
+    max_num_iterations: 8
+    keyframe_parallax: 10.0
+    acc_n: 0.1
+    acc_w: 0.0002
+    gyr_n: 0.01
+    gyr_w: 0.00002
+    g_norm: 9.805
 
-#imu parameters       The more accurate parameters you provide, the better performance
-acc_n: 0.1          # accelerometer measurement noise standard deviation.
-gyr_n: 0.01         # gyroscope measurement noise standard deviation.
-acc_w: 0.0002         # accelerometer bias random work noise standard deviation.
-gyr_w: 2.0e-5       # gyroscope bias random work noise standard deviation.
-g_norm: 9.805       # gravity magnitude
+    # extrinsic (row-major 3x3 rotation, camera-to-IMU; D435i approximate)
+    estimate_extrinsic: 1
+    extrinsic_rotation: [1.0, 0.0, 0.0,
+                         0.0, 1.0, 0.0,
+                         0.0, 0.0, 1.0]
+    extrinsic_translation: [0.0, 0.0, 0.0]
 
-#loop closure parameters
-loop_closure: 1                    # start loop closure
-fast_relocalization: 1             # useful in real-time and large project
-load_previous_pose_graph: 0        # load and reuse previous pose graph; load from 'pose_graph_save_path'
-pose_graph_save_path: "/home/lxy/output/pose_graph/sparse1/" # save and load path
+    # td / rolling shutter
+    estimate_td: 1
+    td: 0.0
+    rolling_shutter: 1
+    rolling_shutter_tr: 0.033
 
-#unsynchronization parameters
-estimate_td: 1                      # online estimate time offset between camera and imu
-td: 0.000                           # initial value of time offset. unit: s. readed image clock + td = real image clock (IMU clock)
-
-#rolling shutter parameters
-rolling_shutter: 1                      # 0: global shutter camera, 1: rolling shutter camera
-rolling_shutter_tr: 0.033               # unit: s. rolling shutter read out time per frame (from data sheet).
-
-#visualization parameters
-save_image: 1                   # save image in pose graph for visualization prupose; you can close this function by setting 0
-visualize_imu_forward: 0        # output imu forward propogation to achieve low latency and high frequence results
-visualize_camera_size: 0.4      # size of camera marker in RVIZ
-
-# W3: sparse rotation prior (sparse photometric align -> VINS BA)
-# Set use_sparse_r_prior to 1 to enable.  Requires feature_tracker to publish
-# /feature_tracker/sparse_rot with R (and chi2) for every frame pair.
-use_sparse_r_prior: 1
-sparse_r_lambda: 0.1        # λ — trade-off weight.  0.05=loose, 0.1=default, 0.5=strong
-sparse_r_chi2_gate: 50.0    # max sparse chi2 to accept (discard outliers)
-sparse_r_angle_gate: 0.087266    # ~5 deg in radians
-
-# Sparse image alignment (SVO-style semi-direct refinement in the front-end)
-# Runs a photometric Gauss-Newton over 4x4 patches on a 4-level image
-# pyramid; replaces the KLT output when alignment converges and falls back
-# to KLT otherwise. Requires IMU messages to provide a rotation prior.
-use_sparse_align: 1
-sparse_align_patch_size: 2
-sparse_align_max_level: 2
-sparse_align_min_level: 0
-sparse_align_max_iter: 4
-sparse_align_lambda_rot: 0.5
-sparse_align_lambda_trans: 0.0
-sparse_align_chi2_thresh: 50.0
-sparse_align_min_features: 30
-sparse_align_min_iter_for_ok: 1
-
-# Time delay pre-calibration (D2.2): estimate camera-IMU time offset online
-# using sparse align residuals. Set to 1 to enable. Default: 0 (off).
-# When enabled, td is estimated jointly with rotation prior quality.
-use_td_pre_calib: 1
+    # pose graph
+    loop_closure: 1
+    load_previous_pose_graph: 0
+    fast_relocalization: 1
+    save_image: 1
+    visualize_imu_forward: 0
+    visualize_camera_size: 0.4

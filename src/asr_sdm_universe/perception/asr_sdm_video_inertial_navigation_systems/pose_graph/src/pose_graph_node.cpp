@@ -25,6 +25,22 @@
 #define SKIP_FIRST_CNT 10
 using namespace std;
 
+namespace
+{
+
+template <typename T>
+T getParamOrDeclare(const rclcpp::Node::SharedPtr& n, const std::string& name, const T& default_value)
+{
+    if (!n->has_parameter(name)) {
+        n->declare_parameter<T>(name, default_value);
+    }
+    T value = default_value;
+    n->get_parameter(name, value);
+    return value;
+}
+
+}  // namespace
+
 queue<sensor_msgs::msg::Image::ConstPtr> image_buf;
 queue<sensor_msgs::msg::PointCloud::ConstPtr> point_buf;
 queue<nav_msgs::msg::Odometry::ConstPtr> pose_buf;
@@ -507,77 +523,142 @@ int main(int argc, char **argv)
     n->declare_parameter<double>("skip_dis", 0.0);
     n->get_parameter("skip_dis", SKIP_DIS);
 
-    std::string config_file;
-    n->declare_parameter<std::string>("config_file", "");
-    n->get_parameter("config_file", config_file);
-    cv::FileStorage fsSettings(config_file, cv::FileStorage::READ);
-    if(!fsSettings.isOpened())
-    {
-        std::cerr << "ERROR: Wrong path to settings" << std::endl;
+    std::string config_file = getParamOrDeclare<std::string>(n, "config_file", "");
+    const std::string image_topic_param = getParamOrDeclare<std::string>(n, "image_topic", "");
+
+    double camera_visual_size = 0.4;
+    std::string IMAGE_TOPIC;
+    int LOAD_PREVIOUS_POSE_GRAPH = 0;
+
+    if (!image_topic_param.empty()) {
+        camera_visual_size = getParamOrDeclare<double>(n, "visualize_camera_size", 0.4);
+        cameraposevisual.setScale(camera_visual_size);
+        cameraposevisual.setLineWidth(camera_visual_size / 10.0);
+
+        LOOP_CLOSURE = getParamOrDeclare<int>(n, "loop_closure", 1);
+        if (LOOP_CLOSURE) {
+            ROW = getParamOrDeclare<int>(n, "image_height", 480);
+            COL = getParamOrDeclare<int>(n, "image_width", 752);
+            n->declare_parameter<std::string>("support_file", "");
+            std::string support_path;
+            n->get_parameter("support_file", support_path);
+            if (support_path.empty()) {
+                const std::string pkg_path = ament_index_cpp::get_package_share_directory("config_pkg");
+                support_path = pkg_path + "/support_files";
+            }
+            string vocabulary_file = support_path + "/brief_k10L6.bin";
+            cout << "vocabulary_file: " << vocabulary_file << endl;
+            posegraph.loadVocabulary(vocabulary_file);
+
+            BRIEF_PATTERN_FILE = support_path + "/brief_pattern.yml";
+            cout << "BRIEF_PATTERN_FILE: " << BRIEF_PATTERN_FILE << endl;
+
+            std::string calib_file = getParamOrDeclare<std::string>(n, "camera_calibration_file", "");
+            if (calib_file.empty()) {
+                std::cerr << "ERROR: camera_calibration_file is required in ROS params mode" << std::endl;
+                return 1;
+            }
+            m_camera = camodocal::CameraFactory::instance()->generateCameraFromYamlFile(calib_file.c_str());
+
+            std::string config_pkg_share = getParamOrDeclare<std::string>(n, "config_pkg_share", "");
+            if (config_pkg_share.empty()) {
+                config_pkg_share = getParamOrDeclare<std::string>(n, "vins_folder", "");
+            }
+
+            IMAGE_TOPIC = image_topic_param;
+            POSE_GRAPH_SAVE_PATH = FileSystemHelper::resolveWorkspacePath(
+                getParamOrDeclare<std::string>(n, "pose_graph_save_path", "output/pose_graph"),
+                config_pkg_share);
+            VINS_RESULT_PATH = FileSystemHelper::resolveWorkspacePath(
+                getParamOrDeclare<std::string>(n, "output_path", "output"),
+                config_pkg_share);
+            DEBUG_IMAGE = getParamOrDeclare<int>(n, "save_image", 1);
+
+            FileSystemHelper::createDirectoryIfNotExists(POSE_GRAPH_SAVE_PATH.c_str());
+            FileSystemHelper::createDirectoryIfNotExists(VINS_RESULT_PATH.c_str());
+
+            VISUALIZE_IMU_FORWARD = getParamOrDeclare<int>(n, "visualize_imu_forward", 0);
+            LOAD_PREVIOUS_POSE_GRAPH = getParamOrDeclare<int>(n, "load_previous_pose_graph", 0);
+            FAST_RELOCALIZATION = getParamOrDeclare<int>(n, "fast_relocalization", 0);
+            VINS_RESULT_PATH = VINS_RESULT_PATH + "/vins_result_loop.csv";
+            std::ofstream fout(VINS_RESULT_PATH, std::ios::out);
+            fout.close();
+        }
+    } else {
+        cv::FileStorage fsSettings(config_file, cv::FileStorage::READ);
+        if (!fsSettings.isOpened()) {
+            std::cerr << "ERROR: Wrong path to settings" << std::endl;
+            return 1;
+        }
+
+        camera_visual_size = fsSettings["visualize_camera_size"];
+        cameraposevisual.setScale(camera_visual_size);
+        cameraposevisual.setLineWidth(camera_visual_size / 10.0);
+
+        LOOP_CLOSURE = fsSettings["loop_closure"];
+        if (LOOP_CLOSURE) {
+            ROW = fsSettings["image_height"];
+            COL = fsSettings["image_width"];
+            n->declare_parameter<std::string>("support_file", "");
+            std::string support_path;
+            n->get_parameter("support_file", support_path);
+            if (support_path.empty()) {
+                const std::string pkg_path = ament_index_cpp::get_package_share_directory("config_pkg");
+                support_path = pkg_path + "/support_files";
+            }
+            string vocabulary_file = support_path + "/brief_k10L6.bin";
+            cout << "vocabulary_file: " << vocabulary_file << endl;
+            posegraph.loadVocabulary(vocabulary_file);
+
+            BRIEF_PATTERN_FILE = support_path + "/brief_pattern.yml";
+            cout << "BRIEF_PATTERN_FILE: " << BRIEF_PATTERN_FILE << endl;
+
+            std::string calib_file = getParamOrDeclare<std::string>(n, "camera_calibration_file", "");
+            if (calib_file.empty()) {
+                calib_file = config_file;
+            }
+            m_camera = camodocal::CameraFactory::instance()->generateCameraFromYamlFile(calib_file.c_str());
+
+            fsSettings["image_topic"] >> IMAGE_TOPIC;
+            fsSettings["pose_graph_save_path"] >> POSE_GRAPH_SAVE_PATH;
+            fsSettings["output_path"] >> VINS_RESULT_PATH;
+
+            std::string config_pkg_share = getParamOrDeclare<std::string>(n, "config_pkg_share", "");
+            if (config_pkg_share.empty()) {
+                config_pkg_share = getParamOrDeclare<std::string>(n, "vins_folder", "");
+            }
+            POSE_GRAPH_SAVE_PATH = FileSystemHelper::resolveWorkspacePath(
+                POSE_GRAPH_SAVE_PATH, config_pkg_share);
+            VINS_RESULT_PATH = FileSystemHelper::resolveWorkspacePath(
+                VINS_RESULT_PATH, config_pkg_share);
+            fsSettings["save_image"] >> DEBUG_IMAGE;
+
+            FileSystemHelper::createDirectoryIfNotExists(POSE_GRAPH_SAVE_PATH.c_str());
+            FileSystemHelper::createDirectoryIfNotExists(VINS_RESULT_PATH.c_str());
+
+            VISUALIZE_IMU_FORWARD = fsSettings["visualize_imu_forward"];
+            LOAD_PREVIOUS_POSE_GRAPH = fsSettings["load_previous_pose_graph"];
+            FAST_RELOCALIZATION = fsSettings["fast_relocalization"];
+            VINS_RESULT_PATH = VINS_RESULT_PATH + "/vins_result_loop.csv";
+            std::ofstream fout(VINS_RESULT_PATH, std::ios::out);
+            fout.close();
+        }
+        fsSettings.release();
     }
 
-    double camera_visual_size = fsSettings["visualize_camera_size"];
-    cameraposevisual.setScale(camera_visual_size);
-    cameraposevisual.setLineWidth(camera_visual_size / 10.0);
-
-
-    LOOP_CLOSURE = fsSettings["loop_closure"];
-    std::string IMAGE_TOPIC;
-    int LOAD_PREVIOUS_POSE_GRAPH;
-    if (LOOP_CLOSURE)
-    {
-        ROW = fsSettings["image_height"];
-        COL = fsSettings["image_width"];
-        n->declare_parameter<std::string>("support_file", "");
-        std::string support_path;
-        n->get_parameter("support_file", support_path);
-        if (support_path.empty()) {
-            // Fall back to ament index lookup if launch didn't pass the param.
-            const std::string pkg_path = ament_index_cpp::get_package_share_directory("config_pkg");
-            support_path = pkg_path + "/support_files";
-        }
-        string vocabulary_file = support_path + "/brief_k10L6.bin";
-        cout << "vocabulary_file: " << vocabulary_file << endl;
-        posegraph.loadVocabulary(vocabulary_file);
-
-        BRIEF_PATTERN_FILE = support_path + "/brief_pattern.yml";
-        cout << "BRIEF_PATTERN_FILE: " << BRIEF_PATTERN_FILE << endl;
-        m_camera = camodocal::CameraFactory::instance()->generateCameraFromYamlFile(config_file.c_str());
-
-        fsSettings["image_topic"] >> IMAGE_TOPIC;        
-        fsSettings["pose_graph_save_path"] >> POSE_GRAPH_SAVE_PATH;
-        fsSettings["output_path"] >> VINS_RESULT_PATH;
-        fsSettings["save_image"] >> DEBUG_IMAGE;
-
-        // create folder if not exists
-        FileSystemHelper::createDirectoryIfNotExists(POSE_GRAPH_SAVE_PATH.c_str());
-        FileSystemHelper::createDirectoryIfNotExists(VINS_RESULT_PATH.c_str());
-
-        VISUALIZE_IMU_FORWARD = fsSettings["visualize_imu_forward"];
-        LOAD_PREVIOUS_POSE_GRAPH = fsSettings["load_previous_pose_graph"];
-        FAST_RELOCALIZATION = fsSettings["fast_relocalization"];
-        VINS_RESULT_PATH = VINS_RESULT_PATH + "/vins_result_loop.csv";
-        std::ofstream fout(VINS_RESULT_PATH, std::ios::out);
-        fout.close();
-        fsSettings.release();
-
-        if (LOAD_PREVIOUS_POSE_GRAPH)
-        {
+    if (LOOP_CLOSURE) {
+        if (LOAD_PREVIOUS_POSE_GRAPH) {
             printf("load pose graph\n");
             m_process.lock();
             posegraph.loadPoseGraph();
             m_process.unlock();
             printf("load pose graph finish\n");
             load_flag = 1;
-        }
-        else
-        {
+        } else {
             printf("no previous pose graph\n");
             load_flag = 1;
         }
     }
-
-    fsSettings.release();
 
     auto sub_imu_forward = n->create_subscription<nav_msgs::msg::Odometry>("/vins_estimator/imu_propagate", rclcpp::QoS(rclcpp::KeepLast(2000)), imu_forward_callback);
     auto sub_vio = n->create_subscription<nav_msgs::msg::Odometry>("/vins_estimator/odometry", rclcpp::QoS(rclcpp::KeepLast(2000)), vio_callback);

@@ -7,6 +7,9 @@
 #include <cmath>
 #include <cassert>
 #include <cstring>
+#include <climits>
+#include <unistd.h>
+#include <string>
 #include <eigen3/Eigen/Dense>
 
 class Utility
@@ -146,6 +149,34 @@ class Utility
 class FileSystemHelper
 {
   public:
+
+    // Resolve a workspace-relative path (e.g. "output/pose_graph") against the
+    // colcon workspace root inferred from config_pkg share directory.
+    static std::string resolveWorkspacePath(
+        const std::string& path, const std::string& config_pkg_share)
+    {
+        if (path.empty() || path[0] == '/') {
+            return path;
+        }
+        if (config_pkg_share.empty()) {
+            return path;
+        }
+
+        char buf[PATH_MAX];
+        if (realpath(config_pkg_share.c_str(), buf) == nullptr) {
+            return path;
+        }
+
+        std::string ws_root(buf);
+        for (int i = 0; i < 4; ++i) {
+            const size_t pos = ws_root.find_last_of('/');
+            if (pos == std::string::npos || pos == 0) {
+                return path;
+            }
+            ws_root = ws_root.substr(0, pos);
+        }
+        return ws_root + "/" + path;
+    }
 
     /******************************************************************************
      * Recursively create directory if `path` not exists.

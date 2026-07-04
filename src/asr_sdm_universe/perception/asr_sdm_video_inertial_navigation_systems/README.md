@@ -233,14 +233,24 @@ VINS 当帧间 R 先验（方向 B）打基础的中间步骤。
 
 ## 10.1 用法
 
+Launch 默认配置在 `vins_estimator/config/vins.yaml`（`params_file`、`namespace`、
+`sparse_align`、`pose_graph` 等）。修改该文件后重新 `colcon build vins_estimator`。
+
 ```bash
-# 直接使用默认 EuRoC 配置
+# EuRoC（默认）
 ros2 launch vins_estimator vins_launch.py enable_sparse:=1
 
-# 或者显式指定其他数据集
+# 仅 feature tracker + rviz2
+ros2 launch feature_tracker feature_tracker.launch.py
+
+# 显式覆盖参数文件
 ros2 launch vins_estimator vins_launch.py \
-  config_file:=/path/to/config_pkg/config/realsense/realsense_d435i_config.yaml \
-  enable_sparse:=1
+  params_file:=config/euroc/euroc_config.yaml \
+  calibration_file:=config/euroc/euroc_cam_calibration.yaml
+
+# 旧版 OpenCV 单文件配置（向后兼容）
+ros2 launch vins_estimator vins_launch.py \
+  config_file:=/path/to/euroc_config_opencv.yaml
 ```
 
 ## 10.2 相机校准文件选择
@@ -268,15 +278,18 @@ ros2 launch vins_estimator vins_launch.py \
 # EuRoC
 ros2 launch vins_estimator vins_launch.py enable_sparse:=1
 ros2 bag play /path/to/MH_01_easy_ros2
-
-# D435i
-ros2 launch vins_estimator vins_launch.py \
-  config_file:=$YOUR_WS/src/.../config_pkg/config/realsense/realsense_d435i_config.yaml \
-  enable_sparse:=1
-ros2 bag play /path/to/d435i.mcap --rate 1.0
 ```
 
-注意：所有节点默认落在 `/sparse1` namespace 下（与默认 rviz 配置匹配），
-公共话题如 `/sparse1/odometry` / `/sparse1/path`。
+注意：所有节点默认落在 `/localization` namespace 下（与默认 rviz 配置匹配），
+公共话题如 `/localization/odometry` / `/localization/path`。
 
 由于程序整体架构有变化，原来的命令已经不能使用，请使用最新的命令
+
+## How to start system
+```sh
+# 完整 pipeline - EuRoC
+ros2 launch vins_estimator vins_launch.py
+# 完整 pipeline - D435i
+ros2 launch vins_estimator vins_launch.py vins_launch_config:=vins_d435i.yaml
+```
+`enable_sparse: true` is configured in vins_estimator/config/.yaml, default is `true`.

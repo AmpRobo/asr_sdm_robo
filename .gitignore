@@ -48,6 +48,7 @@ __pycache__/
 *.pyo
 
 # Local development / debugging artifacts
+output/
 output_compare/
 docs/svo_vio_dataflow_analysis.md
 docs/vins_dataflow_analysis.md
