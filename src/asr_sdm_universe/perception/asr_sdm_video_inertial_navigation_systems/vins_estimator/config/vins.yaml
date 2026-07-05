@@ -23,7 +23,7 @@
       sparse_align_min_iter_for_ok: 1
 
     # ---- pipeline layout --------------------------------------------------
-    namespace: localization
+    namespace: localization/vins
     rviz_config: config/vins_euroc_rviz.rviz
 
     pose_graph:

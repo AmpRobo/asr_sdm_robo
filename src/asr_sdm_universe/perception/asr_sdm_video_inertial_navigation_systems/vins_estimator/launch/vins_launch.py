@@ -155,7 +155,7 @@ def _pipeline(config_pkg_path, common_params, vins_config):
     Pipeline: feature_tracker -> vins_estimator -> pose_graph + rviz2
     All nodes run under the namespace configured in config/vins.yaml.
     """
-    ns = vins_config.get('namespace', 'localization')
+    ns = vins_config.get('namespace', 'localization/vins')
     rviz_cfg = os.path.join(
         config_pkg_path, vins_config.get('rviz_config', 'config/vins_euroc_rviz.rviz'))
     pose_graph_cfg = vins_config.get('pose_graph', {})
@@ -209,8 +209,9 @@ def _pipeline(config_pkg_path, common_params, vins_config):
         'skip_dis': pose_graph_cfg.get('skip_dis', 0.0),
     }]
 
-    return GroupAction([
-        PushRosNamespace(ns),
+    ns_actions = [PushRosNamespace(part) for part in ns.split('/') if part]
+
+    return GroupAction(ns_actions + [
 
         Node(
             package='feature_tracker',
