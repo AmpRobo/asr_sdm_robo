@@ -61,8 +61,7 @@ private:
 
   /* ROS utils */
   std::shared_ptr<rclcpp::Node> node_;
-  rclcpp::TimerBase::SharedPtr exec_timer_, safety_timer_, vis_timer_, frontier_timer_,
-    map_update_timer_;
+  rclcpp::TimerBase::SharedPtr exec_timer_, safety_timer_, vis_timer_, frontier_timer_;
   rclcpp::Subscription<nav_msgs::msg::Path>::SharedPtr waypoint_sub_;
   rclcpp::Subscription<nav_msgs::msg::Odometry>::SharedPtr odom_sub_;
   rclcpp::Publisher<std_msgs::msg::Empty>::SharedPtr replan_pub_, new_pub_;
