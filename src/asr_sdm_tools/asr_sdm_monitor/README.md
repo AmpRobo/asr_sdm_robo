@@ -21,7 +21,51 @@ source install/setup.bash
 ros2 run asr_sdm_monitor asr_sdm_monitor
 ```
 
+Optional: load monitor parameters from the package config file:
+
+```bash
+ros2 run asr_sdm_monitor asr_sdm_monitor --ros-args \
+  --params-file $(ros2 pkg prefix asr_sdm_monitor)/share/asr_sdm_monitor/config/system_monitor.yaml
+```
+
 ### Hardware
+
+#### External dependencies
+
+The built-in hardware monitors (`cpu_monitor`, `mem_monitor`, `hdd_monitor`, `net_monitor`) call system utilities. Install the packages below on the host as needed.
+
+##### lm-sensors (`sensors`)
+
+Used for **CPU** core temperature when `check_core_temps` is enabled, and for **HDD** hardware temperature when `no_hw_temp` is set to `false`.
+
+Install on Ubuntu/Debian:
+
+```bash
+sudo apt update
+sudo apt install lm-sensors
+sudo sensors-detect
+```
+
+During `sensors-detect`, accept the defaults (press Enter) so the recommended kernel modules are loaded.
+
+Enable the service and verify:
+
+```bash
+sudo systemctl enable lm-sensors.service
+sudo systemctl start lm-sensors.service
+sensors
+```
+
+If `sensors` prints CPU or other chip temperatures, installation succeeded.
+
+Related settings in `config/system_monitor.yaml`:
+
+| Monitor | Parameter | Default | Meaning |
+|---|---|---|---|
+| CPU | `check_core_temps` | `true` | Read core temperatures via `sensors` |
+| HDD | `no_hw_temp` | `true` | Skip HW temperature (`sensors -j`); set to `false` to enable |
+
+If `lm-sensors` is not installed, temperature checks may fail while usage, memory, disk, and network metrics continue to work. On VMs or machines without hardware sensors, empty or missing `sensors` output is normal.
 
 #### Function
 
@@ -534,7 +578,51 @@ source install/setup.bash
 ros2 run asr_sdm_monitor asr_sdm_monitor
 ```
 
+可选：从 package 配置文件加载 monitor 参数：
+
+```bash
+ros2 run asr_sdm_monitor asr_sdm_monitor --ros-args \
+  --params-file $(ros2 pkg prefix asr_sdm_monitor)/share/asr_sdm_monitor/config/system_monitor.yaml
+```
+
 ### Hardware
+
+#### 外部依赖
+
+内置 hardware monitor 节点（`cpu_monitor`、`mem_monitor`、`hdd_monitor`、`net_monitor`）会调用系统命令，请按需安装下列工具。
+
+##### lm-sensors（`sensors`）
+
+在启用 CPU 核心温度（`check_core_temps`）或 HDD 硬件温度（`no_hw_temp: false`）时使用。
+
+Ubuntu/Debian 安装：
+
+```bash
+sudo apt update
+sudo apt install lm-sensors
+sudo sensors-detect
+```
+
+运行 `sensors-detect` 时按提示选择 **Yes**（通常直接回车即可），以加载推荐的内核模块。
+
+启用服务并验证：
+
+```bash
+sudo systemctl enable lm-sensors.service
+sudo systemctl start lm-sensors.service
+sensors
+```
+
+若 `sensors` 能输出 CPU 或其他芯片温度，说明安装成功。
+
+相关配置见 `config/system_monitor.yaml`：
+
+| Monitor | 参数 | 默认值 | 说明 |
+|---|---|---|---|
+| CPU | `check_core_temps` | `true` | 通过 `sensors` 读取核心温度 |
+| HDD | `no_hw_temp` | `true` | 跳过硬件温度（`sensors -j`）；设为 `false` 可启用 |
+
+未安装 `lm-sensors` 时，温度相关诊断可能失败，内存、磁盘、网络等其余指标仍可正常显示。虚拟机或无硬件传感器的机器上 `sensors` 无输出属于正常现象。
 
 #### 功能
 

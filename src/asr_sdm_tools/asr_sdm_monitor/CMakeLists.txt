@@ -6,7 +6,9 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_AUTOMOC ON)
 
 find_package(ament_cmake REQUIRED)
+find_package(ament_index_cpp REQUIRED)
 find_package(rclcpp REQUIRED)
+find_package(diagnostic_updater REQUIRED)
 find_package(diagnostic_msgs REQUIRED)
 find_package(sensor_msgs REQUIRED)
 find_package(geometry_msgs REQUIRED)
@@ -21,8 +23,20 @@ qt_add_executable(${PROJECT_NAME}
   src/main.cpp
   src/ros_ui_bridge.cpp
   src/ros_video_image_provider.cpp
+  src/system_monitor/monitor_utils.cpp
+  src/system_monitor/cpu_monitor.cpp
+  src/system_monitor/mem_monitor.cpp
+  src/system_monitor/hdd_monitor.cpp
+  src/system_monitor/net_monitor.cpp
+  src/system_monitor/system_monitor.cpp
   include/asr_sdm_monitor/ros_ui_bridge.hpp
   include/asr_sdm_monitor/ros_video_image_provider.hpp
+  include/asr_sdm_monitor/system_monitor/monitor_utils.hpp
+  include/asr_sdm_monitor/system_monitor/cpu_monitor.hpp
+  include/asr_sdm_monitor/system_monitor/mem_monitor.hpp
+  include/asr_sdm_monitor/system_monitor/hdd_monitor.hpp
+  include/asr_sdm_monitor/system_monitor/net_monitor.hpp
+  include/asr_sdm_monitor/system_monitor/system_monitor.hpp
 )
 
 qt_add_resources(${PROJECT_NAME} "qml_resources"
@@ -65,6 +79,8 @@ target_link_libraries(${PROJECT_NAME} PRIVATE
   Qt6::Quick
   Qt6::QuickControls2
   rclcpp::rclcpp
+  ament_index_cpp::ament_index_cpp
+  diagnostic_updater::diagnostic_updater
   ${diagnostic_msgs_TARGETS}
   ${sensor_msgs_TARGETS}
   ${geometry_msgs_TARGETS}
@@ -79,6 +95,10 @@ endif()
 
 install(TARGETS ${PROJECT_NAME}
   RUNTIME DESTINATION lib/${PROJECT_NAME}
+)
+
+install(DIRECTORY config
+  DESTINATION share/${PROJECT_NAME}
 )
 
 ament_package()

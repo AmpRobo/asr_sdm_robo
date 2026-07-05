@@ -34,7 +34,25 @@ Flickable {
         RowLayout {
             Layout.fillWidth: true
             spacing: 12
-            ValueCard { title: I18n.t(root.language, "interfaceList"); value: UiHelpers.display(RosUi.netSummary.interfaces); appPalette: root.appPalette }
+            ValueCard {
+                Layout.fillWidth: true
+                Layout.fillHeight: true
+                title: I18n.t(root.language, "interfaceList")
+                value: UiHelpers.display(RosUi.netSummary.interfaces)
+                appPalette: root.appPalette
+            }
+            ValueCard {
+                Layout.fillWidth: true
+                Layout.fillHeight: true
+                title: I18n.t(root.language, "ipAddressList")
+                value: UiHelpers.display(RosUi.netSummary.ipAddresses)
+                appPalette: root.appPalette
+            }
+        }
+
+        RowLayout {
+            Layout.fillWidth: true
+            spacing: 12
             ValueCard { title: I18n.t(root.language, "stateLevel"); value: UiHelpers.display(RosUi.netSummary.level); appPalette: root.appPalette }
             ValueCard { title: I18n.t(root.language, "stateDescription"); value: UiHelpers.display(RosUi.netSummary.state); appPalette: root.appPalette }
             Item { Layout.fillWidth: true }
@@ -55,13 +73,14 @@ Flickable {
         SimpleTable {
             appPalette: root.appPalette
             columns: [
-                { label: I18n.t(root.language, "interface"), key: "interface", width: 140 },
-                { label: I18n.t(root.language, "state"), key: "state", width: 110 },
-                { label: I18n.t(root.language, "input"), key: "input", width: 170 },
-                { label: I18n.t(root.language, "output"), key: "output", width: 170 },
-                { label: I18n.t(root.language, "rxErr"), key: "rxErrors", width: 100 },
-                { label: I18n.t(root.language, "txErr"), key: "txErrors", width: 100 },
-                { label: I18n.t(root.language, "totalRx"), key: "totalRx", width: 150 },
+                { label: I18n.t(root.language, "interface"), key: "interface", width: 130 },
+                { label: I18n.t(root.language, "ipAddress"), key: "ip", width: 150 },
+                { label: I18n.t(root.language, "state"), key: "state", width: 90 },
+                { label: I18n.t(root.language, "input"), key: "input", width: 150 },
+                { label: I18n.t(root.language, "output"), key: "output", width: 150 },
+                { label: I18n.t(root.language, "rxErr"), key: "rxErrors", width: 90 },
+                { label: I18n.t(root.language, "txErr"), key: "txErrors", width: 90 },
+                { label: I18n.t(root.language, "totalRx"), key: "totalRx", width: 130 },
                 { label: I18n.t(root.language, "totalTx"), key: "totalTx", fill: true }
             ]
             rows: RosUi.netInterfaceRows

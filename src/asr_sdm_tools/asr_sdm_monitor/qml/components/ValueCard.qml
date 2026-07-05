@@ -12,21 +12,28 @@ Rectangle {
     border.color: appPalette.border
     border.width: 1
     Layout.fillWidth: true
-    implicitHeight: 90
+    Layout.fillHeight: false
+    implicitHeight: Math.max(90, contentColumn.implicitHeight + 28)
 
     Column {
-        anchors.fill: parent
+        id: contentColumn
+        anchors.left: parent.left
+        anchors.right: parent.right
+        anchors.top: parent.top
         anchors.margins: 14
         spacing: 8
 
         Text {
+            width: parent.width
             text: root.title
             font.pixelSize: 16
             font.bold: true
             color: appPalette.textPrimary
+            wrapMode: Text.WrapAnywhere
         }
 
         Text {
+            width: parent.width
             text: root.value
             font.pixelSize: 16
             color: appPalette.cardValue

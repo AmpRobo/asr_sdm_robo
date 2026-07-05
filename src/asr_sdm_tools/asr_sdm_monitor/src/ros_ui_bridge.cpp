@@ -340,7 +340,23 @@ RosUiBridge::RosUiBridge(QObject *parent)
 
     discoverVideoTopics();
     discoverPlotTopics();
+}
 
+void RosUiBridge::addNode(const rclcpp::Node::SharedPtr & node)
+{
+    if (!node || !executor_) {
+        return;
+    }
+    owned_nodes_.push_back(node);
+    executor_->add_node(node);
+}
+
+void RosUiBridge::startRosExecutor()
+{
+    if (ros_executor_started_ || !executor_) {
+        return;
+    }
+    ros_executor_started_ = true;
     ros_thread_ = std::thread([this]()
     {
         executor_->spin();
@@ -1727,6 +1743,7 @@ void RosUiBridge::updateNet(const diagnostic_msgs::msg::DiagnosticStatus &status
     double total_out = 0.0;
     int total_errors = 0;
     QStringList interfaces;
+    QStringList ip_entries;
 
     for (const auto &item : status.values) {
         const QString key = QString::fromStdString(item.key);
@@ -1742,6 +1759,9 @@ void RosUiBridge::updateNet(const diagnostic_msgs::msg::DiagnosticStatus &status
             has_interface = true;
         } else if (has_interface && key == "State") {
             current_if["state"] = value;
+        } else if (has_interface && key == "IP Address") {
+            current_if["ip"] = value;
+            ip_entries << current_if.value("interface").toString() + ": " + value;
         } else if (has_interface && key == "Input Traffic") {
             current_if["input"] = value;
             total_in += extractNumber(value);
@@ -1775,6 +1795,7 @@ void RosUiBridge::updateNet(const diagnostic_msgs::msg::DiagnosticStatus &status
     summary["input"] = formatNumber(total_in, 4) + " MB/s";
     summary["output"] = formatNumber(total_out, 4) + " MB/s";
     summary["interfaces"] = interfaces.join(", ");
+    summary["ipAddresses"] = ip_entries.join("\n");
     summary["interfaceCount"] = interfaces.size();
     summary["errors"] = total_errors;
 

@@ -15,6 +15,7 @@
 #include <memory>
 #include <mutex>
 #include <thread>
+#include <vector>
 
 #include <diagnostic_msgs/msg/diagnostic_array.hpp>
 #include <rclcpp/rclcpp.hpp>
@@ -86,6 +87,9 @@ class RosUiBridge : public QObject
 public:
     explicit RosUiBridge(QObject *parent = nullptr);
     ~RosUiBridge() override;
+
+    void addNode(const rclcpp::Node::SharedPtr & node);
+    void startRosExecutor();
 
     QString rosStatus() const;
 
@@ -331,6 +335,7 @@ private:
     std::chrono::steady_clock::time_point playback_last_tick_;
 
     rclcpp::Node::SharedPtr node_;
+    std::vector<rclcpp::Node::SharedPtr> owned_nodes_;
     rclcpp::Subscription<diagnostic_msgs::msg::DiagnosticArray>::SharedPtr diagnostics_sub_;
     rclcpp::Subscription<std_msgs::msg::String>::SharedPtr video_topics_sub_;
     rclcpp::TimerBase::SharedPtr topic_discovery_timer_;
@@ -338,4 +343,5 @@ private:
     rclcpp::Publisher<std_msgs::msg::String>::SharedPtr video_select_pub_;
     std::unique_ptr<rclcpp::executors::SingleThreadedExecutor> executor_;
     std::thread ros_thread_;
+    bool ros_executor_started_ = false;
 };
