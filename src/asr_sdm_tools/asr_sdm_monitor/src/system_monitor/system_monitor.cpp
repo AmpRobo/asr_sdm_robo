@@ -1,12 +1,12 @@
-#include "system_monitor/system_monitor.hpp"
+#include "asr_sdm_monitor/system_monitor/system_monitor.hpp"
 
 #include <ament_index_cpp/get_package_share_directory.hpp>
 
-#include "system_monitor/cpu_monitor.hpp"
-#include "system_monitor/hdd_monitor.hpp"
-#include "system_monitor/mem_monitor.hpp"
-#include "system_monitor/monitor_utils.hpp"
-#include "system_monitor/net_monitor.hpp"
+#include "asr_sdm_monitor/system_monitor/cpu_monitor.hpp"
+#include "asr_sdm_monitor/system_monitor/hdd_monitor.hpp"
+#include "asr_sdm_monitor/system_monitor/mem_monitor.hpp"
+#include "asr_sdm_monitor/system_monitor/monitor_utils.hpp"
+#include "asr_sdm_monitor/system_monitor/net_monitor.hpp"
 
 namespace asr_sdm_monitor
 {

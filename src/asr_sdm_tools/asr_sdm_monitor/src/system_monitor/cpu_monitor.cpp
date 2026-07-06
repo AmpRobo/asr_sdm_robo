@@ -1,4 +1,4 @@
-#include "system_monitor/cpu_monitor.hpp"
+#include "asr_sdm_monitor/system_monitor/cpu_monitor.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -8,7 +8,7 @@
 #include <thread>
 #include <tuple>
 
-#include "system_monitor/monitor_utils.hpp"
+#include "asr_sdm_monitor/system_monitor/monitor_utils.hpp"
 
 namespace asr_sdm_monitor
 {

@@ -1,4 +1,4 @@
-#include "system_monitor/hdd_monitor.hpp"
+#include "asr_sdm_monitor/system_monitor/hdd_monitor.hpp"
 
 #include <QJsonDocument>
 #include <QJsonObject>
@@ -6,7 +6,7 @@
 
 #include <set>
 
-#include "system_monitor/monitor_utils.hpp"
+#include "asr_sdm_monitor/system_monitor/monitor_utils.hpp"
 
 namespace asr_sdm_monitor
 {

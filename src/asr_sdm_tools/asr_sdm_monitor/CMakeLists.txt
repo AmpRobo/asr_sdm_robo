@@ -30,14 +30,14 @@ qt_add_executable(${PROJECT_NAME}
   src/system_monitor/hdd_monitor.cpp
   src/system_monitor/net_monitor.cpp
   src/system_monitor/system_monitor.cpp
-  include/ros_ui_bridge.hpp
-  include/ros_video_image_provider.hpp
-  include/system_monitor/monitor_utils.hpp
-  include/system_monitor/cpu_monitor.hpp
-  include/system_monitor/mem_monitor.hpp
-  include/system_monitor/hdd_monitor.hpp
-  include/system_monitor/net_monitor.hpp
-  include/system_monitor/system_monitor.hpp
+  include/asr_sdm_monitor/ros_ui_bridge.hpp
+  include/asr_sdm_monitor/ros_video_image_provider.hpp
+  include/asr_sdm_monitor/system_monitor/monitor_utils.hpp
+  include/asr_sdm_monitor/system_monitor/cpu_monitor.hpp
+  include/asr_sdm_monitor/system_monitor/mem_monitor.hpp
+  include/asr_sdm_monitor/system_monitor/hdd_monitor.hpp
+  include/asr_sdm_monitor/system_monitor/net_monitor.hpp
+  include/asr_sdm_monitor/system_monitor/system_monitor.hpp
 )
 
 qt_add_resources(${PROJECT_NAME} "qml_resources"

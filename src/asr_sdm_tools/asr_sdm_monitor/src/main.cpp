@@ -4,10 +4,10 @@
 #include <qqml.h>
 
 #include <rclcpp/rclcpp.hpp>
-#include "ros_ui_bridge.hpp"
-#include "ros_video_image_provider.hpp"
-#include "system_monitor/monitor_utils.hpp"
-#include "system_monitor/system_monitor.hpp"
+#include "asr_sdm_monitor/ros_ui_bridge.hpp"
+#include "asr_sdm_monitor/ros_video_image_provider.hpp"
+#include "asr_sdm_monitor/system_monitor/monitor_utils.hpp"
+#include "asr_sdm_monitor/system_monitor/system_monitor.hpp"
 
 int main(int argc, char *argv[])
 {

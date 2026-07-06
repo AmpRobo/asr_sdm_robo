@@ -1,4 +1,4 @@
-#include "system_monitor/net_monitor.hpp"
+#include "asr_sdm_monitor/system_monitor/net_monitor.hpp"
 
 #include <algorithm>
 #include <cctype>
@@ -11,7 +11,7 @@
 #include <sstream>
 #include <thread>
 
-#include "system_monitor/monitor_utils.hpp"
+#include "asr_sdm_monitor/system_monitor/monitor_utils.hpp"
 
 namespace asr_sdm_monitor
 {
