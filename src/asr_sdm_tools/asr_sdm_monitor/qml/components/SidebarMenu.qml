@@ -49,7 +49,7 @@ Rectangle {
         }
 
         SelectableButton {
-            label: root.collapsed ? "H" : I18n.t(root.language, "hardware")
+            label: root.collapsed ? I18n.t(root.language, "hardwareShort") : I18n.t(root.language, "hardware")
             selected: root.currentSection === 0
             appPalette: root.appPalette
             implicitWidth: parent.width
@@ -59,7 +59,7 @@ Rectangle {
         }
 
         SelectableButton {
-            label: root.collapsed ? "V" : I18n.t(root.language, "video")
+            label: root.collapsed ? I18n.t(root.language, "videoShort") : I18n.t(root.language, "video")
             selected: root.currentSection === 1
             appPalette: root.appPalette
             implicitWidth: parent.width
@@ -69,7 +69,7 @@ Rectangle {
         }
 
         SelectableButton {
-            label: root.collapsed ? "P" : I18n.t(root.language, "plot")
+            label: root.collapsed ? I18n.t(root.language, "plotShort") : I18n.t(root.language, "plot")
             selected: root.currentSection === 2
             appPalette: root.appPalette
             implicitWidth: parent.width

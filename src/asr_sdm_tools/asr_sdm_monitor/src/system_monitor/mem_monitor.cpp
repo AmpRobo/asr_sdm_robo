@@ -1,8 +1,8 @@
-#include "asr_sdm_monitor/system_monitor/mem_monitor.hpp"
+#include "system_monitor/mem_monitor.hpp"
 
 #include <set>
 
-#include "asr_sdm_monitor/system_monitor/monitor_utils.hpp"
+#include "system_monitor/monitor_utils.hpp"
 
 namespace asr_sdm_monitor
 {

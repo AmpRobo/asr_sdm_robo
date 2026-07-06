@@ -4,29 +4,65 @@
 
 The interface is organized into 3 main modules:
 
-- **Hardware**: monitor CPU, memory, disk, network, and NTP information from `/diagnostics`
+- **Hardware**: run the integrated CPU, memory, disk, and network monitors and visualize `/diagnostics`; compatible external NTP diagnostics can also be displayed
 - **Video**: display `/perception*` image streams in selectable video windows
-- **Plot**: select plottable ROS topics, visualize live data, record selected topics, and replay rosbag / MCAP data
+- **Plot**: distinguish normal ROS 2 publishers from active `ros2 bag play` sources, visualize selected live data, record selected topics, and open rosbag / MCAP data independently for playback
 
 The top bar provides **Theme** and **Language** selectors. 
 
 ### Quick start
 
-Build the package in a ROS 2 workspace and source the workspace before running the monitor.
+Target environment: Ubuntu 24.04, ROS 2 Jazzy, and Qt 6. Run the following commands from the root of a ROS 2 workspace:
 
 ```bash
-cd ~/ros2_ws
-colcon build --packages-select asr_sdm_monitor
+source /opt/ros/jazzy/setup.bash
+rosdep install --from-paths src --ignore-src -r -y
+```
+
+If the Qt 6 development and QML runtime modules are not installed, install them explicitly:
+
+```bash
+sudo apt update
+sudo apt install qt6-base-dev qt6-declarative-dev \
+  qml6-module-qtquick qml6-module-qtquick-controls \
+  qml6-module-qtquick-layouts qml6-module-qtquick-window \
+  qml6-module-qtqml-workerscript
+```
+
+Build and run:
+
+```bash
+colcon build --packages-select asr_sdm_monitor --event-handlers console_direct+
 source install/setup.bash
 ros2 run asr_sdm_monitor asr_sdm_monitor
 ```
 
-Optional: load monitor parameters from the package config file:
+When moving the source tree between computers or after changing build dependencies, a clean package rebuild can be used:
 
 ```bash
-ros2 run asr_sdm_monitor asr_sdm_monitor --ros-args \
-  --params-file $(ros2 pkg prefix asr_sdm_monitor)/share/asr_sdm_monitor/config/system_monitor.yaml
+rm -rf build/asr_sdm_monitor install/asr_sdm_monitor
+colcon build --packages-select asr_sdm_monitor --event-handlers console_direct+
+source install/setup.bash
 ```
+
+The CPU, memory, disk, and network monitor nodes are integrated into the same executable. A separate `ros2_system_monitor` package, folder, launch file, or second startup command is not required.
+
+The installed `config/system_monitor.yaml` file is loaded automatically.
+
+```bash
+ros2 run asr_sdm_monitor asr_sdm_monitor
+```
+
+#### Runtime architecture
+
+| Execution domain | Main responsibilities |
+|---|---|
+| **Qt GUI thread** | QML pages, chart rendering, batched plot refresh, final video display, lightweight diagnostics handling, and ROS graph discovery |
+| **Plot / Record executor** | Typed plot subscriptions, publisher-GID source filtering, numeric field extraction, generic recording subscriptions, and rosbag2 writing |
+| **Video executor** | `Image` / `CompressedImage` subscriptions and image decoding |
+| **Hardware executor** | Integrated CPU, memory, disk, and network monitor nodes |
+
+All worker executors are stopped and joined before ROS 2 shutdown.
 
 ### Hardware
 
@@ -69,24 +105,23 @@ If `lm-sensors` is not installed, temperature checks may fail while usage, memor
 
 #### Function
 
-The `/diagnostics` topic is published by the monitor nodes from the `ros2_system_monitor` package, including `cpu_monitor`, `mem_monitor`, `hdd_monitor`, `net_monitor`, and `ntp_monitor`.
+The CPU, memory, disk, and network monitor nodes are built into `asr_sdm_monitor`. Starting the application with the following single command starts both the Qt/QML interface and all integrated hardware monitors:
 
 ```bash
-cd ~/ros2_ws
-colcon build --packages-select ros2_system_monitor
-source install/setup.bash
-ros2 launch ros2_system_monitor system_monitor.launch.py
+ros2 run asr_sdm_monitor asr_sdm_monitor
 ```
 
-The **Hardware** module visualizes system status from the ROS 2 `/diagnostics` topic. It listens to diagnostic messages and updates the page when diagnostic status names match the following categories:
+The integrated monitor nodes publish system status to `/diagnostics`, and the **Hardware** module subscribes to the same topic. No separate `ros2_system_monitor` folder, package, or launch command is needed.
+
+The page parses the following diagnostic categories:
 
 - CPU usage
 - Memory usage
 - HDD usage
 - Network usage
-- NTP offset
+- NTP offset, when compatible NTP diagnostics are published by another ROS 2 node
 
-The module contains five tabs: **CPU**, **Memory**, **HDD**, **Net**, and **NTP**. Each tab has summary cards and, when available, a detailed table or history chart.
+The module contains five tabs: **CPU**, **Memory**, **HDD**, **Net**, and **NTP**. CPU, memory, disk, and network diagnostics are generated internally. The NTP tab displays compatible NTP diagnostic messages when they are available.
 
 #### CPU page
 
@@ -239,35 +274,23 @@ Table columns:
 
 #### Typical workflow
 
-1. Start the system monitor nodes in one terminal.
+1. From a sourced workspace, start the complete monitor application:
 
 ```bash
-cd ~/ros2_ws
-colcon build --packages-select ros2_system_monitor
-source install/setup.bash
-ros2 launch ros2_system_monitor system_monitor.launch.py
-```
-
-2. Start the monitor UI in another terminal.
-
-```bash
-cd ~/ros2_ws
-source install/setup.bash
 ros2 run asr_sdm_monitor asr_sdm_monitor
 ```
 
-3. Open **Hardware** from the sidebar.
+2. Open **Hardware** from the sidebar.
 
-4. Use the **CPU** page as a typical example.
+3. Use the **CPU** page as a typical example.
 
    ![Hardware CPU page](docs/images/hardware_cpu_overview.png)
 
-5. If the page does not update, first confirm that `/diagnostics` is being published.
+4. If the page does not update, inspect `/diagnostics` from another sourced terminal:
 
 ```bash
 ros2 topic echo /diagnostics --once
 ```
-
 
 ### Video
 
@@ -342,13 +365,13 @@ The monitor supports common raw image encodings handled by the implementation, i
 
 #### Function
 
-The **Plot** module visualizes numeric fields from selected ROS topics. It supports three subpages:
+The **Plot** module visualizes numeric fields from ROS topics and records selected ROS 2 messages. It supports three subpages:
 
 | Subpage | Function |
 |---|---|
-| **Topics** | Scan published topics and choose which topics are candidates for plotting |
-| **Live** | Plot live data from selected topics and record selected topic messages to a bag |
-| **Recorded** | Open a recorded rosbag / MCAP directory and replay plottable data |
+| **Topics** | Scan active publishers, distinguish normal ROS 2 sources from active `ros2 bag play` sources, sort the list, and select the source used by Live plotting and recording |
+| **Live** | Plot supported numeric fields from selected topic sources and record every selected topic, including non-plottable message types |
+| **Recorded** | Open a rosbag / MCAP directory, read all supported plot fields directly from the bag, and replay them independently of Topics-page selections |
 
 The Plot module can work as a time-series plot or as an XY plot:
 
@@ -359,7 +382,7 @@ For example, if the X axis is `angular_velocity.x` and the Y axis is `angular_ve
 
 #### Supported topic types
 
-Only topics with supported numeric message types can be plotted or recorded through the Plot UI.
+The following message types can be decoded into numeric fields for **Live** and **Recorded** plotting. Recording is not restricted to this table: every selected topic source with a valid message type can be stored through a generic serialized subscription.
 
 | Message type | Plottable fields |
 |---|---|
@@ -389,65 +412,66 @@ Only topics with supported numeric message types can be plotted or recorded thro
 
 #### Topics subpage
 
-The **Topics** subpage is used to build the candidate topic set for plotting.
+The **Topics** subpage lists active ROS graph publisher sources used by **Live** plotting and recording.
 
 Buttons and controls:
 
 | Control | Function |
 |---|---|
-| **Refresh** | Scan the ROS graph again and refresh the topic list |
-| **Checkbox** | Add or remove a topic from the plotting candidate set |
-| **Topic Name** | Display the ROS topic name |
-| **Topic Type** | Display the ROS message type |
-| **Status** | Show whether the topic is plottable and how many fields it provides |
+| **Refresh** | Scan the ROS graph again and refresh publisher sources |
+| **Sort** | Sort by `Name A–Z`, `Name Z–A`, `Source`, or `Plottable first` |
+| **Checkbox** | Select or clear one publisher source |
+| **Topic** | Display the ROS topic name |
+| **Type** | Display the ROS message type |
+| **Source** | Show `ROS 2 Live` or `ROS 2 Bag Play`, followed by publisher node names when available |
+| **Capability** | Show whether the source is plottable, recordable, or recordable only |
 
-Status meanings:
+Source and selection behavior:
 
-| Status | Meaning |
-|---|---|
-| **Plottable · N** | The topic type is supported and provides `N` numeric fields |
-| **Unsupported** | The topic exists but its message type is not supported by the Plot module |
-
-Notes:
-
-- Only checked plottable topics appear in the **Live** and **Recorded** label selectors.
-- When the selected topic set changes, live plot samples are cleared and subscriptions are refreshed.
-- The topic list is also refreshed automatically by the backend topic discovery timer.
+- Normal publishers and active `ros2 bag play` publishers are separated using ROS graph endpoint information and publisher GIDs.
+- Multiple rows may therefore have the same topic name but different sources.
+- Only one source can be selected for the same topic name. Selecting another source with that name automatically clears the previous source.
+- Different topic names can be selected independently.
+- Selected supported types provide fields to **Live**; selected unsupported types remain recordable.
+- Changing the selected source set clears current Live samples and refreshes plot and recording subscriptions.
+- This page does not contain offline topics from a bag opened in **Recorded**.
 
 #### Live subpage
 
-The **Live** subpage displays real-time samples from the selected topic set.
+The **Live** subpage displays real-time samples from the source selections made in **Topics**.
 
 Buttons and controls:
 
 | Control | Function |
 |---|---|
 | **Recording Bag** | Path where a new recording bag will be saved |
-| **Start Recording** | Start recording selected live topic messages to a bag |
+| **Start Recording** | Start recording every selected topic source |
 | **Stop Recording** | Stop the active recording and close the bag writer |
 | **X Axis settings** | Configure the X-axis data source and display style |
 | **Y Axis settings** | Configure the number of curves and each curve style |
 | **Reset** | Reset the chart view after zooming or panning |
 
-Recording behavior:
+Live and recording behavior:
 
-- The default recording directory is `~/asr_sdm_monitor_recordings`.
+- Live field selectors contain only supported numeric fields from the selected topic sources.
+- The default recording directory is `$HOME/asr_sdm_monitor_recordings`.
 - The default bag name format is `plot_yyyyMMdd_HHmmss`.
 - If the path field is empty, the monitor generates a default path.
 - If the target path already exists, recording will not start.
-- Only messages from selected plottable topics are recorded.
+- Recording stores all selected topic sources, including message types that cannot be plotted.
+- Publisher-GID filtering keeps messages from the selected source when the same topic name is published by both a live node and `ros2 bag play`.
 - The status text shows the recording path and message count while recording.
 
 #### Recorded subpage
 
-The **Recorded** subpage loads and replays recorded rosbag / MCAP data.
+The **Recorded** subpage loads and replays rosbag / MCAP data without depending on the **Topics** checkboxes.
 
 Buttons and controls:
 
 | Control | Function |
 |---|---|
 | **Recorded Bag** | Path of the recorded bag / MCAP directory |
-| **Open** | Open a folder dialog and choose a recorded bag directory |
+| **Open** | Open a folder dialog and choose a bag directory |
 | **Play** | Start playback from the current time |
 | **Pause** | Pause playback |
 | **Start Time** | Set the start boundary of playback |
@@ -455,6 +479,8 @@ Buttons and controls:
 | **Current Time** | Set the current playback time |
 | **Speed** | Set playback speed |
 | **Playback slider** | Drag to adjust the current playback time |
+
+When **Open** succeeds, the monitor reads the bag metadata and messages, exposes every supported numeric field found in the bag, and makes all decoded plot samples available immediately. Offline bag topics do not need to be selected in **Topics**, and they are not added to the Topics list.
 
 Adjustable playback parameters:
 
@@ -475,7 +501,8 @@ Time input formats:
 
 Playback behavior:
 
-- When a bag is loaded successfully, the module switches to **Recorded** data source.
+- Loading a bag switches the plot data source to **Recorded**.
+- Unsupported message types remain in the bag but are skipped by the plot decoder.
 - When playback reaches **End Time**, it stops automatically.
 - If **Play** is pressed after playback has reached the end, playback restarts from **Start Time**.
 - The chart shows a vertical playback marker in time-series mode.
@@ -486,7 +513,7 @@ Playback behavior:
 | Parameter | Options / Range | Default | Description |
 |---|---:|---:|---|
 | **Label type** | `Time`, `Topic Message` | `Time` | Select whether the X axis uses time or a topic field |
-| **Label** | Selected plottable field | First available field when needed | Used only when **Label type** is `Topic Message` |
+| **Label** | Available plottable field for the active data source | First available field when needed | Used only when **Label type** is `Topic Message` |
 | **Show tick labels** | `On`, `Off` | `On` | Show or hide X-axis tick labels |
 | **Timestamp format** | `Relative Time`, `Absolute Time` | `Relative Time` | Used only when **Label type** is `Time` |
 | **Current Time** | Display only in Live; editable through playback controls in Recorded | Current live or playback time | Shows current reference time |
@@ -498,7 +525,7 @@ Playback behavior:
 |---|---:|---:|---|
 | **Series number** | 1 to 16 | 1 | Number of curves to draw |
 | **Show tick labels** | `On`, `Off` | `On` | Show or hide Y-axis tick labels |
-| **Series Label** | `None` or selected plottable field | `None` | Field used by this curve |
+| **Series Label** | `None` or an available plottable field | `None` | Field used by this curve |
 | **Series Color** | Color dialog or text value | Automatic palette color | Color of the curve |
 | **Line width** | Positive number, minimum 0.1 | 1.0 | Width of the curve line |
 
@@ -519,8 +546,6 @@ Series behavior:
 
 #### Axis scale
 
-The implementation contains an axis scale mode property used by the chart:
-
 | Mode | Function |
 |---|---|
 | **Independent** | X and Y axes scale independently |
@@ -528,62 +553,88 @@ The implementation contains an axis scale mode property used by the chart:
 
 #### Typical workflow
 
-1. Open **Plot** from the sidebar.
+1. Open **Plot** and go to **Topics**.
 
-2. Go to **Topics** and click **Refresh** if the topic list needs to be updated.
-
-3. Check the plottable topics that should be used by the plot module.
+2. Refresh the list when needed, choose a sorting mode, and select the required source for each topic name.
 
    ![Plot topic selection](docs/images/plot_topics_selection.png)
 
-4. Go to **Live** for real-time visualization.
+3. Open **Live**. Supported selected topics provide plot fields; all selected topics can be recorded.
 
-5. For a time-series plot, set **X Axis / Label type** to `Time`, choose **Relative Time** or **Absolute Time**, and adjust **Time window**.
+4. For a time-series plot, set **X Axis / Label type** to `Time`, choose **Relative Time** or **Absolute Time**, and adjust **Time window**.
 
    ![Plot Live time-series](docs/images/plot_live_timeseries.png)
 
-6. For an XY plot, set **X Axis / Label type** to `Topic Message`, then choose the X-axis topic field.
+5. For an XY plot, set **X Axis / Label type** to `Topic Message`, then choose the X-axis topic field.
 
    ![Plot Live topic-series](docs/images/plot_live_topics.png)
 
-7. Set **Series number** and select one Y-axis field for each curve.
+6. Set **Series number** and select one Y-axis field for each curve. Adjust color and line width as needed.
 
-8. Adjust **Series Color** and **Line width** when different curves need to be distinguished.
+7. To record, Topics-page selection is required, then set **Recording Bag**, click **Start Recording**, and click **Stop Recording** when finished.
 
-9. Use the mouse wheel to zoom the chart view, left mouse drag to pan the chart view, and **Reset** to restore the automatic chart view.
+8. To inspect an offline bag, open **Recorded**, click **Open**, and select a rosbag / MCAP directory. No Topics-page selection is required.
 
-10. To record live data, set **Recording Bag**, click **Start Recording**, then click **Stop Recording** when finished.
+9. Select fields from the opened bag, configure **Start Time**, **End Time**, **Current Time**, and **Speed**, and click **Play**.
 
-11. To replay data, go to **Recorded**, click **Open**, and select a rosbag / MCAP directory.
-
-12. Set **Start Time**, **End Time**, **Current Time**, and **Speed** as needed.
-
-13. Click **Play** to replay the selected time range, or click **Pause** to pause playback.
-
-    ![Plot Recorded playback](docs/images/plot_recorded_playback.png)
-
-14. After playback reaches **End Time**, click **Play** again to restart from **Start Time**.
-
+   ![Plot Recorded playback](docs/images/plot_recorded_playback.png)
 
 ---
 
 ### 快速开始
 
-在 ROS 2 workspace 中编译 package，并 source workspace 后启动 monitor。
+目标环境为 Ubuntu 24.04、ROS 2 Jazzy 和 Qt 6。请在 ROS 2 workspace 根目录执行：
 
 ```bash
-cd ~/ros2_ws
-colcon build --packages-select asr_sdm_monitor
+source /opt/ros/jazzy/setup.bash
+rosdep install --from-paths src --ignore-src -r -y
+```
+
+如果尚未安装 Qt 6 开发包和 QML 运行模块，可显式安装：
+
+```bash
+sudo apt update
+sudo apt install qt6-base-dev qt6-declarative-dev \
+  qml6-module-qtquick qml6-module-qtquick-controls \
+  qml6-module-qtquick-layouts qml6-module-qtquick-window \
+  qml6-module-qtqml-workerscript
+```
+
+编译并启动：
+
+```bash
+colcon build --packages-select asr_sdm_monitor --event-handlers console_direct+
 source install/setup.bash
 ros2 run asr_sdm_monitor asr_sdm_monitor
 ```
 
-可选：从 package 配置文件加载 monitor 参数：
+在不同电脑之间移动源码或修改编译依赖后，可以仅清理本 package 再重新编译：
+
+```bash
+rm -rf build/asr_sdm_monitor install/asr_sdm_monitor
+colcon build --packages-select asr_sdm_monitor --event-handlers console_direct+
+source install/setup.bash
+```
+
+CPU、内存、磁盘和网络监测节点已经集成到同一个可执行程序中，不需要额外准备 `ros2_system_monitor` 文件夹、package 或 launch 文件，也不需要第二条启动命令。
+
+安装后的 `config/system_monitor.yaml` 会自动加载，也可以显式指定：
 
 ```bash
 ros2 run asr_sdm_monitor asr_sdm_monitor --ros-args \
   --params-file $(ros2 pkg prefix asr_sdm_monitor)/share/asr_sdm_monitor/config/system_monitor.yaml
 ```
+
+#### 运行架构
+
+| 执行域 | 主要职责 |
+|---|---|
+| **Qt GUI 主线程** | QML 页面、曲线最终绘制、Plot 数据批量刷新、视频最终显示、轻量 diagnostics 处理和 ROS graph 话题发现 |
+| **Plot / Record executor** | 类型化绘图订阅、publisher GID 来源过滤、数值字段提取、通用录制订阅和 rosbag2 写入 |
+| **Video executor** | `Image` / `CompressedImage` 订阅和图像解码 |
+| **Hardware executor** | 内置 CPU、内存、磁盘和网络监测节点 |
+
+程序退出时会先停止并回收所有 ROS worker executor，再执行 ROS 2 shutdown。
 
 ### Hardware
 
@@ -626,26 +677,23 @@ sensors
 
 #### 功能
 
-`/diagnostics` 话题由 `ros2_system_monitor` package 中的多个监测节点发布，包括 `cpu_monitor`、`mem_monitor`、`hdd_monitor`、`net_monitor`, `ntp_monitor`。 
-
-启动`ros2_system_monitor`
+CPU、内存、磁盘和网络监测节点已经内置在 `asr_sdm_monitor` 中。执行下面一个命令即可同时启动 Qt/QML 界面和全部内置硬件监测：
 
 ```bash
-cd ~/ros2_ws
-colcon build --packages-select ros2_system_monitor
-source install/setup.bash
-ros2 launch ros2_system_monitor system_monitor.launch.py
+ros2 run asr_sdm_monitor asr_sdm_monitor
 ```
 
-**Hardware** 模块用于显示 ROS 2 `/diagnostics` 话题中的系统诊断信息。程序会订阅 `/diagnostics`，并根据 diagnostic status 的名称解析下面几类信息：
+内置节点会把系统状态发布到 `/diagnostics`，**Hardware** 模块订阅同一个话题并显示结果。不需要单独的 `ros2_system_monitor` 文件夹、package 或启动命令。
+
+页面会解析以下诊断类别：
 
 - CPU usage
 - Memory usage
 - HDD usage
 - Network usage
-- NTP offset
+- NTP offset：当其他 ROS 2 节点发布兼容的 NTP diagnostics 时显示
 
-该模块包含五个子页面：**CPU**、**Memory**、**HDD**、**Net**、**NTP**。每个页面包含概要卡片，部分页面还包含历史曲线或详细表格。
+该模块包含五个子页面：**CPU**、**Memory**、**HDD**、**Net**、**NTP**。CPU、内存、磁盘和网络诊断由本程序内部生成；NTP 页面在收到兼容的 NTP 诊断消息时显示对应信息。
 
 #### CPU 页面
 
@@ -799,35 +847,23 @@ ros2 launch ros2_system_monitor system_monitor.launch.py
 
 #### 典型使用流程
 
-1. 在一个终端中启动 system monitor 节点。
+1. 在已经 source 的 workspace 中启动完整 monitor：
 
 ```bash
-cd ~/ros2_ws
-colcon build --packages-select ros2_system_monitor
-source install/setup.bash
-ros2 launch ros2_system_monitor system_monitor.launch.py
-```
-
-2. 在另一个终端中启动 monitor UI。
-
-```bash
-cd ~/ros2_ws
-source install/setup.bash
 ros2 run asr_sdm_monitor asr_sdm_monitor
 ```
 
-3. 在侧边栏打开 **Hardware**。
+2. 在侧边栏打开 **Hardware**。
 
-4. 以 **CPU** 页面作为典型示例。
+3. 以 **CPU** 页面作为典型示例。
 
    ![Hardware CPU 页面](docs/images/hardware_cpu_overview.png)
 
-5. 如果页面没有刷新，先确认 `/diagnostics` 是否正在发布。
+4. 如果页面没有刷新，可以在另一个已 source 的终端中检查 `/diagnostics`：
 
 ```bash
 ros2 topic echo /diagnostics --once
 ```
-
 
 ### Video
 
@@ -901,24 +937,24 @@ monitor 支持实现中处理的常见 raw image encoding：
 
 #### 功能
 
-**Plot** 模块用于可视化所选 ROS topic 中的数值字段。它包含三个子页面：
+**Plot** 模块用于可视化 ROS topic 中的数值字段，并录制所选 ROS 2 消息。它包含三个子页面：
 
 | 子页面 | 功能 |
 |---|---|
-| **Topics** | 扫描正在发布的话题，并选择可用于绘图的候选 topic |
-| **Live** | 显示所选 topic 的实时数据，并可以录制为 bag |
-| **Recorded** | 打开 rosbag / MCAP 目录，并回放其中可绘图的数据 |
+| **Topics** | 扫描当前 publisher，区分普通 ROS 2 来源与正在运行的 `ros2 bag play` 来源，对列表排序，并选择 Live 绘图和录制使用的来源 |
+| **Live** | 绘制所选来源中的受支持数值字段，并录制全部已选话题，包括不可绘制的消息类型 |
+| **Recorded** | 打开 rosbag / MCAP 目录，直接读取 bag 内所有受支持的绘图字段，且回放与 Topics 页面勾选完全解耦 |
 
 Plot 模块支持两种绘图方式：
 
 - **时间序列图**：X 轴是时间，Y 轴是一个或多个 topic message 字段
 - **XY 图**：X 轴是一个 topic message 字段，Y 轴是一个或多个 topic message 字段
 
-例如 X 轴选择 `angular_velocity.x`，Y 轴选择 `angular_velocity.y` 时，图中显示的是 IMU 角速度两个分量之间的 XY 关系。
+例如 X 轴选择 `angular_velocity.x`，Y 轴选择 `angular_velocity.y` 时，图中显示 IMU 角速度两个分量之间的 XY 关系。
 
 #### 支持的话题类型
 
-只有支持的数值消息类型可以在 Plot 中绘制或通过 Plot UI 录制。
+下表中的消息类型可以在 **Live** 和 **Recorded** 中解析为数值字段。录制不受此表限制：只要 Topics 中选择的话题具有有效消息类型，就可以通过通用序列化订阅写入 bag。
 
 | Message type | 可绘制字段 |
 |---|---|
@@ -948,58 +984,59 @@ Plot 模块支持两种绘图方式：
 
 #### Topics 子页面
 
-**Topics** 子页面用于构建绘图候选 topic 集合。
+**Topics** 子页面只展示当前 ROS graph 中的 publisher 来源，用于 **Live** 绘图和录制。
 
 按钮和控件：
 
 | 控件 | 作用 |
 |---|---|
-| **Refresh** | 重新扫描 ROS graph 并刷新 topic 列表 |
-| **Checkbox** | 将某个 topic 加入或移出绘图候选集合 |
-| **Topic Name** | 显示 ROS topic 名称 |
-| **Topic Type** | 显示 ROS message type |
-| **Status** | 显示该 topic 是否可绘图，以及有多少个可绘制字段 |
+| **Refresh** | 重新扫描 ROS graph 并刷新 publisher 来源 |
+| **Sort** | 按 `名称正序 A–Z`、`名称倒序 Z–A`、`话题来源` 或 `可绘图优先` 排序 |
+| **Checkbox** | 选择或取消一个 publisher 来源 |
+| **Topic** | 显示 ROS topic 名称 |
+| **Type** | 显示 ROS message type |
+| **Source** | 显示 `ROS 2 Live` 或 `ROS 2 Bag Play`，可用时同时显示 publisher node 名称 |
+| **Capability** | 显示可绘图且可录制，或仅可录制 |
 
-状态含义：
+来源与选择规则：
 
-| 状态 | 含义 |
-|---|---|
-| **Plottable · N** | 该 topic 类型支持绘图，并提供 `N` 个数值字段 |
-| **Unsupported** | topic 存在，但消息类型当前不支持绘图 |
-
-说明：
-
-- 只有被勾选的可绘图 topic，才会出现在 **Live** 和 **Recorded** 的 Label 下拉菜单中。
-- 当候选 topic 集合发生变化时，实时绘图缓存会被清空，订阅会重新刷新。
-- topic 列表也会由后端定时自动刷新。
+- 程序通过 ROS graph endpoint 信息和 publisher GID 区分普通 publisher 与正在运行的 `ros2 bag play` publisher。
+- 因此列表中可能出现名称相同但来源不同的多行话题。
+- 同一个话题名称只能选择一个来源；勾选另一个同名来源时，原来源会自动取消。
+- 不同名称的话题可以分别勾选。
+- 已选且受支持的话题会向 **Live** 提供绘图字段；已选但不支持绘图的话题仍然可以录制。
+- 修改选择后会清空当前 Live 样本，并刷新绘图订阅和录制订阅。
+- **Recorded** 中打开的离线 bag 话题不会出现在 Topics 页面。
 
 #### Live 子页面
 
-**Live** 子页面用于显示所选 topic 的实时数据。
+**Live** 子页面显示 Topics 中所选来源的实时数据。
 
 按钮和控件：
 
 | 控件 | 作用 |
 |---|---|
 | **Recording Bag** | 新录制 bag 的保存路径 |
-| **Start Recording** | 开始把所选实时 topic 消息录制到 bag |
+| **Start Recording** | 开始录制全部已选话题来源 |
 | **Stop Recording** | 停止当前录制并关闭 bag writer |
 | **X Axis settings** | 设置 X 轴数据来源和显示方式 |
 | **Y Axis settings** | 设置曲线数量和每条曲线的显示方式 |
 | **Reset** | 鼠标缩放或拖动后恢复自动视野 |
 
-录制行为：
+Live 与录制行为：
 
-- 默认录制目录是 `~/asr_sdm_monitor_recordings`。
+- Live 字段下拉菜单只包含已选来源中受支持的数值字段。
+- 默认录制目录是 `$HOME/asr_sdm_monitor_recordings`。
 - 默认 bag 名称格式是 `plot_yyyyMMdd_HHmmss`。
 - 如果路径为空，monitor 会自动生成默认路径。
 - 如果目标路径已经存在，录制不会开始。
-- 只有已勾选的可绘图 topic 会被录制。
+- 录制会保存全部已选话题，包括不能绘制的消息类型。
+- 当普通节点和 `ros2 bag play` 同时发布同名话题时，publisher GID 过滤只保留所选来源的消息。
 - 录制过程中状态栏会显示录制路径和消息数量。
 
 #### Recorded 子页面
 
-**Recorded** 子页面用于加载和回放 rosbag / MCAP 数据。
+**Recorded** 子页面用于加载和回放 rosbag / MCAP 数据，不依赖 **Topics** 页面的勾选状态。
 
 按钮和控件：
 
@@ -1014,6 +1051,8 @@ Plot 模块支持两种绘图方式：
 | **Current Time** | 设置当前回放时间 |
 | **Speed** | 设置播放速度 |
 | **Playback slider** | 拖动调整当前回放时间 |
+
+**Open** 成功后，程序会读取 bag 元数据和消息，立即把 bag 中所有受支持的数值字段加入 Recorded 的字段选择，并提供全部已解码样本。离线 bag 话题不需要在 Topics 中勾选，也不会加入 Topics 列表。
 
 可设置的回放参数：
 
@@ -1034,10 +1073,11 @@ Plot 模块支持两种绘图方式：
 
 回放行为：
 
-- bag 成功加载后，模块会切换到 **Recorded** 数据源。
+- bag 加载成功后，Plot 数据源会切换到 **Recorded**。
+- 不受支持的消息类型仍保留在原 bag 中，但不会被绘图解码器读取。
 - 当回放到 **End Time** 时会自动停止。
 - 如果回放已经结束，再点击 **Play**，会从 **Start Time** 重新播放。
-- 时间序列图中会显示一条垂直的当前回放时间标记线。
+- 时间序列图中会显示垂直的当前回放时间标记线。
 - 底部进度条和 **Current Time** 字段都会影响当前可视时间窗口。
 
 #### X Axis 设置
@@ -1045,7 +1085,7 @@ Plot 模块支持两种绘图方式：
 | 参数 | 选项 / 范围 | 默认值 | 说明 |
 |---|---:|---:|---|
 | **Label type** | `Time`, `Topic Message` | `Time` | 选择 X 轴使用时间还是 topic 字段 |
-| **Label** | 已选择 topic 的可绘图字段 | 需要时使用第一个可用字段 | 只在 **Label type** 为 `Topic Message` 时使用 |
+| **Label** | 当前数据源中的可用绘图字段 | 需要时使用第一个可用字段 | 只在 **Label type** 为 `Topic Message` 时使用 |
 | **Show tick labels** | `On`, `Off` | `On` | 是否显示 X 轴刻度标签 |
 | **Timestamp format** | `Relative Time`, `Absolute Time` | `Relative Time` | 只在 **Label type** 为 `Time` 时使用 |
 | **Current Time** | Live 中仅显示；Recorded 中通过回放控件编辑 | 当前实时或回放时间 | 显示当前参考时间 |
@@ -1057,7 +1097,7 @@ Plot 模块支持两种绘图方式：
 |---|---:|---:|---|
 | **Series number** | 1 到 16 | 1 | 要绘制的曲线数量 |
 | **Show tick labels** | `On`, `Off` | `On` | 是否显示 Y 轴刻度标签 |
-| **Series Label** | `None` 或已选择 topic 的可绘图字段 | `None` | 该曲线使用的字段 |
+| **Series Label** | `None` 或当前数据源中的可用绘图字段 | `None` | 该曲线使用的字段 |
 | **Series Color** | 颜色对话框或文本颜色值 | 自动颜色 | 曲线颜色 |
 | **Line width** | 正数，最小 0.1 | 1.0 | 曲线线宽 |
 
@@ -1078,8 +1118,6 @@ Plot 模块支持两种绘图方式：
 
 #### 坐标轴比例
 
-实现中包含一个坐标轴比例模式属性：
-
 | 模式 | 作用 |
 |---|---|
 | **Independent** | X 轴和 Y 轴独立缩放 |
@@ -1087,38 +1125,28 @@ Plot 模块支持两种绘图方式：
 
 #### 典型使用流程
 
-1. 在侧边栏打开 **Plot**。
+1. 在侧边栏打开 **Plot**，进入 **Topics**。
 
-2. 进入 **Topics**，必要时点击 **Refresh** 刷新 topic 列表。
-
-3. 勾选需要用于绘图的 plottable topics。
+2. 必要时刷新列表，选择排序方式，并为每个话题名称勾选需要使用的来源。
 
    ![Plot topic 选择](docs/images/plot_topics_selection.png)
 
-4. 进入 **Live** 查看实时数据。
+3. 进入 **Live**。受支持的已选话题可用于绘图，全部已选话题都可以录制。
 
-5. 如果需要时间序列图，把 **X Axis / Label type** 设置为 `Time`，选择 **Relative Time** 或 **Absolute Time**，并调整 **Time window**。
+4. 时间序列图中，将 **X Axis / Label type** 设置为 `Time`，选择 **Relative Time** 或 **Absolute Time**，并调整 **Time window**。
 
    ![Plot Live 时间序列](docs/images/plot_live_timeseries.png)
 
-6. 如果需要 XY 图，把 **X Axis / Label type** 设置为 `Topic Message`，然后选择 X 轴使用的 topic 字段。
+5. XY 图中，将 **X Axis / Label type** 设置为 `Topic Message`，然后选择 X 轴字段。
 
-   ![Plot Live topic序列](docs/images/plot_live_topics.png)
+   ![Plot Live topic 序列](docs/images/plot_live_topics.png)
 
-7. 设置 **Series number**，并为每条曲线选择一个 Y 轴字段。
+6. 设置 **Series number**，为每条曲线选择 Y 轴字段，并按需调整颜色和线宽。
 
-8. 需要区分多条曲线时，可以调整 **Series Color** 和 **Line width**。
+7. 需要录制时，先在 Topics 中勾选录制话题，设置 **Recording Bag**，点击 **Start Recording**，结束后点击 **Stop Recording**。
 
-9. 使用鼠标滚轮缩放曲线视野，使用鼠标左键拖动平移视野，点击 **Reset** 恢复自动视野。
+8. 查看离线 bag 时，进入 **Recorded**，点击 **Open** 并选择 rosbag / MCAP 目录，不需要先在 Topics 中勾选。
 
-10. 如果需要录制实时数据，设置 **Recording Bag**，点击 **Start Recording**，结束后点击 **Stop Recording**。
+9. 从已打开 bag 的字段中选择曲线，设置 **Start Time**、**End Time**、**Current Time** 和 **Speed**，然后点击 **Play**。
 
-11. 如果需要回放数据，进入 **Recorded**，点击 **Open**，选择 rosbag / MCAP 目录。
-
-12. 根据需要设置 **Start Time**、**End Time**、**Current Time** 和 **Speed**。
-
-13. 点击 **Play** 回放选定时间范围，点击 **Pause** 暂停。
-
-    ![Plot Recorded 回放](docs/images/plot_recorded_playback.png)
-
-14. 当回放到 **End Time** 后，再次点击 **Play** 会从 **Start Time** 重新播放。
+   ![Plot Recorded 回放](docs/images/plot_recorded_playback.png)

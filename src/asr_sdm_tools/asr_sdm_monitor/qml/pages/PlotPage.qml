@@ -22,6 +22,7 @@ Item {
     property bool yShowTickLabels: true
     property string settingsSource: "live"
     property string plotSection: "live"
+    property string topicSortMode: "nameAsc"
     property bool suppressDataSourceSync: false
     property var livePlotSettings: ({
         xAxisMode: "time",
@@ -56,6 +57,12 @@ Item {
         { value: "topics", label: I18n.t(root.language, "topics") },
         { value: "live", label: I18n.t(root.language, "live") },
         { value: "recorded", label: I18n.t(root.language, "recorded") }
+    ]
+    readonly property var topicSortOptions: [
+        { value: "nameAsc", label: I18n.t(root.language, "topicSortNameAscending") },
+        { value: "nameDesc", label: I18n.t(root.language, "topicSortNameDescending") },
+        { value: "source", label: I18n.t(root.language, "topicSortSource") },
+        { value: "plottableFirst", label: I18n.t(root.language, "topicSortPlottableFirst") }
     ]
     readonly property var xAxisOptions: [
         { value: "time", label: I18n.t(root.language, "time") },
@@ -286,11 +293,11 @@ Item {
 
     function defaultSeriesColor(index) {
         if (!root.appPalette)
-            return "#3794ff"
+            return "transparent"
         const colors = root.appPalette.chartSeriesColors || []
         if (colors.length > 0)
             return colors[index % colors.length]
-        return root.appPalette.primaryChart || root.appPalette.accent || "#3794ff"
+        return root.appPalette.primaryChart || root.appPalette.accent || root.appPalette.textPrimary
     }
 
     function defaultSeries(index) {
@@ -500,6 +507,82 @@ Item {
         return I18n.t(root.language, "topicSummaryTopics") + ": " + topics.length
                + "   " + I18n.t(root.language, "topicSummarySelected") + ": " + selected
                + "   " + I18n.t(root.language, "topicSummaryFields") + ": " + fields
+    }
+
+    function topicsHeadingText() {
+        return I18n.t(root.language, "allTopicSources")
+    }
+
+    function topicsHintText() {
+        return I18n.t(root.language, "unifiedTopicCandidateHint")
+    }
+
+    function topicSourceRank(topicItem) {
+        return topicItem && topicItem.sourceKind === "ros2_bag_play" ? 1 : 0
+    }
+
+    function sortedPlotTopics() {
+        const topics = (RosUi.plotTopics || []).slice()
+        const mode = root.topicSortMode
+        topics.sort(function(left, right) {
+            const leftName = String(left.name || "")
+            const rightName = String(right.name || "")
+            const nameOrder = leftName.localeCompare(rightName)
+
+            if (mode === "nameDesc") {
+                if (nameOrder !== 0)
+                    return -nameOrder
+            } else if (mode === "source") {
+                const sourceOrder = root.topicSourceRank(left) - root.topicSourceRank(right)
+                if (sourceOrder !== 0)
+                    return sourceOrder
+                const leftSource = String(left.sourceName || "")
+                const rightSource = String(right.sourceName || "")
+                const sourceNameOrder = leftSource.localeCompare(rightSource)
+                if (sourceNameOrder !== 0)
+                    return sourceNameOrder
+                if (nameOrder !== 0)
+                    return nameOrder
+            } else if (mode === "plottableFirst") {
+                const capabilityOrder = Number(!!right.plottable) - Number(!!left.plottable)
+                if (capabilityOrder !== 0)
+                    return capabilityOrder
+                if (nameOrder !== 0)
+                    return nameOrder
+            } else if (nameOrder !== 0) {
+                return nameOrder
+            }
+
+            const sourceOrder = root.topicSourceRank(left) - root.topicSourceRank(right)
+            if (sourceOrder !== 0)
+                return sourceOrder
+            return String(left.key || "").localeCompare(String(right.key || ""))
+        })
+        return topics
+    }
+
+    function topicSourceText(topicItem) {
+        if (!topicItem)
+            return "--"
+
+        let sourceLabel = I18n.t(root.language, "ros2LiveSource")
+        if (topicItem.sourceKind === "ros2_bag_play")
+            sourceLabel = I18n.t(root.language, "ros2BagPlaySource")
+
+        const sourceName = String(topicItem.sourceName || "")
+        return sourceName.length > 0 ? sourceLabel + " · " + sourceName : sourceLabel
+    }
+
+    function topicCapabilityText(topicItem) {
+        if (topicItem && topicItem.plottable) {
+            let capability = I18n.t(root.language, "plottable") + " · " + Number(topicItem.fieldCount || 0)
+            if (topicItem.recordable)
+                capability += " · " + I18n.t(root.language, "recordableOnly")
+            return capability
+        }
+        if (topicItem && topicItem.recordable)
+            return I18n.t(root.language, "recordableOnly")
+        return I18n.t(root.language, "unsupportedPlotTopic")
     }
 
     function currentLiveTimeText() {
@@ -1421,7 +1504,7 @@ Item {
 
                     Text {
                         Layout.fillWidth: true
-                        text: I18n.t(root.language, "allPublishedTopics")
+                        text: root.topicsHeadingText()
                         font.pixelSize: root.baseFontSize + 4
                         font.bold: true
                         color: root.appPalette.textPrimary
@@ -1446,9 +1529,41 @@ Item {
                     elide: Text.ElideRight
                 }
 
+                RowLayout {
+                    Layout.fillWidth: true
+                    spacing: 10
+
+                    Text {
+                        text: I18n.t(root.language, "topicSort")
+                        font.pixelSize: root.baseFontSize
+                        color: root.appPalette.textSecondary
+                        elide: Text.ElideRight
+                    }
+
+                    ComboBox {
+                        id: topicSortCombo
+                        Layout.preferredWidth: Math.max(240, Math.min(360, topicsPanel.width * 0.30))
+                        model: root.topicSortOptions
+                        textRole: "label"
+                        currentIndex: root.indexOfValue(root.topicSortOptions, root.topicSortMode)
+                        onActivated: root.topicSortMode = root.topicSortOptions[currentIndex].value
+                        palette.window: root.appPalette.inputBackground
+                        palette.button: root.appPalette.inputBackground
+                        palette.base: root.appPalette.inputBackground
+                        palette.text: root.appPalette.textPrimary
+                        palette.buttonText: root.appPalette.textPrimary
+                        palette.highlight: root.appPalette.accent
+                        palette.highlightedText: root.appPalette.accentText
+                        background: Rectangle { radius: 8; color: root.appPalette.inputBackground; border.color: root.appPalette.controlBorder; border.width: 1 }
+                        contentItem: Text { leftPadding: 12; rightPadding: 34; text: topicSortCombo.displayText; color: root.appPalette.textPrimary; font.pixelSize: root.baseFontSize; verticalAlignment: Text.AlignVCenter; elide: Text.ElideRight }
+                    }
+
+                    Item { Layout.fillWidth: true }
+                }
+
                 Text {
                     Layout.fillWidth: true
-                    text: I18n.t(root.language, "topicCandidateHint")
+                    text: root.topicsHintText()
                     wrapMode: Text.WordWrap
                     font.pixelSize: root.baseFontSize - 1
                     color: root.appPalette.textSecondary
@@ -1460,8 +1575,9 @@ Item {
                     Layout.preferredHeight: 0
                     visible: false
                     property int checkWidth: 44
-                    property int statusWidth: Math.max(120, Math.min(160, topicsPanel.width * 0.14))
-                    property int typeWidth: Math.max(300, Math.min(560, topicsPanel.width * 0.36))
+                    property int capabilityWidth: Math.max(170, Math.min(240, topicsPanel.width * 0.18))
+                    property int sourceWidth: Math.max(150, Math.min(260, topicsPanel.width * 0.20))
+                    property int typeWidth: Math.max(240, Math.min(460, topicsPanel.width * 0.30))
                 }
 
                 Rectangle {
@@ -1481,7 +1597,8 @@ Item {
                         Text { Layout.preferredWidth: topicColumns.checkWidth; text: "" }
                         Text { Layout.fillWidth: true; text: I18n.t(root.language, "topicName"); font.pixelSize: root.baseFontSize; font.bold: true; color: root.appPalette.textPrimary; elide: Text.ElideRight }
                         Text { Layout.preferredWidth: topicColumns.typeWidth; text: I18n.t(root.language, "topicType"); font.pixelSize: root.baseFontSize; font.bold: true; color: root.appPalette.textPrimary; elide: Text.ElideRight }
-                        Text { Layout.preferredWidth: topicColumns.statusWidth; text: I18n.t(root.language, "plotStatus"); font.pixelSize: root.baseFontSize; font.bold: true; color: root.appPalette.textPrimary; horizontalAlignment: Text.AlignRight; elide: Text.ElideRight }
+                        Text { Layout.preferredWidth: topicColumns.sourceWidth; text: I18n.t(root.language, "topicSource"); font.pixelSize: root.baseFontSize; font.bold: true; color: root.appPalette.textPrimary; elide: Text.ElideRight }
+                        Text { Layout.preferredWidth: topicColumns.capabilityWidth; text: I18n.t(root.language, "topicCapability"); font.pixelSize: root.baseFontSize; font.bold: true; color: root.appPalette.textPrimary; horizontalAlignment: Text.AlignRight; elide: Text.ElideRight }
                     }
                 }
 
@@ -1491,7 +1608,7 @@ Item {
                     Layout.fillHeight: true
                     spacing: 6
                     clip: true
-                    model: RosUi.plotTopics
+                    model: root.sortedPlotTopics()
                     boundsBehavior: Flickable.StopAtBounds
                     ScrollBar.vertical: ScrollBar { policy: ScrollBar.AsNeeded }
 
@@ -1500,9 +1617,9 @@ Item {
                         contentY = Math.max(0, Math.min(savedContentY, maxContentY))
                     }
 
-                    function setTopicSelectedWithoutJump(topicName, selected) {
+                    function setTopicSelectedWithoutJump(topicKey, selected) {
                         const savedContentY = contentY
-                        RosUi.setPlotTopicSelected(topicName, selected)
+                        RosUi.setPlotTopicSelected(topicKey, selected)
                         restoreContentY(savedContentY)
                         Qt.callLater(function() { topicListView.restoreContentY(savedContentY) })
                     }
@@ -1522,9 +1639,29 @@ Item {
                             spacing: 12
 
                             CheckBox {
+                                id: topicCheckBox
                                 Layout.preferredWidth: topicColumns.checkWidth
                                 checked: !!modelData.selected
-                                onClicked: topicListView.setTopicSelectedWithoutJump(modelData.name, checked)
+                                onClicked: topicListView.setTopicSelectedWithoutJump(modelData.key, checked)
+
+                                indicator: Rectangle {
+                                    implicitWidth: 22
+                                    implicitHeight: 22
+                                    x: 4
+                                    y: (topicCheckBox.height - height) / 2
+                                    radius: 4
+                                    color: topicCheckBox.checked ? root.appPalette.accent : root.appPalette.inputBackground
+                                    border.color: topicCheckBox.checked ? root.appPalette.accentBorder : root.appPalette.controlBorder
+                                    border.width: 1
+
+                                    Text {
+                                        anchors.centerIn: parent
+                                        text: topicCheckBox.checked ? "✓" : ""
+                                        font.pixelSize: 15
+                                        font.bold: true
+                                        color: root.appPalette.accentText
+                                    }
+                                }
                             }
 
                             Text {
@@ -1544,8 +1681,16 @@ Item {
                             }
 
                             Text {
-                                Layout.preferredWidth: topicColumns.statusWidth
-                                text: modelData.plottable ? (I18n.t(root.language, "plottable") + " · " + modelData.fieldCount) : I18n.t(root.language, "unsupportedPlotTopic")
+                                Layout.preferredWidth: topicColumns.sourceWidth
+                                text: root.topicSourceText(modelData)
+                                font.pixelSize: root.baseFontSize - 1
+                                color: root.appPalette.textSecondary
+                                elide: Text.ElideMiddle
+                            }
+
+                            Text {
+                                Layout.preferredWidth: topicColumns.capabilityWidth
+                                text: root.topicCapabilityText(modelData)
                                 font.pixelSize: root.baseFontSize - 1
                                 color: modelData.plottable ? root.appPalette.textPrimary : root.appPalette.textSecondary
                                 horizontalAlignment: Text.AlignRight

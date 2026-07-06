@@ -1,4 +1,4 @@
-#include "asr_sdm_monitor/ros_ui_bridge.hpp"
+#include "ros_ui_bridge.hpp"
 
 #include <QJsonArray>
 #include <QJsonDocument>
@@ -24,6 +24,8 @@
 #include <string>
 #include <vector>
 
+#include <rclcpp/generic_subscription.hpp>
+#include <rclcpp/message_info.hpp>
 #include <rclcpp/serialization.hpp>
 #include <rclcpp/serialized_message.hpp>
 #include <builtin_interfaces/msg/time.hpp>
@@ -62,6 +64,50 @@ constexpr const char *kCompressedImageType = "sensor_msgs/msg/CompressedImage";
 constexpr int kMaxPlotSamples = 600;
 constexpr int kPlotUiUpdateIntervalMs = 50;
 constexpr int kRecordedPlaybackUpdateIntervalMs = 50;
+
+QString normalizedNodeFullName(const QString &nodeName, const QString &nodeNamespace)
+{
+    QString ns = nodeNamespace.trimmed();
+    QString name = nodeName.trimmed();
+    if (name.isEmpty()) {
+        return ns;
+    }
+    if (ns.isEmpty() || ns == QStringLiteral("/")) {
+        return QStringLiteral("/") + name;
+    }
+    if (!ns.startsWith(QLatin1Char('/'))) {
+        ns.prepend(QLatin1Char('/'));
+    }
+    if (ns.endsWith(QLatin1Char('/'))) {
+        ns.chop(1);
+    }
+    return ns + QStringLiteral("/") + name;
+}
+
+QByteArray endpointGidBytes(const std::array<uint8_t, RMW_GID_STORAGE_SIZE> &gid)
+{
+    return QByteArray(
+        reinterpret_cast<const char *>(gid.data()),
+        static_cast<int>(gid.size()));
+}
+
+QByteArray publisherGidBytes(const rclcpp::MessageInfo &messageInfo)
+{
+    const auto &gid = messageInfo.get_rmw_message_info().publisher_gid;
+    return QByteArray(
+        reinterpret_cast<const char *>(gid.data),
+        static_cast<int>(RMW_GID_STORAGE_SIZE));
+}
+
+bool gidHasNonZeroByte(const QByteArray &gid)
+{
+    for (const char byte : gid) {
+        if (byte != 0) {
+            return true;
+        }
+    }
+    return false;
+}
 
 QString plotFieldPathForTopic(const QString &topicName, const QString &fieldName)
 {
@@ -297,6 +343,7 @@ bool deserializeRecordedPlotSample(const rosbag2_storage::SerializedBagMessage &
     rclcpp::SerializedMessage serializedMessage(*bagMessage.serialized_data);
     serializer.deserialize_message(&serializedMessage, &message);
     *sample = sampleFromPlotMessage(topicName, message, fallbackAbsoluteTimeMs);
+    sample->insert(QStringLiteral("sourceTopic"), topicName);
     return true;
 }
 }
@@ -315,6 +362,24 @@ RosUiBridge::RosUiBridge(QObject *parent)
     plot_update_timer_->start();
 
     node_ = std::make_shared<rclcpp::Node>("diagnostics_qml_ui_node");
+    gui_executor_ = std::make_unique<rclcpp::executors::SingleThreadedExecutor>();
+    gui_executor_->add_node(node_);
+
+    // Thread 1 services only lightweight diagnostics and ROS graph discovery
+    // in short bounded slices. QML, plot rendering and final video display stay
+    // owned by the Qt GUI thread.
+    gui_ros_spin_timer_ = new QTimer(this);
+    gui_ros_spin_timer_->setInterval(10);
+    connect(gui_ros_spin_timer_, &QTimer::timeout, this, [this]()
+    {
+        if (gui_executor_ && rclcpp::ok()) {
+            gui_executor_->spin_some(std::chrono::milliseconds(1));
+        }
+    });
+    gui_ros_spin_timer_->start();
+
+    plot_node_ = std::make_shared<rclcpp::Node>("plot_record_qml_ui_node");
+    video_node_ = std::make_shared<rclcpp::Node>("video_qml_ui_node");
 
     diagnostics_sub_ = node_->create_subscription<diagnostic_msgs::msg::DiagnosticArray>(
         "/diagnostics", 20,
@@ -332,8 +397,20 @@ RosUiBridge::RosUiBridge(QObject *parent)
             discoverPlotTopics();
         });
 
-    executor_ = std::make_unique<rclcpp::executors::SingleThreadedExecutor>();
-    executor_->add_node(node_);
+    // Plot/Record data handling has its own ROS executor thread.  The callbacks
+    // buffer plot samples or write serialized messages, but never touch QML
+    // rendering objects directly.
+    plot_executor_ = std::make_unique<rclcpp::executors::SingleThreadedExecutor>();
+    plot_executor_->add_node(plot_node_);
+
+    // Video subscriptions and image decoding remain isolated in their own
+    // executor thread.
+    video_executor_ = std::make_unique<rclcpp::executors::SingleThreadedExecutor>();
+    video_executor_->add_node(video_node_);
+
+    // Potentially blocking hardware monitor nodes remain isolated from both
+    // video and Plot/Record callbacks.
+    hardware_executor_ = std::make_unique<rclcpp::executors::SingleThreadedExecutor>();
 
     ros_status_ = "Subscribed: /diagnostics; scanning ROS topics";
     emit rosStatusChanged();
@@ -342,40 +419,84 @@ RosUiBridge::RosUiBridge(QObject *parent)
     discoverPlotTopics();
 }
 
-void RosUiBridge::addNode(const rclcpp::Node::SharedPtr & node)
+void RosUiBridge::addHardwareNode(const rclcpp::Node::SharedPtr & node)
 {
-    if (!node || !executor_) {
+    if (!node || !hardware_executor_ || ros_executors_started_) {
         return;
     }
-    owned_nodes_.push_back(node);
-    executor_->add_node(node);
+
+    hardware_nodes_.push_back(node);
+    hardware_executor_->add_node(node);
+}
+
+void RosUiBridge::startRosExecutors()
+{
+    if (ros_executors_started_ || !plot_executor_ || !video_executor_ || !hardware_executor_) {
+        return;
+    }
+
+    ros_executors_started_ = true;
+
+    plot_ros_thread_ = std::thread([this]()
+    {
+        plot_executor_->spin();
+    });
+
+    video_ros_thread_ = std::thread([this]()
+    {
+        video_executor_->spin();
+    });
+
+    hardware_ros_thread_ = std::thread([this]()
+    {
+        hardware_executor_->spin();
+    });
+}
+
+void RosUiBridge::addNode(const rclcpp::Node::SharedPtr & node)
+{
+    addHardwareNode(node);
 }
 
 void RosUiBridge::startRosExecutor()
 {
-    if (ros_executor_started_ || !executor_) {
-        return;
-    }
-    ros_executor_started_ = true;
-    ros_thread_ = std::thread([this]()
-    {
-        executor_->spin();
-    });
+    startRosExecutors();
 }
 
 RosUiBridge::~RosUiBridge()
 {
-    stopPlotRecording();
     setPlaybackPlaying(false);
+
+    if (gui_ros_spin_timer_) {
+        gui_ros_spin_timer_->stop();
+    }
+    if (gui_executor_) {
+        gui_executor_->cancel();
+    }
+
+    // Stop ROS callbacks before releasing subscriptions or the rosbag writer.
+    if (plot_executor_) {
+        plot_executor_->cancel();
+    }
+    if (video_executor_) {
+        video_executor_->cancel();
+    }
+    if (hardware_executor_) {
+        hardware_executor_->cancel();
+    }
+
+    if (plot_ros_thread_.joinable()) {
+        plot_ros_thread_.join();
+    }
+    if (video_ros_thread_.joinable()) {
+        video_ros_thread_.join();
+    }
+    if (hardware_ros_thread_.joinable()) {
+        hardware_ros_thread_.join();
+    }
+
     stopPlotSubscriptions();
-
-    if (executor_) {
-        executor_->cancel();
-    }
-
-    if (ros_thread_.joinable()) {
-        ros_thread_.join();
-    }
+    stopPlotRecording();
 }
 
 QString RosUiBridge::rosStatus() const
@@ -585,11 +706,13 @@ QVariantList RosUiBridge::recordedPlotSamples() const
 
 bool RosUiBridge::plotRecording() const
 {
+    std::lock_guard<std::mutex> lock(plot_recording_mutex_);
     return plot_recording_;
 }
 
 QString RosUiBridge::plotRecordingPath() const
 {
+    std::lock_guard<std::mutex> lock(plot_recording_mutex_);
     return plot_recording_path_;
 }
 
@@ -636,7 +759,10 @@ void RosUiBridge::setPlotDataSource(const QString &dataSource)
         return;
     }
 
+    // The Live/Recorded switch controls only which samples and field list are
+    // drawn. The Topics model is unified and never changes with this switch.
     plot_data_source_ = next;
+    rebuildPlotFieldOptions();
     emit plotDataSourceChanged();
 }
 
@@ -727,6 +853,11 @@ bool RosUiBridge::startPlotRecording(const QString &filePath)
             plot_recording_path_ = path;
         }
 
+        // Recording is independent from plotting: every selected active ROS
+        // graph source is subscribed in serialized form, including
+        // non-plottable message types.
+        refreshRecordSubscriptions();
+
         plot_status_ = QStringLiteral("Recording bag: %1").arg(path);
         emit plotRecordingChanged();
         emit plotStatusChanged();
@@ -743,6 +874,10 @@ void RosUiBridge::stopPlotRecording()
     bool was_recording = false;
     QString saved_path;
     size_t saved_count = 0;
+
+    // Remove serialized subscriptions first so no new callback can enter the
+    // writer after it is closed.
+    stopRecordSubscriptions();
 
     {
         std::lock_guard<std::mutex> lock(plot_recording_mutex_);
@@ -762,30 +897,41 @@ void RosUiBridge::stopPlotRecording()
     emit plotStatusChanged();
 }
 
-template<typename MessageT>
-void RosUiBridge::writePlotRecordingSample(const QString &topicName, const MessageT &msg, double absoluteTimeMs)
+void RosUiBridge::writeSerializedRecordingSample(
+    const QString &topicName,
+    const QString &topicType,
+    const std::shared_ptr<rclcpp::SerializedMessage> &message)
 {
+    if (!message) {
+        return;
+    }
+
     std::lock_guard<std::mutex> lock(plot_recording_mutex_);
     if (!plot_recording_ || !plot_bag_writer_) {
         return;
     }
 
     try {
-        int64_t timestamp_ns = static_cast<int64_t>(std::llround(absoluteTimeMs * 1000000.0));
-        if (timestamp_ns <= 0 && node_) {
-            timestamp_ns = node_->now().nanoseconds();
-        }
-
-        plot_bag_writer_->write(msg, topicName.toStdString(), rclcpp::Time(timestamp_ns));
+        const rclcpp::Time timestamp = plot_node_
+                                           ? plot_node_->now()
+                                           : rclcpp::Time(static_cast<int64_t>(fallbackNowMs() * 1000000.0));
+        plot_bag_writer_->write(
+            message,
+            topicName.toStdString(),
+            topicType.toStdString(),
+            timestamp);
         ++plot_recorded_message_count_;
     } catch (const std::exception &error) {
         plot_recording_ = false;
-        plot_status_ = QStringLiteral("Bag recording stopped: %1").arg(QString::fromUtf8(error.what()));
         plot_bag_writer_.reset();
+        const QString errorStatus =
+            QStringLiteral("Bag recording stopped: %1").arg(QString::fromUtf8(error.what()));
         QMetaObject::invokeMethod(
             this,
-            [this]()
+            [this, errorStatus]()
             {
+                stopRecordSubscriptions();
+                plot_status_ = errorStatus;
                 emit plotRecordingChanged();
                 emit plotStatusChanged();
             },
@@ -823,6 +969,7 @@ bool RosUiBridge::loadRecordedRosbag(const QString &filePath)
         rosbag2_cpp::Reader reader;
         reader.open(filePath.toStdString());
 
+        QStringList bagTopicNames;
         QMap<QString, QString> bagTopicTypes;
         QVariantList availableFields;
         const auto topicsAndTypes = reader.get_all_topics_and_types();
@@ -833,6 +980,7 @@ bool RosUiBridge::loadRecordedRosbag(const QString &filePath)
                 continue;
             }
 
+            bagTopicNames.append(topicName);
             bagTopicTypes.insert(topicName, topicType);
             const QVariantList fields = plotFieldOptionsForTopic(topicName, topicType);
             for (const QVariant &field : fields) {
@@ -921,10 +1069,30 @@ bool RosUiBridge::loadRecordedRosbag(const QString &filePath)
             item = sample;
         }
 
+        bagTopicNames.removeDuplicates();
+        bagTopicNames.sort(Qt::CaseSensitive);
+
+        const bool sameBag = recorded_file_path_ == filePath;
+        if (!sameBag) {
+            selected_recorded_plot_topic_names_.clear();
+        }
+
         recorded_file_path_ = filePath;
-        recorded_plot_samples_ = samples;
+        recorded_topic_source_name_ = QFileInfo(filePath).fileName();
+        if (recorded_topic_source_name_.isEmpty()) {
+            recorded_topic_source_name_ = filePath;
+        }
+        recorded_plot_topic_names_ = bagTopicNames;
+        recorded_plot_topic_types_ = bagTopicTypes;
+        recorded_all_plot_samples_ = samples;
         recorded_available_plot_field_options_ = availableFields;
-        recorded_plot_field_options_ = filterPlotFieldOptionsForSelectedTopics(recorded_available_plot_field_options_);
+
+        // Recorded plotting is intentionally independent of the Topics-page
+        // checkboxes. Opening a bag immediately exposes every plottable field
+        // in the Recorded controls and makes all decoded samples available to
+        // the existing playback/curve logic, matching the previous package.
+        recorded_plot_field_options_ = recorded_available_plot_field_options_;
+        recorded_plot_samples_ = recorded_all_plot_samples_;
         recorded_bag_start_time_ms_ = bagStartMs;
         recorded_bag_end_time_ms_ = bagEndMs;
         playback_start_time_ms_ = bagStartMs;
@@ -933,11 +1101,22 @@ bool RosUiBridge::loadRecordedRosbag(const QString &filePath)
         recorded_status_ = samples.isEmpty()
                                ? QStringLiteral("Loaded bag: %1; no supported plot topics found").arg(filePath)
                                : QStringLiteral("Loaded bag: %1 (%2 plot samples)").arg(filePath).arg(samples.size());
+
+        rebuildPlotFieldOptions();
+        rebuildPlotTopicsModel();
         return true;
     } catch (const std::exception &error) {
         recorded_status_ = QStringLiteral("Cannot load rosbag / MCAP: %1").arg(QString::fromUtf8(error.what()));
         return false;
     }
+}
+
+void RosUiBridge::rebuildRecordedPlotSamples()
+{
+    // Recorded field selection is performed inside the Recorded page itself.
+    // Topics-page selection must not hide bag samples or disable playback.
+    recorded_plot_samples_ = recorded_all_plot_samples_;
+    emit recordedPlotSamplesChanged();
 }
 
 void RosUiBridge::updateRecordedPlaybackBounds()
@@ -1088,38 +1267,184 @@ void RosUiBridge::refreshPlotTopics()
     discoverPlotTopics();
 }
 
-void RosUiBridge::setPlotTopicSelected(const QString &topicName, bool selected)
+QString RosUiBridge::recordedTopicKey(const QString &topicName) const
 {
-    const QString normalized = topicName.trimmed();
-    if (normalized.isEmpty()) {
+    return QStringLiteral("bag|%1|%2").arg(recorded_file_path_, topicName);
+}
+
+const RosUiBridge::PlotTopicSource *RosUiBridge::graphTopicSourceForKey(const QString &key) const
+{
+    for (const PlotTopicSource &source : graph_plot_topic_sources_) {
+        if (source.key == key) {
+            return &source;
+        }
+    }
+    return nullptr;
+}
+
+QStringList RosUiBridge::selectedGraphTopicNames() const
+{
+    QStringList topics;
+    for (const QString &key : selected_graph_plot_source_keys_) {
+        const PlotTopicSource *source = graphTopicSourceForKey(key);
+        if (source && !source->topic_name.isEmpty()) {
+            topics.append(source->topic_name);
+        }
+    }
+    topics.removeDuplicates();
+    topics.sort(Qt::CaseSensitive);
+    return topics;
+}
+
+bool RosUiBridge::messageMatchesSelectedGraphSource(
+    const QString &topicName,
+    const rclcpp::MessageInfo &messageInfo) const
+{
+    std::lock_guard<std::mutex> sourceLock(plot_source_mutex_);
+
+    const QByteArray publisherGid = publisherGidBytes(messageInfo);
+    const bool gidAvailable = gidHasNonZeroByte(publisherGid);
+    int availableSourceCount = 0;
+    int selectedSourceCount = 0;
+    bool selectedGidMatched = false;
+
+    for (const PlotTopicSource &source : graph_plot_topic_sources_) {
+        if (source.topic_name != topicName) {
+            continue;
+        }
+
+        ++availableSourceCount;
+        if (!selected_graph_plot_source_keys_.contains(source.key)) {
+            continue;
+        }
+
+        ++selectedSourceCount;
+        if (gidAvailable && source.publisher_gids.contains(publisherGid)) {
+            selectedGidMatched = true;
+        }
+    }
+
+    if (selectedSourceCount == 0) {
+        return false;
+    }
+
+    // GID filtering is only needed when the same topic currently has multiple
+    // independently selectable sources and only a subset of them is selected.
+    // For the common case of one source, or when every source is selected,
+    // accepting directly avoids RMW-specific endpoint-GID representation
+    // differences from incorrectly dropping every Plot/Record message.
+    if (availableSourceCount == 1 || selectedSourceCount == availableSourceCount) {
+        return true;
+    }
+
+    return gidAvailable && selectedGidMatched;
+}
+
+bool RosUiBridge::isRosbagPlayerNode(const QString &nodeName, const QString &nodeNamespace) const
+{
+    const QString lowerName = nodeName.trimmed().toLower();
+    if (lowerName.contains(QStringLiteral("rosbag2_player"))) {
+        return true;
+    }
+
+    if (!node_) {
+        return false;
+    }
+
+    try {
+        const auto services = node_->get_service_names_and_types_by_node(
+            nodeName.toStdString(), nodeNamespace.toStdString());
+        int rosbagControlServiceCount = 0;
+        for (const auto &entry : services) {
+            const QString serviceName = QString::fromStdString(entry.first).toLower();
+            bool hasRosbagType = false;
+            for (const std::string &type : entry.second) {
+                if (QString::fromStdString(type).startsWith(QStringLiteral("rosbag2_interfaces/srv/"))) {
+                    hasRosbagType = true;
+                    break;
+                }
+            }
+            if (!hasRosbagType) {
+                continue;
+            }
+
+            if (serviceName.endsWith(QStringLiteral("/pause"))
+                || serviceName.endsWith(QStringLiteral("/resume"))
+                || serviceName.endsWith(QStringLiteral("/seek"))
+                || serviceName.endsWith(QStringLiteral("/set_rate"))
+                || serviceName.endsWith(QStringLiteral("/play_next"))
+                || serviceName.endsWith(QStringLiteral("/burst"))) {
+                ++rosbagControlServiceCount;
+            }
+        }
+        return rosbagControlServiceCount >= 2;
+    } catch (const std::exception &) {
+        return false;
+    }
+}
+
+void RosUiBridge::setPlotTopicSelected(const QString &topicKey, bool selected)
+{
+    const QString normalizedKey = topicKey.trimmed();
+    if (normalizedKey.isEmpty()) {
         return;
     }
 
-    const bool alreadySelected = selected_plot_topic_names_.contains(normalized);
-    if (selected == alreadySelected) {
-        return;
-    }
-
-    if (selected) {
-        selected_plot_topic_names_.append(normalized);
-        selected_plot_topic_names_.removeDuplicates();
-        selected_plot_topic_names_.sort(Qt::CaseSensitive);
-    } else {
-        selected_plot_topic_names_.removeAll(normalized);
-    }
-
+    bool graphSourceSelected = false;
     {
-        std::lock_guard<std::mutex> lock(live_plot_mutex_);
-        pending_live_plot_samples_.clear();
-        pending_live_plot_status_topic_.clear();
-    }
-    imu_plot_samples_.clear();
-    plot_start_time_ = -1.0;
+        std::lock_guard<std::mutex> sourceLock(plot_source_mutex_);
+        graphSourceSelected = graphTopicSourceForKey(normalizedKey) != nullptr;
+        if (graphSourceSelected) {
+            const bool alreadySelected = selected_graph_plot_source_keys_.contains(normalizedKey);
+            if (selected == alreadySelected) {
+                return;
+            }
 
-    rebuildPlotTopicsModel();
-    rebuildPlotFieldOptions();
-    refreshPlotSubscriptions();
-    emit imuPlotSamplesChanged();
+            if (selected) {
+                const PlotTopicSource *selectedSource = graphTopicSourceForKey(normalizedKey);
+                if (!selectedSource) {
+                    return;
+                }
+
+                // A topic name may be published by both a live node and a
+                // rosbag2 player. Only one source may be selected for the same
+                // topic name, while different topic names remain independently
+                // selectable.
+                const QString selectedTopicName = selectedSource->topic_name;
+                for (const PlotTopicSource &source : graph_plot_topic_sources_) {
+                    if (source.topic_name == selectedTopicName) {
+                        selected_graph_plot_source_keys_.removeAll(source.key);
+                    }
+                }
+                selected_graph_plot_source_keys_.append(normalizedKey);
+                selected_graph_plot_source_keys_.removeDuplicates();
+                selected_graph_plot_source_keys_.sort(Qt::CaseSensitive);
+            } else {
+                selected_graph_plot_source_keys_.removeAll(normalizedKey);
+            }
+        }
+    }
+
+    if (graphSourceSelected) {
+        {
+            std::lock_guard<std::mutex> lock(live_plot_mutex_);
+            pending_live_plot_samples_.clear();
+            pending_live_plot_status_topic_.clear();
+        }
+        imu_plot_samples_.clear();
+        plot_start_time_ = -1.0;
+        refreshPlotSubscriptions();
+        if (plotRecording()) {
+            refreshRecordSubscriptions();
+        }
+        emit imuPlotSamplesChanged();
+        rebuildPlotTopicsModel();
+        rebuildPlotFieldOptions();
+        return;
+    }
+
+    // Offline bag topics are selected directly inside Recorded after Open.
+
 }
 
 void RosUiBridge::discoverPlotTopics()
@@ -1128,92 +1453,216 @@ void RosUiBridge::discoverPlotTopics()
         return;
     }
 
-    QStringList discovered_names;
-    QMap<QString, QString> discovered_types;
+    QList<PlotTopicSource> discoveredSources;
+    QMap<QString, int> sourceIndexByKey;
+    QMap<QString, QStringList> publisherNodesByKey;
+    QMap<QString, bool> playerNodeCache;
 
-    const auto topics_and_types = node_->get_topic_names_and_types();
-    for (const auto &entry : topics_and_types) {
-        const QString topic_name = QString::fromStdString(entry.first).trimmed();
-        if (topic_name.isEmpty()) {
+    const auto topicsAndTypes = node_->get_topic_names_and_types();
+    for (const auto &entry : topicsAndTypes) {
+        const QString topicName = QString::fromStdString(entry.first).trimmed();
+        if (topicName.isEmpty()) {
             continue;
         }
 
-        discovered_names.append(topic_name);
-        if (!entry.second.empty()) {
-            discovered_types.insert(topic_name, QString::fromStdString(entry.second.front()).trimmed());
+        std::vector<rclcpp::TopicEndpointInfo> publishers;
+        try {
+            publishers = node_->get_publishers_info_by_topic(entry.first);
+        } catch (const std::exception &) {
+            continue;
+        }
+
+        for (const rclcpp::TopicEndpointInfo &publisher : publishers) {
+            const QString nodeName = QString::fromStdString(publisher.node_name()).trimmed();
+            const QString nodeNamespace = QString::fromStdString(publisher.node_namespace()).trimmed();
+            const QString fullNodeName = normalizedNodeFullName(nodeName, nodeNamespace);
+            const QString cacheKey = nodeNamespace + QStringLiteral("|") + nodeName;
+            if (!playerNodeCache.contains(cacheKey)) {
+                playerNodeCache.insert(cacheKey, isRosbagPlayerNode(nodeName, nodeNamespace));
+            }
+
+            const bool bagPlay = playerNodeCache.value(cacheKey);
+            const QString sourceKind = bagPlay
+                                         ? QStringLiteral("ros2_bag_play")
+                                         : QStringLiteral("ros2_live");
+            const QString sourceKey = QStringLiteral("graph|%1|%2").arg(sourceKind, topicName);
+            QString topicType = QString::fromStdString(publisher.topic_type()).trimmed();
+            if (topicType.isEmpty() && !entry.second.empty()) {
+                topicType = QString::fromStdString(entry.second.front()).trimmed();
+            }
+
+            int sourceIndex = sourceIndexByKey.value(sourceKey, -1);
+            if (sourceIndex < 0) {
+                PlotTopicSource source;
+                source.key = sourceKey;
+                source.topic_name = topicName;
+                source.topic_type = topicType;
+                source.source_kind = sourceKind;
+                discoveredSources.append(source);
+                sourceIndex = discoveredSources.size() - 1;
+                sourceIndexByKey.insert(sourceKey, sourceIndex);
+            }
+
+            PlotTopicSource &source = discoveredSources[sourceIndex];
+            const QByteArray gid = endpointGidBytes(publisher.endpoint_gid());
+            if (gidHasNonZeroByte(gid) && !source.publisher_gids.contains(gid)) {
+                source.publisher_gids.append(gid);
+            }
+            QStringList &publisherNodes = publisherNodesByKey[sourceKey];
+            if (!fullNodeName.isEmpty() && !publisherNodes.contains(fullNodeName)) {
+                publisherNodes.append(fullNodeName);
+            }
         }
     }
 
+    for (PlotTopicSource &source : discoveredSources) {
+        std::sort(source.publisher_gids.begin(), source.publisher_gids.end());
+        QStringList publisherNodes = publisherNodesByKey.value(source.key);
+        publisherNodes.sort(Qt::CaseSensitive);
+        source.source_name = publisherNodes.join(QStringLiteral(", "));
+    }
+
+    std::sort(discoveredSources.begin(), discoveredSources.end(),
+              [](const PlotTopicSource &left, const PlotTopicSource &right)
+              {
+                  if (left.topic_name != right.topic_name) {
+                      return left.topic_name < right.topic_name;
+                  }
+                  if (left.source_kind != right.source_kind) {
+                      return left.source_kind < right.source_kind;
+                  }
+                  return left.key < right.key;
+              });
+
     QMetaObject::invokeMethod(
         this,
-        [this, discovered_names, discovered_types]()
+        [this, discoveredSources]()
         {
-            applyDiscoveredPlotTopics(discovered_names, discovered_types);
+            applyDiscoveredPlotTopics(discoveredSources);
         },
         Qt::QueuedConnection);
 }
 
-void RosUiBridge::applyDiscoveredPlotTopics(const QStringList &topicNames, const QMap<QString, QString> &topicTypes)
+void RosUiBridge::applyDiscoveredPlotTopics(const QList<PlotTopicSource> &sources)
 {
-    QStringList discovered_names = topicNames;
-    discovered_names.removeDuplicates();
-    discovered_names.sort(Qt::CaseSensitive);
+    bool topicGraphChanged = false;
+    bool selectionChanged = false;
+    {
+        std::lock_guard<std::mutex> sourceLock(plot_source_mutex_);
+        topicGraphChanged = graph_plot_topic_sources_ != sources;
+        graph_plot_topic_sources_ = sources;
 
-    QMap<QString, QString> discovered_types;
-    for (const QString &name : discovered_names) {
-        discovered_types.insert(name, topicTypes.value(name));
+        live_plot_topic_types_.clear();
+        QStringList validSourceKeys;
+        for (const PlotTopicSource &source : graph_plot_topic_sources_) {
+            validSourceKeys.append(source.key);
+            if (!source.topic_name.isEmpty() && !source.topic_type.isEmpty()) {
+                live_plot_topic_types_.insert(source.topic_name, source.topic_type);
+            }
+        }
+
+        QStringList retainedSelection;
+        QStringList retainedTopicNames;
+        for (const QString &key : selected_graph_plot_source_keys_) {
+            if (!validSourceKeys.contains(key)) {
+                continue;
+            }
+            const PlotTopicSource *source = graphTopicSourceForKey(key);
+            if (!source || retainedTopicNames.contains(source->topic_name)) {
+                continue;
+            }
+            retainedSelection.append(key);
+            retainedTopicNames.append(source->topic_name);
+        }
+        selectionChanged = retainedSelection != selected_graph_plot_source_keys_;
+        selected_graph_plot_source_keys_ = retainedSelection;
     }
 
-    const bool topicGraphChanged = plot_topic_names_ != discovered_names || plot_topic_types_ != discovered_types;
-    plot_topic_names_ = discovered_names;
-    plot_topic_types_ = discovered_types;
-
     rebuildPlotTopicsModel();
-    if (topicGraphChanged) {
+
+    if (topicGraphChanged || selectionChanged) {
         rebuildPlotFieldOptions();
         refreshPlotSubscriptions();
+        if (plotRecording()) {
+            refreshRecordSubscriptions();
+        }
     }
 }
 
 void RosUiBridge::rebuildPlotTopicsModel()
 {
-    QVariantList topic_items;
+    QVariantList topicItems;
     int selectedCount = 0;
     int plottableFieldCount = 0;
 
-    for (const QString &name : plot_topic_names_) {
-        const QString type = plot_topic_types_.value(name);
-        const QVariantList fields = plotFieldOptionsForTopic(name, type);
-        const bool selected = selected_plot_topic_names_.contains(name);
+    for (const PlotTopicSource &source : graph_plot_topic_sources_) {
+        const QVariantList fields = plotFieldOptionsForTopic(source.topic_name, source.topic_type);
+        const bool selected = selected_graph_plot_source_keys_.contains(source.key);
         if (selected) {
             ++selectedCount;
             plottableFieldCount += fields.size();
         }
 
         QVariantMap item;
-        item[QStringLiteral("name")] = name;
-        item[QStringLiteral("type")] = type;
+        item[QStringLiteral("key")] = source.key;
+        item[QStringLiteral("name")] = source.topic_name;
+        item[QStringLiteral("type")] = source.topic_type;
         item[QStringLiteral("selected")] = selected;
         item[QStringLiteral("plottable")] = !fields.isEmpty();
         item[QStringLiteral("fieldCount")] = fields.size();
-        topic_items.append(item);
+        item[QStringLiteral("sourceKind")] = source.source_kind;
+        item[QStringLiteral("sourceName")] = source.source_name;
+        item[QStringLiteral("recordable")] = true;
+        topicItems.append(item);
     }
 
-    plot_topics_ = topic_items;
-    plot_topics_status_ = QStringLiteral("%1 topics, %2 selected, %3 plottable fields")
-                              .arg(plot_topic_names_.size())
+
+    auto sourceRank = [](const QString &kind)
+    {
+        if (kind == QStringLiteral("ros2_live")) {
+            return 0;
+        }
+        if (kind == QStringLiteral("ros2_bag_play")) {
+            return 1;
+        }
+        return 2;
+    };
+    std::sort(topicItems.begin(), topicItems.end(),
+              [&sourceRank](const QVariant &leftValue, const QVariant &rightValue)
+              {
+                  const QVariantMap left = leftValue.toMap();
+                  const QVariantMap right = rightValue.toMap();
+                  const QString leftName = left.value(QStringLiteral("name")).toString();
+                  const QString rightName = right.value(QStringLiteral("name")).toString();
+                  if (leftName != rightName) {
+                      return leftName < rightName;
+                  }
+                  const int leftRank = sourceRank(left.value(QStringLiteral("sourceKind")).toString());
+                  const int rightRank = sourceRank(right.value(QStringLiteral("sourceKind")).toString());
+                  if (leftRank != rightRank) {
+                      return leftRank < rightRank;
+                  }
+                  return left.value(QStringLiteral("key")).toString()
+                         < right.value(QStringLiteral("key")).toString();
+              });
+
+    plot_topics_ = topicItems;
+    plot_topics_status_ = QStringLiteral("%1 topic sources, %2 selected, %3 plottable fields")
+                              .arg(topicItems.size())
                               .arg(selectedCount)
                               .arg(plottableFieldCount);
     emit plotTopicsChanged();
 }
 
-QVariantList RosUiBridge::filterPlotFieldOptionsForSelectedTopics(const QVariantList &fields) const
+QVariantList RosUiBridge::filterPlotFieldOptionsForSelectedTopics(
+    const QVariantList &fields,
+    const QStringList &selectedTopicNames)
 {
     QVariantList result;
     for (const QVariant &candidate : fields) {
         const QVariantMap field = candidate.toMap();
         const QString topic = field.value(QStringLiteral("topic")).toString();
-        if (!topic.isEmpty() && selected_plot_topic_names_.contains(topic)) {
+        if (!topic.isEmpty() && selectedTopicNames.contains(topic)) {
             result.append(field);
         }
     }
@@ -1222,17 +1671,20 @@ QVariantList RosUiBridge::filterPlotFieldOptionsForSelectedTopics(const QVariant
 
 void RosUiBridge::rebuildPlotFieldOptions()
 {
-    QVariantList fields;
-    for (const QString &topic : selected_plot_topic_names_) {
-        const QString type = plot_topic_types_.value(topic);
+    QVariantList liveFields;
+    for (const QString &topic : selectedGraphTopicNames()) {
+        const QString type = live_plot_topic_types_.value(topic);
         const QVariantList topicFields = plotFieldOptionsForTopic(topic, type);
         for (const QVariant &field : topicFields) {
-            fields.append(field);
+            liveFields.append(field);
         }
     }
 
-    plot_field_options_ = fields;
-    recorded_plot_field_options_ = filterPlotFieldOptionsForSelectedTopics(recorded_available_plot_field_options_);
+    plot_field_options_ = liveFields;
+
+    // The Recorded page directly selects from every field decoded from the
+    // opened bag. It does not depend on the unified Topics-page checkboxes.
+    recorded_plot_field_options_ = recorded_available_plot_field_options_;
     emit plotFieldOptionsChanged();
     emit recordedPlotFieldOptionsChanged();
 }
@@ -1246,15 +1698,72 @@ void RosUiBridge::refreshPlotSubscriptions()
 {
     stopPlotSubscriptions();
 
-    if (!node_) {
+    if (!plot_node_) {
         return;
     }
 
-    for (const QString &topic : selected_plot_topic_names_) {
-        const QString type = plot_topic_types_.value(topic);
+    for (const QString &topic : selectedGraphTopicNames()) {
+        const QString type = live_plot_topic_types_.value(topic);
         if (isSupportedPlotType(type)) {
             startPlotSubscriptionForTopic(topic, type);
         }
+    }
+}
+
+void RosUiBridge::stopRecordSubscriptions()
+{
+    record_subscriptions_.clear();
+}
+
+void RosUiBridge::refreshRecordSubscriptions()
+{
+    stopRecordSubscriptions();
+
+    bool recording = false;
+    {
+        std::lock_guard<std::mutex> lock(plot_recording_mutex_);
+        recording = plot_recording_;
+    }
+    if (!plot_node_ || !recording) {
+        return;
+    }
+
+    for (const QString &topic : selectedGraphTopicNames()) {
+        const QString type = live_plot_topic_types_.value(topic).trimmed();
+        if (!type.isEmpty()) {
+            startRecordSubscriptionForTopic(topic, type);
+        }
+    }
+}
+
+void RosUiBridge::startRecordSubscriptionForTopic(const QString &topicName, const QString &topicType)
+{
+    if (!plot_node_ || topicName.isEmpty() || topicType.isEmpty()) {
+        return;
+    }
+
+    try {
+        auto subscription = plot_node_->create_generic_subscription(
+            topicName.toStdString(),
+            topicType.toStdString(),
+            rclcpp::SensorDataQoS(),
+            [this, topicName, topicType](
+                std::shared_ptr<rclcpp::SerializedMessage> message,
+                const rclcpp::MessageInfo &messageInfo)
+            {
+                if (!messageMatchesSelectedGraphSource(topicName, messageInfo)) {
+                    return;
+                }
+                writeSerializedRecordingSample(topicName, topicType, message);
+            });
+
+        record_subscriptions_.insert(
+            topicName,
+            std::static_pointer_cast<rclcpp::SubscriptionBase>(subscription));
+    } catch (const std::exception &error) {
+        plot_status_ = QStringLiteral("Cannot record topic %1: %2")
+                           .arg(topicName, QString::fromUtf8(error.what()));
+        emit plotStatusChanged();
     }
 }
 
@@ -1262,22 +1771,20 @@ template<typename MessageT>
 void RosUiBridge::startTypedPlotSubscription(const QString &topicName)
 {
     const std::string topic = topicName.toStdString();
-    auto subscription = node_->create_subscription<MessageT>(
+    auto subscription = plot_node_->create_subscription<MessageT>(
         topic, rclcpp::SensorDataQoS(),
-        [this, topicName](typename MessageT::SharedPtr msg)
+        [this, topicName](
+            typename MessageT::SharedPtr msg,
+            const rclcpp::MessageInfo &messageInfo)
         {
-            if (!msg) {
+            if (!msg || !messageMatchesSelectedGraphSource(topicName, messageInfo)) {
                 return;
             }
 
-            const double fallbackAbsoluteTimeMs = node_
-                                                   ? static_cast<double>(node_->now().nanoseconds()) / 1000000.0
+            const double fallbackAbsoluteTimeMs = plot_node_
+                                                   ? static_cast<double>(plot_node_->now().nanoseconds()) / 1000000.0
                                                    : fallbackNowMs();
             const QVariantMap sample = sampleFromPlotMessage(topicName, *msg, fallbackAbsoluteTimeMs);
-            bool absoluteTimeOk = false;
-            const double absoluteTimeValueMs = sample.value(QStringLiteral("absoluteTimeMs")).toDouble(&absoluteTimeOk);
-            const double absoluteTimeMs = absoluteTimeOk ? absoluteTimeValueMs : fallbackAbsoluteTimeMs;
-            writePlotRecordingSample(topicName, *msg, absoluteTimeMs);
             appendLivePlotSample(sample, topicName);
         });
 
@@ -2001,6 +2508,12 @@ void RosUiBridge::startVideoSlot(int slotIndex)
     slot.image_sub.reset();
     slot.compressed_sub.reset();
 
+    if (!video_node_) {
+        slot.status = QStringLiteral("Video ROS node unavailable");
+        emitVideoSlotChanged(slotIndex);
+        return;
+    }
+
     if (slot.topic.isEmpty()) {
         slot.status = QStringLiteral("No topic selected");
         emitVideoSlotChanged(slotIndex);
@@ -2013,7 +2526,7 @@ void RosUiBridge::startVideoSlot(int slotIndex)
     slot.status = QStringLiteral("Waiting for video frame");
 
     if (slot.topic_type == QString::fromLatin1(kImageType) || slot.topic_type.isEmpty()) {
-        slot.image_sub = node_->create_subscription<sensor_msgs::msg::Image>(
+        slot.image_sub = video_node_->create_subscription<sensor_msgs::msg::Image>(
             selected_topic, qos,
             [this, slotIndex](const sensor_msgs::msg::Image::SharedPtr msg)
             {
@@ -2022,7 +2535,7 @@ void RosUiBridge::startVideoSlot(int slotIndex)
     }
 
     if (slot.topic_type == QString::fromLatin1(kCompressedImageType) || slot.topic_type.isEmpty()) {
-        slot.compressed_sub = node_->create_subscription<sensor_msgs::msg::CompressedImage>(
+        slot.compressed_sub = video_node_->create_subscription<sensor_msgs::msg::CompressedImage>(
             selected_topic, qos,
             [this, slotIndex](const sensor_msgs::msg::CompressedImage::SharedPtr msg)
             {

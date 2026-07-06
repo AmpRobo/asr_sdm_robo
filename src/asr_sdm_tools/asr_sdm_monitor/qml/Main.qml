@@ -197,13 +197,13 @@ ApplicationWindow {
                     }
 
                     background: Rectangle {
-                        color: closeButton.hovered ? "#c42b1c" : "transparent"
+                        color: closeButton.hovered ? window.appPalette.danger : "transparent"
                     }
 
                     contentItem: Item {
                         implicitWidth: window.titleButtonWidth
                         implicitHeight: windowTitleBar.height
-                        property color iconColor: closeButton.hovered ? "white" : window.appPalette.textSecondary
+                        property color iconColor: closeButton.hovered ? window.appPalette.dangerText : window.appPalette.textSecondary
 
                         Item {
                             width: window.titleButtonIconSize

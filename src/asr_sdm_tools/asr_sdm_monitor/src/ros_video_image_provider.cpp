@@ -1,6 +1,6 @@
-#include "asr_sdm_monitor/ros_video_image_provider.hpp"
+#include "ros_video_image_provider.hpp"
 
-#include "asr_sdm_monitor/ros_ui_bridge.hpp"
+#include "ros_ui_bridge.hpp"
 
 #include <QStringList>
 
