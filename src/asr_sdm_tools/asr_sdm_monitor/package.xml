@@ -18,6 +18,13 @@
   <depend>std_msgs</depend>
   <depend>rosbag2_cpp</depend>
 
+  <!-- Runtime tools invoked by the hardware monitor nodes. -->
+  <exec_depend>procps</exec_depend>
+  <exec_depend>sysstat</exec_depend>
+  <exec_depend>ifstat</exec_depend>
+  <exec_depend>iproute2</exec_depend>
+  <exec_depend>lm-sensors</exec_depend>
+
   <test_depend>ament_lint_auto</test_depend>
   <test_depend>ament_lint_common</test_depend>
 

@@ -106,21 +106,12 @@ Rectangle {
     }
 
     function paletteSeriesColor(index) {
-        const colors = root.appPalette.chartSeriesColors || [
-            root.appPalette.primaryChart,
-            root.appPalette.secondaryChart,
-            root.appPalette.accentBorder,
-            "#f2cc60",
-            "#c586c0",
-            "#ce9178",
-            "#b5cea8",
-            "#d7ba7d",
-            "#ff8c00",
-            "#f44747",
-            "#569cd6",
-            "#86c232"
-        ]
-        return colors[index % colors.length]
+        if (!root.appPalette)
+            return "transparent"
+        const colors = root.appPalette.chartSeriesColors || []
+        if (colors.length > 0)
+            return colors[index % colors.length]
+        return root.appPalette.primaryChart || root.appPalette.accent || root.appPalette.textPrimary
     }
 
     function normalizedSeries() {

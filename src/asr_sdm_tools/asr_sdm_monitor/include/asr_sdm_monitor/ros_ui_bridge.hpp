@@ -1,6 +1,8 @@
 #pragma once
 
 #include <QObject>
+#include <QByteArray>
+#include <QList>
 #include <QImage>
 #include <QFile>
 #include <QTimer>
@@ -12,6 +14,7 @@
 #include <QJsonArray>
 #include <QJsonObject>
 #include <array>
+#include <chrono>
 #include <memory>
 #include <mutex>
 #include <thread>
@@ -19,6 +22,8 @@
 
 #include <diagnostic_msgs/msg/diagnostic_array.hpp>
 #include <rclcpp/rclcpp.hpp>
+#include <rclcpp/serialized_message.hpp>
+#include <rclcpp/executors/single_threaded_executor.hpp>
 #include <sensor_msgs/msg/compressed_image.hpp>
 #include <sensor_msgs/msg/image.hpp>
 #include <sensor_msgs/msg/imu.hpp>
@@ -88,6 +93,11 @@ public:
     explicit RosUiBridge(QObject *parent = nullptr);
     ~RosUiBridge() override;
 
+    // Hardware monitor nodes are isolated from video/GUI-facing ROS callbacks.
+    void addHardwareNode(const rclcpp::Node::SharedPtr & node);
+    void startRosExecutors();
+
+    // Backward-compatible wrappers.
     void addNode(const rclcpp::Node::SharedPtr & node);
     void startRosExecutor();
 
@@ -149,7 +159,7 @@ public:
 
     Q_INVOKABLE void setVideoTopic(int slotIndex, const QString &topicName);
     Q_INVOKABLE void refreshPlotTopics();
-    Q_INVOKABLE void setPlotTopicSelected(const QString &topicName, bool selected);
+    Q_INVOKABLE void setPlotTopicSelected(const QString &topicKey, bool selected);
     Q_INVOKABLE void setPlotDataSource(const QString &dataSource);
     Q_INVOKABLE QString defaultPlotRecordingPath() const;
     Q_INVOKABLE bool startPlotRecording(const QString &filePath);
@@ -234,25 +244,58 @@ private:
     void updateVideoStatus(int slotIndex, const QString &status);
     void emitVideoSlotChanged(int slotIndex);
 
+    struct PlotTopicSource {
+        QString key;
+        QString topic_name;
+        QString topic_type;
+        QString source_kind;
+        QString source_name;
+        QList<QByteArray> publisher_gids;
+
+        bool operator==(const PlotTopicSource &other) const
+        {
+            return key == other.key
+                   && topic_name == other.topic_name
+                   && topic_type == other.topic_type
+                   && source_kind == other.source_kind
+                   && source_name == other.source_name
+                   && publisher_gids == other.publisher_gids;
+        }
+    };
+
     void discoverPlotTopics();
-    void applyDiscoveredPlotTopics(const QStringList &topicNames, const QMap<QString, QString> &topicTypes);
+    void applyDiscoveredPlotTopics(const QList<PlotTopicSource> &sources);
     void rebuildPlotTopicsModel();
+    QString recordedTopicKey(const QString &topicName) const;
+    const PlotTopicSource *graphTopicSourceForKey(const QString &key) const;
+    QStringList selectedGraphTopicNames() const;
+    bool messageMatchesSelectedGraphSource(
+        const QString &topicName,
+        const rclcpp::MessageInfo &messageInfo) const;
+    bool isRosbagPlayerNode(const QString &nodeName, const QString &nodeNamespace) const;
     void rebuildPlotFieldOptions();
-    QVariantList filterPlotFieldOptionsForSelectedTopics(const QVariantList &fields) const;
+    static QVariantList filterPlotFieldOptionsForSelectedTopics(
+        const QVariantList &fields, const QStringList &selectedTopicNames);
     void refreshPlotSubscriptions();
     void stopPlotSubscriptions();
     void startPlotSubscriptionForTopic(const QString &topicName, const QString &topicType);
+    void refreshRecordSubscriptions();
+    void stopRecordSubscriptions();
+    void startRecordSubscriptionForTopic(const QString &topicName, const QString &topicType);
+    void writeSerializedRecordingSample(
+        const QString &topicName,
+        const QString &topicType,
+        const std::shared_ptr<rclcpp::SerializedMessage> &message);
     void appendLivePlotSample(const QVariantMap &sample, const QString &topicName);
     void flushLivePlotSamples();
     template<typename MessageT>
     void startTypedPlotSubscription(const QString &topicName);
-    template<typename MessageT>
-    void writePlotRecordingSample(const QString &topicName, const MessageT &msg, double absoluteTimeMs);
     static QVariantList plotFieldOptionsForTopic(const QString &topicName, const QString &topicType);
     static QString plotFieldPath(const QString &topicName, const QString &fieldName);
     static bool isSupportedPlotType(const QString &topicType);
     static QString normalizeLocalPath(const QString &filePath);
     bool loadRecordedRosbag(const QString &filePath);
+    void rebuildRecordedPlotSamples();
     void updateRecordedPlaybackBounds();
     void playbackTick();
 
@@ -298,11 +341,23 @@ private:
     mutable std::mutex video_frame_mutex_;
 
     QVariantList plot_topics_;
-    QStringList plot_topic_names_;
-    QMap<QString, QString> plot_topic_types_;
-    QStringList selected_plot_topic_names_;
+
+    // Active ROS graph sources are separated by publisher origin. A topic can
+    // therefore have both a normal live row and a rosbag2-player row.
+    QList<PlotTopicSource> graph_plot_topic_sources_;
+    QMap<QString, QString> live_plot_topic_types_;
+    QStringList selected_graph_plot_source_keys_;
+    mutable std::mutex plot_source_mutex_;
+
+    // Recorded source: topics read from the currently opened bag metadata.
+    QStringList recorded_plot_topic_names_;
+    QMap<QString, QString> recorded_plot_topic_types_;
+    QStringList selected_recorded_plot_topic_names_;
+    QString recorded_topic_source_name_;
+
     QString plot_topics_status_ = QStringLiteral("Waiting for ROS topics ...");
     QMap<QString, rclcpp::SubscriptionBase::SharedPtr> plot_subscriptions_;
+    QMap<QString, rclcpp::SubscriptionBase::SharedPtr> record_subscriptions_;
 
     QVariantList plot_field_options_;
     QVariantList recorded_available_plot_field_options_;
@@ -315,13 +370,14 @@ private:
 
     QString plot_data_source_ = QStringLiteral("live");
     QVariantList recorded_plot_field_options_;
+    QVariantList recorded_all_plot_samples_;
     QVariantList recorded_plot_samples_;
     QString recorded_file_path_;
     QString recorded_status_ = QStringLiteral("No recorded file loaded");
     bool plot_recording_ = false;
     QString plot_recording_path_;
     std::unique_ptr<rosbag2_cpp::Writer> plot_bag_writer_;
-    std::mutex plot_recording_mutex_;
+    mutable std::mutex plot_recording_mutex_;
     size_t plot_recorded_message_count_ = 0;
     double recorded_bag_start_time_ms_ = 0.0;
     double recorded_bag_end_time_ms_ = 0.0;
@@ -332,16 +388,38 @@ private:
     bool playback_playing_ = false;
     QTimer *playback_timer_ = nullptr;
     QTimer *plot_update_timer_ = nullptr;
+    QTimer *gui_ros_spin_timer_ = nullptr;
     std::chrono::steady_clock::time_point playback_last_tick_;
 
+    // The lightweight ROS-to-GUI node remains serviced from the Qt GUI thread.
+    // It owns diagnostics and ROS graph discovery only; QML and plot rendering
+    // also remain in the Qt GUI thread.
     rclcpp::Node::SharedPtr node_;
-    std::vector<rclcpp::Node::SharedPtr> owned_nodes_;
+    std::unique_ptr<rclcpp::executors::SingleThreadedExecutor> gui_executor_;
+
+    // Plot/Record data callbacks are isolated from the GUI in their own ROS
+    // executor thread.  They only prepare/buffer data; QML rendering remains in
+    // the Qt GUI thread via plot_update_timer_.
+    rclcpp::Node::SharedPtr plot_node_;
+    std::unique_ptr<rclcpp::executors::SingleThreadedExecutor> plot_executor_;
+    std::thread plot_ros_thread_;
+
+    // The video node is serviced only by the video worker thread.
+    rclcpp::Node::SharedPtr video_node_;
+
+    std::vector<rclcpp::Node::SharedPtr> hardware_nodes_;
     rclcpp::Subscription<diagnostic_msgs::msg::DiagnosticArray>::SharedPtr diagnostics_sub_;
     rclcpp::Subscription<std_msgs::msg::String>::SharedPtr video_topics_sub_;
     rclcpp::TimerBase::SharedPtr topic_discovery_timer_;
     std::array<rclcpp::Subscription<std_msgs::msg::String>::SharedPtr, 4> video_status_subs_;
     rclcpp::Publisher<std_msgs::msg::String>::SharedPtr video_select_pub_;
-    std::unique_ptr<rclcpp::executors::SingleThreadedExecutor> executor_;
-    std::thread ros_thread_;
-    bool ros_executor_started_ = false;
+    // Thread 2: Image/CompressedImage subscriptions and decoding only.
+    std::unique_ptr<rclcpp::executors::SingleThreadedExecutor> video_executor_;
+    std::thread video_ros_thread_;
+
+    // Thread 3: potentially blocking hardware monitors (CPU/HDD/MEM/NET).
+    std::unique_ptr<rclcpp::executors::SingleThreadedExecutor> hardware_executor_;
+    std::thread hardware_ros_thread_;
+
+    bool ros_executors_started_ = false;
 };
