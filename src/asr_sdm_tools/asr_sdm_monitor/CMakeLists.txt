@@ -22,7 +22,11 @@ qt_standard_project_setup()
 
 qt_add_executable(${PROJECT_NAME}
   src/main.cpp
+  src/ros_executor_manager.cpp
   src/ros_ui_bridge.cpp
+  src/ros_ui_bridge_hardware.cpp
+  src/ros_ui_bridge_plot.cpp
+  src/ros_ui_bridge_video.cpp
   src/ros_video_image_provider.cpp
   src/system_monitor/monitor_utils.cpp
   src/system_monitor/cpu_monitor.cpp
@@ -31,6 +35,7 @@ qt_add_executable(${PROJECT_NAME}
   src/system_monitor/net_monitor.cpp
   src/system_monitor/system_monitor.cpp
   include/asr_sdm_monitor/ros_ui_bridge.hpp
+  include/asr_sdm_monitor/ros_executor_manager.hpp
   include/asr_sdm_monitor/ros_video_image_provider.hpp
   include/asr_sdm_monitor/system_monitor/monitor_utils.hpp
   include/asr_sdm_monitor/system_monitor/cpu_monitor.hpp

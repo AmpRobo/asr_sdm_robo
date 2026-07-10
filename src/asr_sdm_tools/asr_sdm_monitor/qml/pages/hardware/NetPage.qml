@@ -34,28 +34,10 @@ Flickable {
         RowLayout {
             Layout.fillWidth: true
             spacing: 12
-            ValueCard {
-                Layout.fillWidth: true
-                Layout.fillHeight: true
-                title: I18n.t(root.language, "interfaceList")
-                value: UiHelpers.display(RosUi.netSummary.interfaces)
-                appPalette: root.appPalette
-            }
-            ValueCard {
-                Layout.fillWidth: true
-                Layout.fillHeight: true
-                title: I18n.t(root.language, "ipAddressList")
-                value: UiHelpers.display(RosUi.netSummary.ipAddresses)
-                appPalette: root.appPalette
-            }
-        }
-
-        RowLayout {
-            Layout.fillWidth: true
-            spacing: 12
-            ValueCard { title: I18n.t(root.language, "stateLevel"); value: UiHelpers.display(RosUi.netSummary.level); appPalette: root.appPalette }
-            ValueCard { title: I18n.t(root.language, "stateDescription"); value: UiHelpers.display(RosUi.netSummary.state); appPalette: root.appPalette }
-            Item { Layout.fillWidth: true }
+            ValueCard { Layout.fillHeight: true; title: I18n.t(root.language, "interfaceList"); value: UiHelpers.display(RosUi.netSummary.interfaces); appPalette: root.appPalette }
+            ValueCard { Layout.fillHeight: true; title: I18n.t(root.language, "ipAddressList"); value: UiHelpers.display(RosUi.netSummary.ipAddresses); appPalette: root.appPalette }
+            ValueCard { Layout.fillHeight: true; title: I18n.t(root.language, "stateLevel"); value: UiHelpers.display(RosUi.netSummary.level); appPalette: root.appPalette }
+            ValueCard { Layout.fillHeight: true; title: I18n.t(root.language, "stateDescription"); value: UiHelpers.display(RosUi.netSummary.state); appPalette: root.appPalette }
         }
 
         AreaLineChart {

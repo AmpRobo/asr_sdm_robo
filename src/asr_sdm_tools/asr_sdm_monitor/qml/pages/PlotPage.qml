@@ -85,6 +85,7 @@ Item {
     ]
     readonly property string plotMode: root.xAxisMode === "time" ? "time" : "xy"
     readonly property string longestTopicText: longestOptionText()
+    readonly property string longestCapabilityText: longestTopicCapabilityText()
     readonly property string longestSettingLabelText: longestSettingLabel()
     readonly property string longestSeriesLabelText: longestSeriesLabel()
     readonly property int settingsLabelColumnWidth: Math.ceil(Math.max(128, settingsLabelProbe.implicitWidth + 10))
@@ -98,6 +99,29 @@ Item {
         visible: false
         text: root.longestTopicText
         font.pixelSize: root.baseFontSize
+    }
+
+    Text {
+        id: capabilityHeaderProbe
+        visible: false
+        text: I18n.t(root.language, "topicCapability")
+        font.pixelSize: root.baseFontSize
+        font.bold: true
+    }
+
+    Text {
+        id: capabilityValueProbe
+        visible: false
+        text: root.longestCapabilityText
+        font.pixelSize: root.baseFontSize - 1
+    }
+
+    Text {
+        id: capabilityRequiredProbe
+        visible: false
+        text: I18n.t(root.language, "plottable") + " · "
+              + I18n.t(root.language, "recordableOnly")
+        font.pixelSize: root.baseFontSize - 1
     }
 
     Text {
@@ -583,6 +607,21 @@ Item {
         if (topicItem && topicItem.recordable)
             return I18n.t(root.language, "recordableOnly")
         return I18n.t(root.language, "unsupportedPlotTopic")
+    }
+
+    function longestTopicCapabilityText() {
+        const topics = RosUi.plotTopics || []
+        let longest = I18n.t(root.language, "unsupportedPlotTopic")
+        const recordable = I18n.t(root.language, "recordableOnly")
+        if (recordable.length > longest.length)
+            longest = recordable
+
+        for (let i = 0; i < topics.length; ++i) {
+            const capability = root.topicCapabilityText(topics[i])
+            if (capability.length > longest.length)
+                longest = capability
+        }
+        return longest
     }
 
     function currentLiveTimeText() {
@@ -1574,10 +1613,24 @@ Item {
                     Layout.fillWidth: true
                     Layout.preferredHeight: 0
                     visible: false
-                    property int checkWidth: 44
-                    property int capabilityWidth: Math.max(170, Math.min(240, topicsPanel.width * 0.18))
-                    property int sourceWidth: Math.max(150, Math.min(260, topicsPanel.width * 0.20))
-                    property int typeWidth: Math.max(240, Math.min(460, topicsPanel.width * 0.30))
+                    readonly property int rowSpacing: topicsPanel.width < 720 ? 6 : (topicsPanel.width < 1000 ? 8 : 12)
+                    readonly property int checkWidth: topicsPanel.width < 720 ? 32 : 44
+                    readonly property int rowHorizontalMargins: 20
+                    readonly property int panelHorizontalMargins: 32
+                    readonly property int dataColumnCount: 3
+                    readonly property int availableDataWidth: Math.max(0,
+                        topicsPanel.width - panelHorizontalMargins - rowHorizontalMargins
+                        - checkWidth - rowSpacing * 4)
+                    readonly property int capabilityTargetWidth: Math.ceil(Math.max(
+                        capabilityHeaderProbe.implicitWidth,
+                        capabilityValueProbe.implicitWidth,
+                        capabilityRequiredProbe.implicitWidth) + 16)
+                    readonly property int reservedCapabilityWidth: Math.min(
+                        capabilityTargetWidth, availableDataWidth)
+                    readonly property int dataColumnWidth: Math.max(0, Math.floor(
+                        (availableDataWidth - reservedCapabilityWidth) / dataColumnCount))
+                    readonly property int capabilityWidth: Math.max(0,
+                        availableDataWidth - dataColumnWidth * dataColumnCount)
                 }
 
                 Rectangle {
@@ -1592,12 +1645,12 @@ Item {
                         anchors.fill: parent
                         anchors.leftMargin: 8
                         anchors.rightMargin: 12
-                        spacing: 12
+                        spacing: topicColumns.rowSpacing
 
                         Text { Layout.preferredWidth: topicColumns.checkWidth; text: "" }
-                        Text { Layout.fillWidth: true; text: I18n.t(root.language, "topicName"); font.pixelSize: root.baseFontSize; font.bold: true; color: root.appPalette.textPrimary; elide: Text.ElideRight }
-                        Text { Layout.preferredWidth: topicColumns.typeWidth; text: I18n.t(root.language, "topicType"); font.pixelSize: root.baseFontSize; font.bold: true; color: root.appPalette.textPrimary; elide: Text.ElideRight }
-                        Text { Layout.preferredWidth: topicColumns.sourceWidth; text: I18n.t(root.language, "topicSource"); font.pixelSize: root.baseFontSize; font.bold: true; color: root.appPalette.textPrimary; elide: Text.ElideRight }
+                        Text { Layout.preferredWidth: topicColumns.dataColumnWidth; text: I18n.t(root.language, "topicName"); font.pixelSize: root.baseFontSize; font.bold: true; color: root.appPalette.textPrimary; elide: Text.ElideRight }
+                        Text { Layout.preferredWidth: topicColumns.dataColumnWidth; text: I18n.t(root.language, "topicType"); font.pixelSize: root.baseFontSize; font.bold: true; color: root.appPalette.textPrimary; elide: Text.ElideRight }
+                        Text { Layout.preferredWidth: topicColumns.dataColumnWidth; text: I18n.t(root.language, "topicSource"); font.pixelSize: root.baseFontSize; font.bold: true; color: root.appPalette.textPrimary; elide: Text.ElideRight }
                         Text { Layout.preferredWidth: topicColumns.capabilityWidth; text: I18n.t(root.language, "topicCapability"); font.pixelSize: root.baseFontSize; font.bold: true; color: root.appPalette.textPrimary; horizontalAlignment: Text.AlignRight; elide: Text.ElideRight }
                     }
                 }
@@ -1636,7 +1689,7 @@ Item {
                             anchors.fill: parent
                             anchors.leftMargin: 8
                             anchors.rightMargin: 12
-                            spacing: 12
+                            spacing: topicColumns.rowSpacing
 
                             CheckBox {
                                 id: topicCheckBox
@@ -1665,7 +1718,7 @@ Item {
                             }
 
                             Text {
-                                Layout.fillWidth: true
+                                Layout.preferredWidth: topicColumns.dataColumnWidth
                                 text: modelData.name
                                 font.pixelSize: root.baseFontSize
                                 color: root.appPalette.textPrimary
@@ -1673,7 +1726,7 @@ Item {
                             }
 
                             Text {
-                                Layout.preferredWidth: topicColumns.typeWidth
+                                Layout.preferredWidth: topicColumns.dataColumnWidth
                                 text: modelData.type && modelData.type.length > 0 ? modelData.type : "--"
                                 font.pixelSize: root.baseFontSize - 1
                                 color: root.appPalette.textSecondary
@@ -1681,7 +1734,7 @@ Item {
                             }
 
                             Text {
-                                Layout.preferredWidth: topicColumns.sourceWidth
+                                Layout.preferredWidth: topicColumns.dataColumnWidth
                                 text: root.topicSourceText(modelData)
                                 font.pixelSize: root.baseFontSize - 1
                                 color: root.appPalette.textSecondary
