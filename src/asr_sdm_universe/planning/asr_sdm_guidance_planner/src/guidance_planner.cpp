@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <chrono>
 #include <cmath>
+#include <cstdint>
 #include <limits>
 #include <sstream>
 
@@ -14,6 +15,101 @@ namespace amprobo
 
 GuidancePlanner::GuidancePlanner(const GuidancePlannerOptions & options)
 {
+  setOptions(options);
+}
+
+void GuidancePlanner::initGuidancePlanner(const std::shared_ptr<rclcpp::Node> & nh)
+{
+  GuidancePlannerOptions options;
+
+  /* get parameter — ROS 2 dotted names match astar_lbfgs_planner.yaml */
+  nh->declare_parameter("selection.use_optimized_only_if_safe", true);
+  nh->declare_parameter("selection.project_start_goal_to_safe", true);
+  nh->declare_parameter("selection.safe_point_search_radius", 1.5);
+  options.use_optimized_only_if_safe =
+    nh->get_parameter("selection.use_optimized_only_if_safe").as_bool();
+  options.project_start_goal_to_safe =
+    nh->get_parameter("selection.project_start_goal_to_safe").as_bool();
+  options.safe_point_search_radius =
+    nh->get_parameter("selection.safe_point_search_radius").as_double();
+
+  nh->declare_parameter("astar.heuristic_weight", 1.0);
+  nh->declare_parameter("astar.extra_clearance", 0.0);
+  nh->declare_parameter("astar.max_expansions", 300000);
+  nh->declare_parameter("astar.nearest_free_search_radius", 10);
+  nh->declare_parameter("astar.allow_diagonal", true);
+  options.astar.heuristic_weight = nh->get_parameter("astar.heuristic_weight").as_double();
+  options.astar.extra_clearance = nh->get_parameter("astar.extra_clearance").as_double();
+  options.astar.max_expansions =
+    static_cast<int>(nh->get_parameter("astar.max_expansions").as_int());
+  options.astar.nearest_free_search_radius =
+    static_cast<int>(nh->get_parameter("astar.nearest_free_search_radius").as_int());
+  options.astar.allow_diagonal = nh->get_parameter("astar.allow_diagonal").as_bool();
+
+  nh->declare_parameter("corridor.enabled", true);
+  nh->declare_parameter("corridor.batch_sample_count", 80);
+  nh->declare_parameter("corridor.max_spheres", 80);
+  nh->declare_parameter("corridor.drone_radius", 0.0);
+  nh->declare_parameter("corridor.safety_margin", 0.10);
+  nh->declare_parameter("corridor.min_radius", 0.10);
+  nh->declare_parameter("corridor.max_radius", 6.0);
+  nh->declare_parameter("corridor.min_overlap_volume", 1.0e-5);
+  nh->declare_parameter("corridor.radius_weight", 1.0);
+  nh->declare_parameter("corridor.overlap_weight", 4.0);
+  nh->declare_parameter("corridor.sample_axis_scale", 0.3333333333333333);
+  nh->declare_parameter("corridor.sample_lateral_scale", 2.0);
+  nh->declare_parameter("corridor.random_seed", 7);
+  nh->declare_parameter("corridor.deterministic_sampling", true);
+  options.corridor.enabled = nh->get_parameter("corridor.enabled").as_bool();
+  options.corridor.batch_sample_count =
+    static_cast<int>(nh->get_parameter("corridor.batch_sample_count").as_int());
+  options.corridor.max_spheres =
+    static_cast<int>(nh->get_parameter("corridor.max_spheres").as_int());
+  options.corridor.drone_radius = nh->get_parameter("corridor.drone_radius").as_double();
+  options.corridor.safety_margin = nh->get_parameter("corridor.safety_margin").as_double();
+  options.corridor.min_radius = nh->get_parameter("corridor.min_radius").as_double();
+  options.corridor.max_radius = nh->get_parameter("corridor.max_radius").as_double();
+  options.corridor.min_overlap_volume =
+    nh->get_parameter("corridor.min_overlap_volume").as_double();
+  options.corridor.radius_weight = nh->get_parameter("corridor.radius_weight").as_double();
+  options.corridor.overlap_weight = nh->get_parameter("corridor.overlap_weight").as_double();
+  options.corridor.sample_axis_scale =
+    nh->get_parameter("corridor.sample_axis_scale").as_double();
+  options.corridor.sample_lateral_scale =
+    nh->get_parameter("corridor.sample_lateral_scale").as_double();
+  options.corridor.random_seed =
+    static_cast<uint32_t>(nh->get_parameter("corridor.random_seed").as_int());
+  options.corridor.deterministic_sampling =
+    nh->get_parameter("corridor.deterministic_sampling").as_bool();
+
+  nh->declare_parameter("optimizer.enabled", true);
+  nh->declare_parameter("optimizer.max_iterations", 120);
+  nh->declare_parameter("optimizer.max_control_points", 80);
+  nh->declare_parameter("optimizer.epsilon", 1.0e-4);
+  nh->declare_parameter("optimizer.smooth_weight", 1.0);
+  nh->declare_parameter("optimizer.length_weight", 0.05);
+  nh->declare_parameter("optimizer.obstacle_weight", 12.0);
+  nh->declare_parameter("optimizer.guide_weight", 0.08);
+  nh->declare_parameter("optimizer.safe_distance", 0.20);
+  nh->declare_parameter("optimizer.validity_check_step", 0.05);
+  nh->declare_parameter("optimizer.extra_clearance", 0.0);
+  nh->declare_parameter("optimizer.corridor_weight", 60.0);
+  options.optimizer.enabled = nh->get_parameter("optimizer.enabled").as_bool();
+  options.optimizer.max_iterations =
+    static_cast<int>(nh->get_parameter("optimizer.max_iterations").as_int());
+  options.optimizer.max_control_points =
+    static_cast<int>(nh->get_parameter("optimizer.max_control_points").as_int());
+  options.optimizer.epsilon = nh->get_parameter("optimizer.epsilon").as_double();
+  options.optimizer.smooth_weight = nh->get_parameter("optimizer.smooth_weight").as_double();
+  options.optimizer.length_weight = nh->get_parameter("optimizer.length_weight").as_double();
+  options.optimizer.obstacle_weight = nh->get_parameter("optimizer.obstacle_weight").as_double();
+  options.optimizer.guide_weight = nh->get_parameter("optimizer.guide_weight").as_double();
+  options.optimizer.safe_distance = nh->get_parameter("optimizer.safe_distance").as_double();
+  options.optimizer.validity_check_step =
+    nh->get_parameter("optimizer.validity_check_step").as_double();
+  options.optimizer.extra_clearance = nh->get_parameter("optimizer.extra_clearance").as_double();
+  options.optimizer.corridor_weight = nh->get_parameter("optimizer.corridor_weight").as_double();
+
   setOptions(options);
 }
 

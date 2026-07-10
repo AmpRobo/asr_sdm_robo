@@ -2,102 +2,102 @@ astar_lbfgs_path_planner:
   ros__parameters:
     frame_id: "world"
 
-    topics.occupancy_map: "/esdf_map/occupancy_inflate"
-    topics.esdf_map: "/esdf_map/esdf_distance"
-    topics.clicked_point: "/clicked_point"
-    topics.waypoints: "/planning/waypoints"
+    # --- Node I/O ---
+    topics:
+      occupancy_map: "/esdf_map/occupancy_inflate"
+      esdf_map: "/esdf_map/esdf_distance"
+      clicked_point: "/clicked_point"
+      waypoints: "/planning/waypoints"
 
-    # Default: use offline binary map files from this package, resolved relative to its installed share directory.
-    # Put occupancy.bin and esdf.bin into the package-local maps/ directory before building/installing.
-    # Set map.source to "topic" to subscribe to both live map topics instead.
-    map.source: "binary"
-    binary_map.directory: "maps"
-    binary_map.occupancy_filename: "occupancy.bin"
-    binary_map.esdf_filename: "esdf.bin"
-    binary_map.fallback_to_topic: true
-    # Keep fixed map origin/size by default so the mesh blocks align exactly with asr_sdm_esdf_map.
-    # Set true only if your bin files use different map bounds and you accept different RViz mesh alignment.
-    binary_map.auto_bounds: false
-    binary_map.auto_bounds_padding: 1.0
+    # map.source: "binary" loads package-relative maps/; "topic" subscribes to both map topics.
+    map:
+      source: "binary"
+      # Must match the saved voxel resolution. origin/size used when auto_bounds is false or in topic mode.
+      resolution: 0.15
+      origin_x: -10.0
+      origin_y: -10.0
+      origin_z: -1.0
+      size_x: 20.0
+      size_y: 20.0
+      size_z: 5.0
+      # occupancy_inflate = occupied centers; esdf_distance intensity = real ESDF distance.
+      unknown_as_occupied: false
+      clear_before_integrate: true
+      skip_repeated_occupancy_with_same_point_count: true
+      skip_repeated_esdf_with_same_point_count: true
 
-    # Publish a cube-shaped mesh Marker from the loaded/planner occupancy map for RViz2.
-    visualization.publish_occupied_map: true
-    visualization.occupied_map_topic: "/esdf_map/occupied_map"
-    visualization.occupied_map_alpha: 0.85
-    visualization.occupied_map_stride: 1
-    visualization.occupied_map_mesh_resolution: 0.30
-    # Kept for parameter consistency with asr_sdm_esdf_map; current mesh face generation does not need it.
-    visualization.occupied_map_mesh_max_height_gap: 0.60
-    # These two values must match asr_sdm_esdf_map to make /esdf_map/occupied_map render identically.
-    visualization.ground_height: -1.0
-    visualization.visualization_truncate_height: 3.0
-    visualization.occupied_map_publish_period_sec: 2.0
-    visualization.corridor_marker_topic: "/planning/safe_corridor"
-    visualization.corridor_marker_alpha: 0.1
+    binary_map:
+      directory: "maps"
+      occupancy_filename: "occupancy.bin"
+      esdf_filename: "esdf.bin"
+      fallback_to_topic: true
+      # Keep false so mesh blocks align with asr_sdm_esdf_map; enable only for bins with different bounds.
+      auto_bounds: false
+      auto_bounds_padding: 1.0
 
-    # map.resolution must match the saved map voxel resolution. origin/size are used only when binary_map.auto_bounds is false or topic mode is used.
-    map.resolution: 0.15
-    map.origin_x: -10.0
-    map.origin_y: -10.0
-    map.origin_z: -1.0
-    map.size_x: 20.0
-    map.size_y: 20.0
-    map.size_z: 5.0
+    visualization:
+      publish_occupied_map: true
+      occupied_map_topic: "/esdf_map/occupied_map"
+      occupied_map_alpha: 0.85
+      occupied_map_stride: 1
+      occupied_map_mesh_resolution: 0.30
+      # Kept for parity with asr_sdm_esdf_map; mesh faces do not use it today.
+      occupied_map_mesh_max_height_gap: 0.60
+      # Match asr_sdm_esdf_map so /esdf_map/occupied_map looks identical.
+      ground_height: -1.0
+      visualization_truncate_height: 3.0
+      occupied_map_publish_period_sec: 2.0
+      corridor_marker_topic: "/planning/safe_corridor"
+      corridor_marker_alpha: 0.1
 
-    # occupancy_inflate contains occupied voxel centers. esdf_distance contains x/y/z/intensity, where intensity is the real ESDF distance.
-    map.unknown_as_occupied: false
-    map.clear_before_integrate: true
-    map.skip_repeated_occupancy_with_same_point_count: true
-    map.skip_repeated_esdf_with_same_point_count: true
+    # --- Selection (node click handling + GuidancePlanner projection) ---
+    selection:
+      # Node: RViz Publish Point → /clicked_point
+      clicked_point_use_msg_z: true
+      default_planning_z: 0.5
+      # GuidancePlanner: reject unsafe optimized paths; project clicks along ESDF gradient.
+      use_optimized_only_if_safe: true
+      project_start_goal_to_safe: true
+      # Max gradient travel distance (m), not a full 3D voxel search radius.
+      safe_point_search_radius: 4.0
 
-    # RViz Publish Point provides start/goal through /clicked_point.
-    selection.clicked_point_use_msg_z: true
-    selection.default_planning_z: 0.5
-    selection.use_optimized_only_if_safe: true
-    # If the raw RViz click is too close to an obstacle or outside the ESDF-safe region,
-    # project it along the ESDF increasing-gradient direction until it reaches enough
-    # clearance for corridor generation. This radius is now only the maximum gradient
-    # travel distance, not a full 3D voxel search radius.
-    selection.project_start_goal_to_safe: true
-    selection.safe_point_search_radius: 4.0
+    # --- GuidancePlanner pipeline ---
+    astar:
+      heuristic_weight: 1.0
+      extra_clearance: 0.0
+      max_expansions: 300000
+      nearest_free_search_radius: 10
+      allow_diagonal: true
 
-    astar.heuristic_weight: 1.0
-    astar.extra_clearance: 0.0
-    astar.max_expansions: 300000
-    astar.nearest_free_search_radius: 10
-    astar.allow_diagonal: true
+    # Bubble-Planner-style spheres; A* only supplies guide points.
+    corridor:
+      enabled: true
+      batch_sample_count: 80
+      max_spheres: 80
+      # r = ESDF(center) - drone_radius - safety_margin; maps are already inflated → drone_radius 0.
+      drone_radius: 0.0
+      safety_margin: 0.1
+      min_radius: 0.1
+      max_radius: 6.0
+      min_overlap_volume: 0.00001
+      radius_weight: 1.0
+      overlap_weight: 4.0
+      sample_axis_scale: 0.3333333333333333
+      sample_lateral_scale: 2.0
+      random_seed: 7
+      deterministic_sampling: true
 
-    # Bubble-Planner-style 3D Sphere-Shaped Corridor.
-    # A* only gives guide points. Real corridor sphere centers are selected by BatchSample + score.
-    corridor.enabled: true
-    corridor.batch_sample_count: 80
-    corridor.max_spheres: 80
-    # Radius formula: r = ESDF_distance(center) - drone_radius - safety_margin.
-    # occupancy_inflate/esdf_distance are already inflated externally, so drone_radius can stay 0.0.
-    corridor.drone_radius: 0.0
-    corridor.safety_margin: 0.1
-    corridor.min_radius: 0.1
-    corridor.max_radius: 6.0
-    corridor.min_overlap_volume: 0.00001
-    corridor.radius_weight: 1.0
-    corridor.overlap_weight: 4.0
-    corridor.sample_axis_scale: 0.3333333333333333
-    corridor.sample_lateral_scale: 2.0
-    corridor.random_seed: 7
-    corridor.deterministic_sampling: true
-
-    optimizer.enabled: true
-    optimizer.max_iterations: 120
-    optimizer.max_control_points: 80
-    optimizer.epsilon: 0.0001
-    optimizer.smooth_weight: 1.0
-    optimizer.length_weight: 0.05
-    optimizer.obstacle_weight: 12.0
-    optimizer.guide_weight: 0.08
-
-    # The ESDF input is already computed externally from inflated occupancy.
-    # Keep this small to avoid adding too much extra clearance beyond the inflated map.
-    optimizer.safe_distance: 0.20
-    optimizer.validity_check_step: 0.05
-    optimizer.extra_clearance: 0.0
-    optimizer.corridor_weight: 60.0
+    optimizer:
+      enabled: true
+      max_iterations: 120
+      max_control_points: 80
+      epsilon: 0.0001
+      smooth_weight: 1.0
+      length_weight: 0.05
+      obstacle_weight: 12.0
+      guide_weight: 0.08
+      # ESDF already from inflated occupancy; keep small to avoid stacking clearance.
+      safe_distance: 0.20
+      validity_check_step: 0.05
+      extra_clearance: 0.0
+      corridor_weight: 60.0

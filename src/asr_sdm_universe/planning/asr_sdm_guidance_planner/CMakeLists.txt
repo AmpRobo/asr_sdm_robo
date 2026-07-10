@@ -34,6 +34,7 @@ option(BUILD_GUIDANCE_PLANNER_TEST_NODE "Build RViz test node for guidance plann
 find_package(ament_cmake REQUIRED)
 find_package(Eigen3 REQUIRED)
 find_package(PCL REQUIRED COMPONENTS common)
+find_package(rclcpp REQUIRED)
 find_package(asr_sdm_lbfgs_solver REQUIRED)
 find_package(asr_sdm_esdf_map REQUIRED)
 
@@ -67,10 +68,9 @@ else()
   target_link_libraries(${PROJECT_NAME} asr_sdm_lbfgs_solver)
 endif()
 
-ament_target_dependencies(${PROJECT_NAME} asr_sdm_lbfgs_solver)
+ament_target_dependencies(${PROJECT_NAME} rclcpp asr_sdm_lbfgs_solver)
 
 if(BUILD_GUIDANCE_PLANNER_TEST_NODE)
-  find_package(rclcpp REQUIRED)
   find_package(ament_index_cpp REQUIRED)
   find_package(geometry_msgs REQUIRED)
   find_package(nav_msgs REQUIRED)
@@ -148,5 +148,5 @@ endif()
 
 ament_export_targets(export_${PROJECT_NAME} HAS_LIBRARY_TARGET)
 ament_export_include_directories(include)
-ament_export_dependencies(Eigen3 PCL asr_sdm_lbfgs_solver asr_sdm_esdf_map)
+ament_export_dependencies(Eigen3 PCL rclcpp asr_sdm_lbfgs_solver asr_sdm_esdf_map)
 ament_package()

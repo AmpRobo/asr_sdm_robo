@@ -7,9 +7,11 @@
 #include <Eigen/Core>
 #include <astar_3d_planner.hpp>
 #include <lbfgs_path_optimizer.hpp>
+#include <rclcpp/rclcpp.hpp>
 #include <sphere_corridor.hpp>
 #include <voxel_esdf_map.hpp>
 
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -53,7 +55,11 @@ struct GuidancePlannerResult
 class GuidancePlanner
 {
 public:
+  typedef std::shared_ptr<GuidancePlanner> Ptr;
+
   explicit GuidancePlanner(const GuidancePlannerOptions & options = GuidancePlannerOptions());
+
+  void initGuidancePlanner(const std::shared_ptr<rclcpp::Node> & nh);
 
   void setOptions(const GuidancePlannerOptions & options);
   const GuidancePlannerOptions & options() const { return options_; }
