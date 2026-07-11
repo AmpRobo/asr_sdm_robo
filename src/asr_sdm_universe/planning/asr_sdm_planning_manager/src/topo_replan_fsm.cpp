@@ -18,12 +18,12 @@ void TopoReplanFSM::init(const std::shared_ptr<rclcpp::Node> & nh)
   collide_ = false;
 
   /*  fsm param  */
-  node_->declare_parameter("fsm.flight_type", -1);
+  node_->declare_parameter("fsm.flight_type", std::string(""));
   node_->declare_parameter("fsm.thresh_replan", -1.0);
   node_->declare_parameter("fsm.thresh_no_replan", -1.0);
   node_->declare_parameter("fsm.waypoint_num", -1);
   node_->declare_parameter("fsm.act_map", false);
-  target_type_ = node_->get_parameter("fsm.flight_type").as_int();
+  flight_type_ = node_->get_parameter("fsm.flight_type").as_string();
   replan_time_threshold_ = node_->get_parameter("fsm.thresh_replan").as_double();
   replan_distance_threshold_ = node_->get_parameter("fsm.thresh_no_replan").as_double();
   waypoint_num_ = node_->get_parameter("fsm.waypoint_num").as_int();
@@ -67,7 +67,7 @@ void TopoReplanFSM::waypointCallback(const nav_msgs::msg::Path::SharedPtr msg)
   RCLCPP_INFO(node_->get_logger(), "Triggered!");
 
   vector<Eigen::Vector3d> global_wp;
-  if (target_type_ == TARGET_TYPE::REFENCE_PATH) {
+  if (flight_type_ == "REFERENCE_PATH") {
     for (int i = 0; i < waypoint_num_; ++i) {
       Eigen::Vector3d pt;
       pt(0) = waypoints_[i][0];
@@ -76,13 +76,13 @@ void TopoReplanFSM::waypointCallback(const nav_msgs::msg::Path::SharedPtr msg)
       global_wp.push_back(pt);
     }
   } else {
-    if (target_type_ == TARGET_TYPE::MANUAL_TARGET) {
+    if (flight_type_ == "MANUAL_TARGET") {
       target_point_(0) = msg->poses[0].pose.position.x;
       target_point_(1) = msg->poses[0].pose.position.y;
       target_point_(2) = 1.0;
       RCLCPP_INFO_STREAM(node_->get_logger(), "manual: " << target_point_.transpose());
 
-    } else if (target_type_ == TARGET_TYPE::PRESET_TARGET) {
+    } else if (flight_type_ == "PRESET_TARGET") {
       target_point_(0) = waypoints_[current_wp_][0];
       target_point_(1) = waypoints_[current_wp_][1];
       target_point_(2) = waypoints_[current_wp_][2];

@@ -1,7 +1,7 @@
 planning_manager_node:
   ros__parameters:
     fsm:
-      flight_type: 1
+      flight_type: "MANUAL_TARGET"
       thresh_replan: 0.5
       thresh_no_replan: 2.0
       waypoint_num: 2

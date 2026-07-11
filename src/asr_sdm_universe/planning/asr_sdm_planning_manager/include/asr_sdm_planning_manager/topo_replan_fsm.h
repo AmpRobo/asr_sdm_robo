@@ -23,6 +23,7 @@
 #include <algorithm>
 #include <iostream>
 #include <memory>
+#include <string>
 #include <vector>
 
 using std::vector;
@@ -35,14 +36,13 @@ class TopoReplanFSM
 private:
   /* ---------- flag ---------- */
   enum FSM_EXEC_STATE { INIT, WAIT_TARGET, GEN_NEW_TRAJ, REPLAN_TRAJ, EXEC_TRAJ, REPLAN_NEW };
-  enum TARGET_TYPE { MANUAL_TARGET = 1, PRESET_TARGET = 2, REFENCE_PATH = 3 };
 
   /* planning utils */
   PlanningManager::Ptr planning_manager_;
   PlanningVisualization::Ptr visualization_;
 
   /* parameters */
-  int target_type_;  // 1 mannual select, 2 hard code
+  std::string flight_type_;  // MANUAL_TARGET, PRESET_TARGET, REFERENCE_PATH
   double replan_distance_threshold_, replan_time_threshold_;
   double waypoints_[50][3];
   int waypoint_num_;
