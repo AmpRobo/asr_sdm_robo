@@ -1,6 +1,7 @@
 #include <QApplication>
 #include <QQmlApplicationEngine>
 #include <QUrl>
+#include <QTimer>
 #include <qqml.h>
 
 #include <rclcpp/rclcpp.hpp>
@@ -14,12 +15,27 @@ int main(int argc, char *argv[])
     rclcpp::init(argc, argv);
     QApplication app(argc, argv);
 
+    // rclcpp handles SIGINT and invalidates its context. Qt has an independent
+    // event loop, so explicitly leave it when ROS shuts down (Ctrl+C).
+    QTimer ros_shutdown_watcher;
+    ros_shutdown_watcher.setInterval(50);
+    QObject::connect(&ros_shutdown_watcher, &QTimer::timeout, &app, [&app]()
+    {
+        if (!rclcpp::ok()) {
+            app.quit();
+        }
+    });
+    ros_shutdown_watcher.start();
+
     int ret = -1;
     {
         // Thread 1 is the Qt GUI thread and owns QML, plot rendering and the
         // final video display. Plot/Record ROS callbacks run in a separate
         // executor thread owned by RosUiBridge.
         RosUiBridge bridge;
+        QObject::connect(&app, &QCoreApplication::aboutToQuit,
+                         &bridge, &RosUiBridge::shutdown,
+                         Qt::DirectConnection);
 
         const auto node_options =
             asr_sdm_monitor::system_monitor::makeSystemMonitorNodeOptions();

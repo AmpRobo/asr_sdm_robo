@@ -17,8 +17,7 @@
 #include <chrono>
 #include <memory>
 #include <mutex>
-#include <thread>
-#include <vector>
+#include <atomic>
 
 #include <diagnostic_msgs/msg/diagnostic_array.hpp>
 #include <rclcpp/rclcpp.hpp>
@@ -29,6 +28,11 @@
 #include <sensor_msgs/msg/imu.hpp>
 #include <std_msgs/msg/string.hpp>
 #include <rosbag2_cpp/writer.hpp>
+
+namespace asr_sdm_monitor
+{
+class RosExecutorManager;
+}
 
 class RosUiBridge : public QObject
 {
@@ -96,6 +100,7 @@ public:
     // Hardware monitor nodes are isolated from video/GUI-facing ROS callbacks.
     void addHardwareNode(const rclcpp::Node::SharedPtr & node);
     void startRosExecutors();
+    void shutdown();
 
     // Backward-compatible wrappers.
     void addNode(const rclcpp::Node::SharedPtr & node);
@@ -401,25 +406,17 @@ private:
     // executor thread.  They only prepare/buffer data; QML rendering remains in
     // the Qt GUI thread via plot_update_timer_.
     rclcpp::Node::SharedPtr plot_node_;
-    std::unique_ptr<rclcpp::executors::SingleThreadedExecutor> plot_executor_;
-    std::thread plot_ros_thread_;
 
     // The video node is serviced only by the video worker thread.
     rclcpp::Node::SharedPtr video_node_;
 
-    std::vector<rclcpp::Node::SharedPtr> hardware_nodes_;
     rclcpp::Subscription<diagnostic_msgs::msg::DiagnosticArray>::SharedPtr diagnostics_sub_;
     rclcpp::Subscription<std_msgs::msg::String>::SharedPtr video_topics_sub_;
     rclcpp::TimerBase::SharedPtr topic_discovery_timer_;
     std::array<rclcpp::Subscription<std_msgs::msg::String>::SharedPtr, 4> video_status_subs_;
     rclcpp::Publisher<std_msgs::msg::String>::SharedPtr video_select_pub_;
-    // Thread 2: Image/CompressedImage subscriptions and decoding only.
-    std::unique_ptr<rclcpp::executors::SingleThreadedExecutor> video_executor_;
-    std::thread video_ros_thread_;
-
-    // Thread 3: potentially blocking hardware monitors (CPU/HDD/MEM/NET).
-    std::unique_ptr<rclcpp::executors::SingleThreadedExecutor> hardware_executor_;
-    std::thread hardware_ros_thread_;
-
-    bool ros_executors_started_ = false;
+    // Thread 2 handles Plot/Record, thread 3 handles video decoding, and
+    // thread 4 handles the potentially blocking hardware monitors.
+    std::unique_ptr<asr_sdm_monitor::RosExecutorManager> executor_manager_;
+    std::atomic_bool shutting_down_{false};
 };
