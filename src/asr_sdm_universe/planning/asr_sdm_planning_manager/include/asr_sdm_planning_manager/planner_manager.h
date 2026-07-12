@@ -56,6 +56,11 @@ private:
 
   void updateTrajInfo();
 
+  /* global trajectory helpers */
+  vector<Eigen::Vector3d> buildGlobalWaypoints(const Eigen::Vector3d & start_pos);
+  PolynomialTraj fitGlobalMinSnapTraj(const vector<Eigen::Vector3d> & points);
+  void initLocalTrajFromGlobal(const rclcpp::Time & time_now);
+
   // topology guided optimization
 
   void findCollisionRange(

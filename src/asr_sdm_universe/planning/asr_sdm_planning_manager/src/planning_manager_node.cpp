@@ -10,6 +10,7 @@
 #include <asr_sdm_planning_manager/planner_manager.h>
 #include <asr_sdm_planning_manager/topo_replan_fsm.h>
 
+#include <algorithm>
 #include <chrono>
 #include <memory>
 #include <thread>
@@ -127,19 +128,31 @@ bool PlanningManager::checkTrajCollision(double & distance)
 
 bool PlanningManager::planGlobalTraj(const Eigen::Vector3d & start_pos)
 {
+  // Clear any previous topological search results before building a new global reference.
   plan_data_.clearTopoPaths();
 
-  // generate global reference trajectory
+  // Densify waypoints, fit a min-snap polynomial, then truncate the first local segment.
+  vector<Eigen::Vector3d> points = buildGlobalWaypoints(start_pos);
+  PolynomialTraj global_traj = fitGlobalMinSnapTraj(points);
+  auto time_now = node_->now();
+  global_data_.setGlobalTraj(global_traj, time_now);
 
+  initLocalTrajFromGlobal(time_now);
+  updateTrajInfo();
+  return true;
+}
+
+vector<Eigen::Vector3d> PlanningManager::buildGlobalWaypoints(const Eigen::Vector3d & start_pos)
+{
+  // Start from configured global waypoints and prepend the current start position.
   vector<Eigen::Vector3d> points = plan_data_.global_waypoints_;
   if (points.size() == 0) RCLCPP_WARN(node_->get_logger(), "no global waypoints!");
 
   points.insert(points.begin(), start_pos);
 
-  // insert intermediate points if too far
+  // Insert intermediate points when consecutive waypoints are farther than dist_thresh.
   vector<Eigen::Vector3d> inter_points;
   const double dist_thresh = 4.0;
-
   for (size_t i = 0; i + 1 < points.size(); ++i) {
     inter_points.push_back(points.at(i));
     double dist = (points.at(i + 1) - points.at(i)).norm();
@@ -156,15 +169,21 @@ bool PlanningManager::planGlobalTraj(const Eigen::Vector3d & start_pos)
   }
 
   inter_points.push_back(points.back());
+  // minSnapTraj needs at least 3 waypoints; insert a midpoint if only two remain.
   if (inter_points.size() == 2) {
     Eigen::Vector3d mid = (inter_points[0] + inter_points[1]) * 0.5;
     inter_points.insert(inter_points.begin() + 1, mid);
   }
 
-  // write position matrix
-  int pt_num = inter_points.size();
+  return inter_points;
+}
+
+PolynomialTraj PlanningManager::fitGlobalMinSnapTraj(const vector<Eigen::Vector3d> & points)
+{
+  // Convert waypoints to a position matrix and allocate segment times by distance / max_vel.
+  int pt_num = static_cast<int>(points.size());
   Eigen::MatrixXd pos(pt_num, 3);
-  for (int i = 0; i < pt_num; ++i) pos.row(i) = inter_points[i];
+  for (int i = 0; i < pt_num; ++i) pos.row(i) = points[i];
 
   Eigen::Vector3d zero(0, 0, 0);
   Eigen::VectorXd time(pt_num - 1);
@@ -172,18 +191,18 @@ bool PlanningManager::planGlobalTraj(const Eigen::Vector3d & start_pos)
     time(i) = (pos.row(i + 1) - pos.row(i)).norm() / (pp_.max_vel_);
   }
 
+  // Slow down the first and last segments for smoother start/stop.
   time(0) *= 2.0;
-  time(0) = max(1.0, time(0));
+  time(0) = std::max(1.0, time(0));
   time(time.rows() - 1) *= 2.0;
-  time(time.rows() - 1) = max(1.0, time(time.rows() - 1));
+  time(time.rows() - 1) = std::max(1.0, time(time.rows() - 1));
 
-  PolynomialTraj gl_traj = minSnapTraj(pos, zero, zero, zero, zero, time);
+  return minSnapTraj(pos, zero, zero, zero, zero, time);
+}
 
-  auto time_now = node_->now();
-  global_data_.setGlobalTraj(gl_traj, time_now);
-
-  // truncate a local trajectory
-
+void PlanningManager::initLocalTrajFromGlobal(const rclcpp::Time & time_now)
+{
+  // Truncate a local B-spline segment from the global polynomial for immediate execution.
   double dt, duration;
   Eigen::MatrixXd ctrl_pts = reparamLocalTraj(0.0, dt, duration);
   fast_planner::NonUniformBspline bspline(ctrl_pts, 3, dt);
@@ -192,10 +211,6 @@ bool PlanningManager::planGlobalTraj(const Eigen::Vector3d & start_pos)
   local_data_.position_traj_ = bspline;
   local_data_.start_time_ = time_now;
   RCLCPP_INFO(node_->get_logger(), "global trajectory generated.");
-
-  updateTrajInfo();
-
-  return true;
 }
 
 bool PlanningManager::topoReplan(bool collide)
