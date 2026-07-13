@@ -1,87 +1,107 @@
 esdf_map:
   ros__parameters:
-    esdf_map.resolution: 0.15
-    esdf_map.map_size_x: 20.0
-    esdf_map.map_size_y: 20.0
-    esdf_map.map_size_z: 5.0
+    # All parameters live under the "esdf_map" namespace. ROS 2 flattens this
+    # nested block into dotted names (e.g. esdf_map.resolution) to match the
+    # names declared in esdf_map.cpp.
+    esdf_map:
+      # ---- Map geometry ----
+      resolution: 0.15
+      map_size_x: 20.0
+      map_size_y: 20.0
+      map_size_z: 5.0
 
-    esdf_map.local_update_range_x: 5.0
-    esdf_map.local_update_range_y: 5.0
-    esdf_map.local_update_range_z: 3.0
-    esdf_map.obstacles_inflation: 0.30
+      # ---- Local update window & obstacle inflation ----
+      local_update_range_x: 5.0
+      local_update_range_y: 5.0
+      local_update_range_z: 3.0
+      obstacles_inflation: 0.30
+      local_bound_inflate: 1.0
+      local_map_margin: 1
+      ground_height: -1.0
 
-    esdf_map.fx: 458.0
-    esdf_map.fy: 458.0
-    esdf_map.cx: 320.0
-    esdf_map.cy: 240.0
+      # ---- Camera intrinsics (depth mode) ----
+      fx: 458.0
+      fy: 458.0
+      cx: 320.0
+      cy: 240.0
 
-    esdf_map.use_depth_filter: true
-    esdf_map.depth_filter_tolerance: 0.15
-    esdf_map.depth_filter_maxdist: 5.0
-    esdf_map.depth_filter_mindist: 0.2
-    esdf_map.depth_filter_margin: 2
-    esdf_map.k_depth_scaling_factor: 1000.0
-    esdf_map.skip_pixel: 4
+      # ---- Depth image filtering (depth mode) ----
+      use_depth_filter: true
+      depth_filter_tolerance: 0.15
+      depth_filter_maxdist: 5.0
+      depth_filter_mindist: 0.2
+      depth_filter_margin: 2
+      k_depth_scaling_factor: 1000.0
+      skip_pixel: 4
 
-    esdf_map.p_hit: 0.7
-    esdf_map.p_miss: 0.35
-    esdf_map.p_min: 0.12
-    esdf_map.p_max: 0.97
-    esdf_map.p_occ: 0.8
+      # ---- Occupancy probabilities (log-odds fusion) ----
+      p_hit: 0.7
+      p_miss: 0.35
+      p_min: 0.12
+      p_max: 0.97
+      p_occ: 0.8
 
-    esdf_map.min_ray_length: 0.2
-    esdf_map.max_ray_length: 5.0
+      # ---- Raycasting bounds ----
+      min_ray_length: 0.2
+      max_ray_length: 5.0
 
-    # /esdf_map/esdf is a 2D ESDF slice at this height.
-    esdf_map.esdf_slice_height: 0.5
-    esdf_map.visualization_truncate_height: 3.0
-    esdf_map.virtual_ceil_height: 3.0
+      # ---- Visualization heights ----
+      # /esdf_map/esdf is a 2D ESDF slice at this height.
+      esdf_slice_height: 0.5
+      visualization_truncate_height: 3.0
+      virtual_ceil_height: 3.0
 
-    # Optional 3D ESDF visualization topic: /esdf_map/esdf_3d
-    esdf_map.publish_esdf_3d: true
-    # Raw 3D signed ESDF distance topic for saving/planning: /esdf_map/esdf_distance
-    esdf_map.publish_esdf_distance: true
-    esdf_map.esdf_3d_local_only: true
-    esdf_map.esdf_3d_stride: 1
-    esdf_map.esdf_3d_min_distance: 0.0
-    esdf_map.esdf_3d_max_distance: 3.0
-    esdf_map.esdf_3d_publish_negative_distance: true
+      # ---- 3D ESDF publishing ----
+      # Optional 3D ESDF visualization topic: /esdf_map/esdf_3d
+      publish_esdf_3d: true
+      # Raw 3D signed ESDF distance topic for saving/planning: /esdf_map/esdf_distance
+      publish_esdf_distance: true
+      esdf_3d_local_only: true
+      esdf_3d_stride: 1
+      esdf_3d_min_distance: 0.0
+      esdf_3d_max_distance: 3.0
+      esdf_3d_publish_negative_distance: true
 
-    # Occupied cube mesh visualization topic: /esdf_map/occupied_map
-    esdf_map.publish_occupied_map: true
-    esdf_map.occupied_map_local_only: false
-    esdf_map.occupied_map_use_inflated: true
-    # TRIANGLE_LIST surface mesh. Larger mesh resolution connects sparse points into broader faces.
-    esdf_map.occupied_map_stride: 1
-    esdf_map.occupied_map_alpha: 0.85
-    esdf_map.occupied_map_mesh_resolution: 0.30
-    esdf_map.occupied_map_mesh_max_height_gap: 0.60
+      # ---- Occupied cube mesh (topic: /esdf_map/occupied_map) ----
+      publish_occupied_map: true
+      occupied_map_local_only: false
+      occupied_map_use_inflated: true
+      # TRIANGLE_LIST surface mesh. Larger mesh resolution connects sparse points into broader faces.
+      occupied_map_stride: 1
+      occupied_map_alpha: 0.85
+      occupied_map_mesh_resolution: 0.30
+      occupied_map_mesh_max_height_gap: 0.60
 
-    esdf_map.show_occ_time: false
-    esdf_map.show_esdf_time: false
-    esdf_map.pose_type: 2
-    esdf_map.frame_id: "world"
+      # ---- Debug / misc ----
+      show_occ_time: false
+      show_esdf_time: false
+      pose_type: 2
+      frame_id: "world"
 
-    # Input mode, choose exactly one:
-    #   vio   : use VIO pose + sparse VIO map points
-    #   depth : use depth image + VIO pose, no odometry topic is required
-    esdf_map.input_mode: "vio"
+      # ---- Input mode ----
+      # Choose exactly one:
+      #   vio   : use VIO pose + sparse VIO map points
+      #   depth : use depth image + VIO pose, no odometry topic is required
+      input_mode: "vio"
 
-    # Depth mode input. /pose is geometry_msgs/msg/PoseWithCovarianceStamped.
-    esdf_map.depth_topic: "/sensing/camera/realsense/depth"
-    esdf_map.pose_topic: "/localization/video_inertial_odom/pose"
+      # Depth mode input. /pose is geometry_msgs/msg/PoseWithCovarianceStamped.
+      depth_topic: "/sensing/camera/realsense/depth"
+      pose_topic: "/localization/video_inertial_odom/pose"
 
-    # Reserved only for old external cloud/odom helpers; not used by the default vio/depth modes.
-    esdf_map.odom_topic: "/esdf_map/odom"
-    esdf_map.cloud_topic: "/esdf_map/cloud_input"
+      # Reserved only for old external cloud/odom helpers; not used by the default vio/depth modes.
+      odom_topic: "/esdf_map/odom"
+      cloud_topic: "/esdf_map/cloud_input"
 
-    # VIO sparse-point input.
-    esdf_map.vio_pose_topic: "/localization/video_inertial_odom/pose"
-    esdf_map.vio_points_topic: "/localization/video_inertial_odom/points"
-    esdf_map.vio_points_ns_filter: "pts"
-    esdf_map.vio_points_accumulate: true
+      # VIO sparse-point input.
+      vio_pose_topic: "/localization/video_inertial_odom/pose"
+      vio_points_topic: "/localization/video_inertial_odom/points"
+      vio_points_ns_filter: "pts"
+      vio_points_accumulate: true
 
-
-    esdf_map.local_bound_inflate: 1.0
-    esdf_map.local_map_margin: 1
-    esdf_map.ground_height: -1.0
+      # ---- Preloaded binary map ----
+      # Read at startup by esdf_map_node. A relative directory is resolved against
+      # the installed package share directory (share/asr_sdm_esdf_map/maps).
+      # Set the directory to "" to disable preloading.
+      preload_map_directory: "maps"
+      preload_occupancy_filename: "occupancy.bin"
+      preload_esdf_filename: "esdf.bin"
