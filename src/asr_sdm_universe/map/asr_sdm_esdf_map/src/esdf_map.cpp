@@ -31,7 +31,8 @@
 #include <sstream>
 #include <unordered_map>
 
-namespace {
+namespace
+{
 
 std_msgs::msg::ColorRGBA heightColor(double value, double alpha)
 {
@@ -50,8 +51,6 @@ struct SurfaceVertex
   Eigen::Vector3d pos = Eigen::Vector3d::Zero();
   bool valid = false;
 };
-
-
 
 }  // namespace
 
@@ -157,10 +156,8 @@ void ESDFMap::initMap(const std::shared_ptr<rclcpp::Node> & nh)
   node_->declare_parameter("esdf_map.occupied_map_alpha", 0.85);
   node_->declare_parameter("esdf_map.occupied_map_mesh_resolution", 0.30);
   node_->declare_parameter("esdf_map.occupied_map_mesh_max_height_gap", 0.60);
-  mp_.publish_occupied_map_ =
-    node_->get_parameter("esdf_map.publish_occupied_map").as_bool();
-  mp_.occupied_map_local_only_ =
-    node_->get_parameter("esdf_map.occupied_map_local_only").as_bool();
+  mp_.publish_occupied_map_ = node_->get_parameter("esdf_map.publish_occupied_map").as_bool();
+  mp_.occupied_map_local_only_ = node_->get_parameter("esdf_map.occupied_map_local_only").as_bool();
   mp_.occupied_map_use_inflated_ =
     node_->get_parameter("esdf_map.occupied_map_use_inflated").as_bool();
   mp_.occupied_map_stride_ = node_->get_parameter("esdf_map.occupied_map_stride").as_int();
@@ -171,8 +168,7 @@ void ESDFMap::initMap(const std::shared_ptr<rclcpp::Node> & nh)
     node_->get_parameter("esdf_map.occupied_map_mesh_max_height_gap").as_double();
   mp_.occupied_map_stride_ = std::max(1, mp_.occupied_map_stride_);
   mp_.occupied_map_alpha_ = std::max(0.0, std::min(1.0, mp_.occupied_map_alpha_));
-  mp_.occupied_map_mesh_resolution_ =
-    std::max(mp_.resolution_, mp_.occupied_map_mesh_resolution_);
+  mp_.occupied_map_mesh_resolution_ = std::max(mp_.resolution_, mp_.occupied_map_mesh_resolution_);
   mp_.occupied_map_mesh_max_height_gap_ =
     std::max(mp_.resolution_, mp_.occupied_map_mesh_max_height_gap_);
 
@@ -188,7 +184,8 @@ void ESDFMap::initMap(const std::shared_ptr<rclcpp::Node> & nh)
 
   node_->declare_parameter("esdf_map.input_mode", std::string("vio"));
   node_->declare_parameter("esdf_map.depth_topic", std::string("/sensing/camera/realsense/depth"));
-  node_->declare_parameter("esdf_map.pose_topic", std::string("/localization/video_inertial_odom/pose"));
+  node_->declare_parameter(
+    "esdf_map.pose_topic", std::string("/localization/video_inertial_odom/pose"));
   node_->declare_parameter("esdf_map.odom_topic", std::string("/esdf_map/odom"));
   node_->declare_parameter("esdf_map.cloud_topic", std::string("/esdf_map/cloud_input"));
   node_->declare_parameter(
@@ -211,11 +208,11 @@ void ESDFMap::initMap(const std::shared_ptr<rclcpp::Node> & nh)
   if (mp_.input_mode_ != "vio" && mp_.input_mode_ != "depth") {
     RCLCPP_WARN(
       node_->get_logger(),
-      "Unsupported esdf_map.input_mode='%s'. Only 'vio' and 'depth' are valid. Falling back to 'vio'.",
+      "Unsupported esdf_map.input_mode='%s'. Only 'vio' and 'depth' are valid. Falling back to "
+      "'vio'.",
       mp_.input_mode_.c_str());
     mp_.input_mode_ = "vio";
   }
-
 
   node_->declare_parameter("esdf_map.local_bound_inflate", 1.0);
   node_->declare_parameter("esdf_map.local_map_margin", 1);
@@ -953,13 +950,9 @@ void ESDFMap::updateESDFCallback()
   md_.esdf_need_update_ = false;
 }
 
-
-
-
 void ESDFMap::depthPoseCallback(
   sensor_msgs::msg::Image::ConstSharedPtr img, geometry_msgs::msg::PoseStamped::ConstSharedPtr pose)
 {
-
   /* get depth image */
   cv_bridge::CvImagePtr cv_ptr;
   cv_ptr = cv_bridge::toCvCopy(img, img->encoding);
@@ -1003,7 +996,6 @@ void ESDFMap::odomCallback(nav_msgs::msg::Odometry::ConstSharedPtr odom)
 
 void ESDFMap::cloudCallback(sensor_msgs::msg::PointCloud2::ConstSharedPtr msg)
 {
-
   pcl::PointCloud<pcl::PointXYZ> latest_cloud;
   pcl::fromROSMsg(*msg, latest_cloud);
   insertPointCloud(latest_cloud);
@@ -1011,13 +1003,12 @@ void ESDFMap::cloudCallback(sensor_msgs::msg::PointCloud2::ConstSharedPtr msg)
 
 void ESDFMap::vioPoseCallback(geometry_msgs::msg::PoseWithCovarianceStamped::ConstSharedPtr pose)
 {
-
   md_.camera_pos_(0) = pose->pose.pose.position.x;
   md_.camera_pos_(1) = pose->pose.pose.position.y;
   md_.camera_pos_(2) = pose->pose.pose.position.z;
   md_.camera_q_ = Eigen::Quaterniond(
-    pose->pose.pose.orientation.w, pose->pose.pose.orientation.x,
-    pose->pose.pose.orientation.y, pose->pose.pose.orientation.z);
+    pose->pose.pose.orientation.w, pose->pose.pose.orientation.x, pose->pose.pose.orientation.y,
+    pose->pose.pose.orientation.z);
   if (md_.camera_q_.norm() < 1e-6) md_.camera_q_ = Eigen::Quaterniond::Identity();
   md_.camera_q_.normalize();
 
@@ -1048,11 +1039,10 @@ void ESDFMap::vioPointsCallback(visualization_msgs::msg::Marker::ConstSharedPtr 
 
   if (!mp_.vio_points_ns_filter_.empty() && marker->ns != mp_.vio_points_ns_filter_) return;
 
-  Eigen::Vector3d t(
-    marker->pose.position.x, marker->pose.position.y, marker->pose.position.z);
+  Eigen::Vector3d t(marker->pose.position.x, marker->pose.position.y, marker->pose.position.z);
   Eigen::Quaterniond q(
-    marker->pose.orientation.w, marker->pose.orientation.x,
-    marker->pose.orientation.y, marker->pose.orientation.z);
+    marker->pose.orientation.w, marker->pose.orientation.x, marker->pose.orientation.y,
+    marker->pose.orientation.z);
   if (q.norm() < 1e-6) q = Eigen::Quaterniond::Identity();
   q.normalize();
 
@@ -1099,7 +1089,6 @@ void ESDFMap::vioPointsCallback(visualization_msgs::msg::Marker::ConstSharedPtr 
 
 void ESDFMap::insertPointCloud(const pcl::PointCloud<pcl::PointXYZ> & latest_cloud)
 {
-
   if (!md_.has_odom_) {
     return;
   }
@@ -1316,9 +1305,9 @@ void ESDFMap::publishOccupiedMap()
 
   if (mp_.occupied_map_local_only_) {
     min_cut = md_.local_bound_min_ -
-      Eigen::Vector3i(mp_.local_map_margin_, mp_.local_map_margin_, mp_.local_map_margin_);
+              Eigen::Vector3i(mp_.local_map_margin_, mp_.local_map_margin_, mp_.local_map_margin_);
     max_cut = md_.local_bound_max_ +
-      Eigen::Vector3i(mp_.local_map_margin_, mp_.local_map_margin_, mp_.local_map_margin_);
+              Eigen::Vector3i(mp_.local_map_margin_, mp_.local_map_margin_, mp_.local_map_margin_);
   } else {
     min_cut = mp_.map_min_idx_;
     max_cut = mp_.map_max_idx_;
@@ -1346,8 +1335,7 @@ void ESDFMap::publishOccupiedMap()
   };
 
   auto block_key = [](int x, int y, int z) -> long long {
-    return (static_cast<long long>(x) << 42) ^
-           (static_cast<long long>(y) << 21) ^
+    return (static_cast<long long>(x) << 42) ^ (static_cast<long long>(y) << 21) ^
            static_cast<long long>(z);
   };
 
@@ -1360,16 +1348,17 @@ void ESDFMap::publishOccupiedMap()
     mk.colors.push_back(color);
   };
 
-  auto add_tri = [&](const Eigen::Vector3d & a, const Eigen::Vector3d & b,
-                     const Eigen::Vector3d & c, const std_msgs::msg::ColorRGBA & color) {
+  auto add_tri = [&](
+                   const Eigen::Vector3d & a, const Eigen::Vector3d & b, const Eigen::Vector3d & c,
+                   const std_msgs::msg::ColorRGBA & color) {
     add_vertex(a, color);
     add_vertex(b, color);
     add_vertex(c, color);
   };
 
-  auto add_quad = [&](const Eigen::Vector3d & a, const Eigen::Vector3d & b,
-                      const Eigen::Vector3d & c, const Eigen::Vector3d & d,
-                      const std_msgs::msg::ColorRGBA & color) {
+  auto add_quad = [&](
+                    const Eigen::Vector3d & a, const Eigen::Vector3d & b, const Eigen::Vector3d & c,
+                    const Eigen::Vector3d & d, const std_msgs::msg::ColorRGBA & color) {
     add_tri(a, b, c, color);
     add_tri(a, c, d, color);
   };
@@ -1435,7 +1424,6 @@ void ESDFMap::publishOccupiedMap()
 
   occupied_map_pub_->publish(mk);
 }
-
 
 void ESDFMap::publishUnknown()
 {
@@ -1582,7 +1570,6 @@ void ESDFMap::publishESDF()
   // ROS_INFO("pub esdf");
 }
 
-
 void ESDFMap::publishESDF3D()
 {
   if (!md_.has_odom_ || !md_.has_cloud_) return;
@@ -1594,10 +1581,10 @@ void ESDFMap::publishESDF3D()
   Eigen::Vector3i max_cut;
 
   if (mp_.esdf_3d_local_only_) {
-    min_cut = md_.local_bound_min_ - Eigen::Vector3i(
-      mp_.local_map_margin_, mp_.local_map_margin_, mp_.local_map_margin_);
-    max_cut = md_.local_bound_max_ + Eigen::Vector3i(
-      mp_.local_map_margin_, mp_.local_map_margin_, mp_.local_map_margin_);
+    min_cut = md_.local_bound_min_ -
+              Eigen::Vector3i(mp_.local_map_margin_, mp_.local_map_margin_, mp_.local_map_margin_);
+    max_cut = md_.local_bound_max_ +
+              Eigen::Vector3i(mp_.local_map_margin_, mp_.local_map_margin_, mp_.local_map_margin_);
   } else {
     min_cut = mp_.map_min_idx_;
     max_cut = mp_.map_max_idx_;
@@ -1645,7 +1632,6 @@ void ESDFMap::publishESDF3D()
   esdf_3d_pub_->publish(cloud_msg);
 }
 
-
 void ESDFMap::publishESDFDistance()
 {
   if (!md_.has_odom_ || !md_.has_cloud_) return;
@@ -1657,10 +1643,10 @@ void ESDFMap::publishESDFDistance()
   Eigen::Vector3i max_cut;
 
   if (mp_.esdf_3d_local_only_) {
-    min_cut = md_.local_bound_min_ - Eigen::Vector3i(
-      mp_.local_map_margin_, mp_.local_map_margin_, mp_.local_map_margin_);
-    max_cut = md_.local_bound_max_ + Eigen::Vector3i(
-      mp_.local_map_margin_, mp_.local_map_margin_, mp_.local_map_margin_);
+    min_cut = md_.local_bound_min_ -
+              Eigen::Vector3i(mp_.local_map_margin_, mp_.local_map_margin_, mp_.local_map_margin_);
+    max_cut = md_.local_bound_max_ +
+              Eigen::Vector3i(mp_.local_map_margin_, mp_.local_map_margin_, mp_.local_map_margin_);
   } else {
     min_cut = mp_.map_min_idx_;
     max_cut = mp_.map_max_idx_;
@@ -1791,7 +1777,6 @@ void ESDFMap::getSurroundPts(
 void ESDFMap::depthOdomCallback(
   sensor_msgs::msg::Image::ConstSharedPtr img, nav_msgs::msg::Odometry::ConstSharedPtr odom)
 {
-
   /* get pose */
   md_.camera_pos_(0) = odom->pose.pose.position.x;
   md_.camera_pos_(1) = odom->pose.pose.position.y;
@@ -1839,19 +1824,17 @@ void ESDFMap::depthCallback(sensor_msgs::msg::Image::ConstSharedPtr img)
   }
 }
 
-
 void ESDFMap::poseCallback(geometry_msgs::msg::PoseStamped::ConstSharedPtr pose)
 {
   md_.camera_pos_(0) = pose->pose.position.x;
   md_.camera_pos_(1) = pose->pose.position.y;
   md_.camera_pos_(2) = pose->pose.position.z;
   md_.camera_q_ = Eigen::Quaterniond(
-    pose->pose.orientation.w, pose->pose.orientation.x,
-    pose->pose.orientation.y, pose->pose.orientation.z);
+    pose->pose.orientation.w, pose->pose.orientation.x, pose->pose.orientation.y,
+    pose->pose.orientation.z);
   if (md_.camera_q_.norm() < 1e-6) md_.camera_q_ = Eigen::Quaterniond::Identity();
   md_.camera_q_.normalize();
   md_.has_odom_ = isInMap(md_.camera_pos_);
 }
-
 
 // ESDFMap
