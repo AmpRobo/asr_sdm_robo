@@ -24,6 +24,7 @@ endif()
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall -O3")
 
 find_package(ament_cmake REQUIRED)
+find_package(ament_index_cpp REQUIRED)
 find_package(rclcpp REQUIRED)
 find_package(sensor_msgs REQUIRED)
 find_package(geometry_msgs REQUIRED)
@@ -54,6 +55,7 @@ target_include_directories(asr_sdm_esdf_map PUBLIC
 
 ament_target_dependencies(asr_sdm_esdf_map
   rclcpp
+  ament_index_cpp
   sensor_msgs
   geometry_msgs
   nav_msgs
@@ -130,6 +132,7 @@ ament_export_targets(export_${PROJECT_NAME})
 ament_export_include_directories(include)
 ament_export_dependencies(
   rclcpp
+  ament_index_cpp
   sensor_msgs
   geometry_msgs
   nav_msgs

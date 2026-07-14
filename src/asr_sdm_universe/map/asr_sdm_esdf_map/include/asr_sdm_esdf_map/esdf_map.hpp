@@ -96,6 +96,11 @@ struct MappingParameters {
   string vio_pose_topic_, vio_points_topic_, vio_points_ns_filter_;
   bool vio_points_accumulate_;
 
+  /* preloaded binary map files */
+  string preload_map_directory_;
+  string preload_occupancy_filename_;
+  string preload_esdf_filename_;
+
   /* camera parameters */
   double cx_, cy_, fx_, fy_;
 
@@ -247,6 +252,11 @@ public:
   void checkDist();
   bool hasDepthObservation();
   bool odomValid();
+
+  // preloaded binary map (occupancy.bin / esdf.bin) loading
+  bool loadPreloadedMaps();
+  bool loadOccupancyBinary(const std::string& path, std::string& status);
+  bool loadEsdfBinary(const std::string& path, std::string& status);
   void getRegion(Eigen::Vector3d& ori, Eigen::Vector3d& size);
   double getResolution();
   Eigen::Vector3d getOrigin();

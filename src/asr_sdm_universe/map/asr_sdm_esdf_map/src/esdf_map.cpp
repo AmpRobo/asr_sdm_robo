@@ -23,9 +23,15 @@
 
 #include "asr_sdm_esdf_map/esdf_map.hpp"
 
+#include <ament_index_cpp/get_package_share_directory.hpp>
+
 #include <algorithm>
 #include <chrono>
 #include <cmath>
+#include <cstdint>
+#include <cstring>
+#include <filesystem>
+#include <fstream>
 #include <functional>
 #include <limits>
 #include <sstream>
@@ -51,6 +57,41 @@ struct SurfaceVertex
   Eigen::Vector3d pos = Eigen::Vector3d::Zero();
   bool valid = false;
 };
+
+// Binary map file header written by the map export tooling and consumed here as
+// well as by asr_sdm_guidance_planner. Keep the layout in sync across packages.
+struct BinaryCloudHeader
+{
+  char magic[16];
+  uint32_t version{0};
+  uint32_t map_type{0};
+  int64_t stamp_sec{0};
+  uint32_t stamp_nanosec{0};
+  uint32_t floats_per_record{0};
+  uint64_t point_count{0};
+  uint32_t frame_id_length{0};
+};
+
+bool magicMatches(const char magic[16], const char * expected)
+{
+  char expected_magic[16] = {};
+  const auto copy_len = std::min(std::strlen(expected), sizeof(expected_magic));
+  std::memcpy(expected_magic, expected, copy_len);
+  return std::memcmp(magic, expected_magic, sizeof(expected_magic)) == 0;
+}
+
+bool readBinaryHeader(std::ifstream & ifs, BinaryCloudHeader & header)
+{
+  ifs.read(header.magic, sizeof(header.magic));
+  ifs.read(reinterpret_cast<char *>(&header.version), sizeof(header.version));
+  ifs.read(reinterpret_cast<char *>(&header.map_type), sizeof(header.map_type));
+  ifs.read(reinterpret_cast<char *>(&header.stamp_sec), sizeof(header.stamp_sec));
+  ifs.read(reinterpret_cast<char *>(&header.stamp_nanosec), sizeof(header.stamp_nanosec));
+  ifs.read(reinterpret_cast<char *>(&header.floats_per_record), sizeof(header.floats_per_record));
+  ifs.read(reinterpret_cast<char *>(&header.point_count), sizeof(header.point_count));
+  ifs.read(reinterpret_cast<char *>(&header.frame_id_length), sizeof(header.frame_id_length));
+  return ifs.good();
+}
 
 }  // namespace
 
@@ -205,6 +246,14 @@ void ESDFMap::initMap(const std::shared_ptr<rclcpp::Node> & nh)
   mp_.vio_points_ns_filter_ = node_->get_parameter("esdf_map.vio_points_ns_filter").as_string();
   mp_.vio_points_accumulate_ = node_->get_parameter("esdf_map.vio_points_accumulate").as_bool();
 
+  node_->declare_parameter("esdf_map.preload_map_directory", std::string("maps"));
+  node_->declare_parameter("esdf_map.preload_occupancy_filename", std::string("occupancy.bin"));
+  node_->declare_parameter("esdf_map.preload_esdf_filename", std::string("esdf.bin"));
+  mp_.preload_map_directory_ = node_->get_parameter("esdf_map.preload_map_directory").as_string();
+  mp_.preload_occupancy_filename_ =
+    node_->get_parameter("esdf_map.preload_occupancy_filename").as_string();
+  mp_.preload_esdf_filename_ = node_->get_parameter("esdf_map.preload_esdf_filename").as_string();
+
   if (mp_.input_mode_ != "vio" && mp_.input_mode_ != "depth") {
     RCLCPP_WARN(
       node_->get_logger(),
@@ -271,6 +320,9 @@ void ESDFMap::initMap(const std::shared_ptr<rclcpp::Node> & nh)
   md_.proj_points_.resize(640 * 480 / mp_.skip_pixel_ / mp_.skip_pixel_);
   md_.proj_points_cnt = 0;
 
+  /* load preloaded occupancy/esdf binary maps into the data buffers */
+  loadPreloadedMaps();
+
   /* init callback: vio and depth are mutually exclusive input modes. */
 
   if (mp_.input_mode_ == "depth") {
@@ -335,6 +387,208 @@ void ESDFMap::initMap(const std::shared_ptr<rclcpp::Node> & nh)
   rand_noise2_ = normal_distribution<double>(0, 0.2);
   random_device rd;
   eng_ = default_random_engine(rd());
+}
+
+bool ESDFMap::loadPreloadedMaps()
+{
+  if (mp_.preload_map_directory_.empty()) {
+    RCLCPP_INFO(node_->get_logger(), "esdf_map preload disabled (empty preload_map_directory).");
+    return false;
+  }
+
+  // Resolve the map directory. Absolute paths are used verbatim; relative paths
+  // are resolved against the installed package share directory
+  // (share/asr_sdm_esdf_map/<preload_map_directory>).
+  std::filesystem::path dir(mp_.preload_map_directory_);
+  if (!dir.is_absolute()) {
+    try {
+      dir = std::filesystem::path(
+              ament_index_cpp::get_package_share_directory("asr_sdm_esdf_map")) /
+            dir;
+    } catch (const std::exception & e) {
+      RCLCPP_WARN(
+        node_->get_logger(), "Failed to resolve package share directory for preload maps: %s",
+        e.what());
+    }
+  }
+
+  const std::string occupancy_path = (dir / mp_.preload_occupancy_filename_).string();
+  const std::string esdf_path = (dir / mp_.preload_esdf_filename_).string();
+
+  // Start from an empty local update region and grow it to cover the voxels that
+  // are actually populated by the preloaded map.
+  md_.local_bound_min_ = mp_.map_max_idx_;
+  md_.local_bound_max_ = mp_.map_min_idx_;
+
+  std::string occupancy_status;
+  const bool occupancy_ok = loadOccupancyBinary(occupancy_path, occupancy_status);
+  if (occupancy_ok) {
+    RCLCPP_INFO(node_->get_logger(), "%s", occupancy_status.c_str());
+  } else {
+    RCLCPP_WARN(node_->get_logger(), "%s", occupancy_status.c_str());
+  }
+
+  std::string esdf_status;
+  const bool esdf_ok = loadEsdfBinary(esdf_path, esdf_status);
+  if (esdf_ok) {
+    RCLCPP_INFO(node_->get_logger(), "%s", esdf_status.c_str());
+  } else {
+    RCLCPP_WARN(node_->get_logger(), "%s", esdf_status.c_str());
+  }
+
+  if (!occupancy_ok && !esdf_ok) {
+    md_.local_bound_min_ = Eigen::Vector3i::Zero();
+    md_.local_bound_max_ = mp_.map_voxel_num_ - Eigen::Vector3i::Ones();
+    return false;
+  }
+
+  boundIndex(md_.local_bound_min_);
+  boundIndex(md_.local_bound_max_);
+
+  return true;
+}
+
+bool ESDFMap::loadOccupancyBinary(const std::string & path, std::string & status)
+{
+  std::ifstream ifs(path, std::ios::binary);
+  if (!ifs.is_open()) {
+    status = "esdf_map: failed to open occupancy binary file: " + path;
+    return false;
+  }
+
+  BinaryCloudHeader header;
+  if (!readBinaryHeader(ifs, header)) {
+    status = "esdf_map: invalid occupancy binary header: " + path;
+    return false;
+  }
+
+  if (
+    !magicMatches(header.magic, "ASR_OCC_BIN_V1") || header.version != 1U ||
+    header.map_type != 1U || header.floats_per_record != 3U) {
+    status = "esdf_map: unsupported occupancy binary format: " + path;
+    return false;
+  }
+
+  if (header.frame_id_length > 4096U) {
+    status = "esdf_map: invalid frame_id length in occupancy binary: " + path;
+    return false;
+  }
+
+  std::string file_frame(header.frame_id_length, '\0');
+  if (header.frame_id_length > 0U) {
+    ifs.read(file_frame.data(), static_cast<std::streamsize>(header.frame_id_length));
+  }
+
+  constexpr uint64_t kMaxReasonablePoints = 20000000ULL;
+  if (header.point_count > kMaxReasonablePoints) {
+    status = "esdf_map: too many points in occupancy binary: " + std::to_string(header.point_count);
+    return false;
+  }
+
+  size_t loaded = 0;
+  for (uint64_t i = 0; i < header.point_count; ++i) {
+    float xyz[3];
+    ifs.read(reinterpret_cast<char *>(xyz), sizeof(xyz));
+    if (!ifs.good()) {
+      status = "esdf_map: unexpected EOF while reading occupancy binary: " + path;
+      return false;
+    }
+    if (!std::isfinite(xyz[0]) || !std::isfinite(xyz[1]) || !std::isfinite(xyz[2])) {
+      continue;
+    }
+
+    Eigen::Vector3d pos(xyz[0], xyz[1], xyz[2]);
+    Eigen::Vector3i id;
+    posToIndex(pos, id);
+    if (!isInMap(id)) continue;
+
+    const int idx = toAddress(id);
+    // Mark the voxel occupied in both the log-odds buffer (used by getOccupancy)
+    // and the inflated buffer (used by planners / occupied map publishing).
+    md_.occupancy_buffer_[idx] = mp_.clamp_max_log_;
+    md_.occupancy_buffer_inflate_[idx] = 1;
+
+    md_.local_bound_min_ = md_.local_bound_min_.cwiseMin(id);
+    md_.local_bound_max_ = md_.local_bound_max_.cwiseMax(id);
+    ++loaded;
+  }
+
+  status = "esdf_map: loaded occupancy binary frame=" + file_frame +
+           ", cached_voxels=" + std::to_string(loaded) + " from " + path;
+  return loaded > 0;
+}
+
+bool ESDFMap::loadEsdfBinary(const std::string & path, std::string & status)
+{
+  std::ifstream ifs(path, std::ios::binary);
+  if (!ifs.is_open()) {
+    status = "esdf_map: failed to open ESDF binary file: " + path;
+    return false;
+  }
+
+  BinaryCloudHeader header;
+  if (!readBinaryHeader(ifs, header)) {
+    status = "esdf_map: invalid ESDF binary header: " + path;
+    return false;
+  }
+
+  if (
+    !magicMatches(header.magic, "ASR_ESDF_BIN_V1") || header.version != 1U ||
+    header.map_type != 2U || header.floats_per_record != 4U) {
+    status = "esdf_map: unsupported ESDF binary format: " + path;
+    return false;
+  }
+
+  if (header.frame_id_length > 4096U) {
+    status = "esdf_map: invalid frame_id length in ESDF binary: " + path;
+    return false;
+  }
+
+  std::string file_frame(header.frame_id_length, '\0');
+  if (header.frame_id_length > 0U) {
+    ifs.read(file_frame.data(), static_cast<std::streamsize>(header.frame_id_length));
+  }
+
+  constexpr uint64_t kMaxReasonablePoints = 200000000ULL;
+  if (header.point_count > kMaxReasonablePoints) {
+    status = "esdf_map: too many points in ESDF binary: " + std::to_string(header.point_count);
+    return false;
+  }
+
+  size_t loaded = 0;
+  for (uint64_t i = 0; i < header.point_count; ++i) {
+    float xyzi[4];
+    ifs.read(reinterpret_cast<char *>(xyzi), sizeof(xyzi));
+    if (!ifs.good()) {
+      status = "esdf_map: unexpected EOF while reading ESDF binary: " + path;
+      return false;
+    }
+    if (
+      !std::isfinite(xyzi[0]) || !std::isfinite(xyzi[1]) || !std::isfinite(xyzi[2]) ||
+      !std::isfinite(xyzi[3])) {
+      continue;
+    }
+
+    Eigen::Vector3d pos(xyzi[0], xyzi[1], xyzi[2]);
+    Eigen::Vector3i id;
+    posToIndex(pos, id);
+    if (!isInMap(id)) continue;
+
+    const int idx = toAddress(id);
+    const double dist = static_cast<double>(xyzi[3]);
+    // esdf.bin stores the real signed distance (see esdf_distance topic). Cache it
+    // into distance_buffer_all_, which is what getDistance() queries.
+    md_.distance_buffer_all_[idx] = dist;
+    md_.distance_buffer_[idx] = std::max(0.0, dist);
+
+    md_.local_bound_min_ = md_.local_bound_min_.cwiseMin(id);
+    md_.local_bound_max_ = md_.local_bound_max_.cwiseMax(id);
+    ++loaded;
+  }
+
+  status = "esdf_map: loaded ESDF binary frame=" + file_frame +
+           ", cached_voxels=" + std::to_string(loaded) + " from " + path;
+  return loaded > 0;
 }
 
 void ESDFMap::resetBuffer()
