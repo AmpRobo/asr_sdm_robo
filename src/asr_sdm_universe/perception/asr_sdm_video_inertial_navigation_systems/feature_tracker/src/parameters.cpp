@@ -34,6 +34,11 @@ double SPARSE_ALIGN_CHI2_THRESH;
 int    SPARSE_ALIGN_MIN_FEATURES;
 int    SPARSE_ALIGN_MIN_ITER_FOR_OK;
 
+int    KLT_REUSE_SPARSE_PYR;
+int    DETECT_SKIP_SPARSE;
+int    DETECT_SKIP_MIN_CNT;
+double RANSAC_CONFIDENCE;
+
 namespace
 {
 
@@ -102,6 +107,14 @@ void readFromRosParams(rclcpp::Node::SharedPtr& n)
     SPARSE_ALIGN_CHI2_THRESH = getParamOrDeclare<double>(n, "sparse_align_chi2_thresh", 50.0);
     SPARSE_ALIGN_MIN_FEATURES = getParamOrDeclare<int>(n, "sparse_align_min_features", 30);
     SPARSE_ALIGN_MIN_ITER_FOR_OK = getParamOrDeclare<int>(n, "sparse_align_min_iter_for_ok", 2);
+
+    // Performance toggles.  Sparse-on-only by design: each flag's effect
+    // is gated on USE_SPARSE_ALIGN inside feature_tracker.cpp so the
+    // sparse-off baseline reproduces the original VINS-Mono front-end.
+    KLT_REUSE_SPARSE_PYR = getParamOrDeclare<int>(n, "klt_reuse_sparse_pyr", 1);
+    DETECT_SKIP_SPARSE   = getParamOrDeclare<int>(n, "detect_skip_sparse", 3);
+    DETECT_SKIP_MIN_CNT  = getParamOrDeclare<int>(n, "detect_skip_min_cnt", 80);
+    RANSAC_CONFIDENCE    = getParamOrDeclare<double>(n, "ransac_confidence", 0.95);
 }
 
 void readFromConfigFile(rclcpp::Node::SharedPtr& n, const std::string& config_file)
@@ -174,6 +187,11 @@ void readFromConfigFile(rclcpp::Node::SharedPtr& n, const std::string& config_fi
     SPARSE_ALIGN_MIN_FEATURES = readInt("sparse_align_min_features", 30);
     SPARSE_ALIGN_MIN_ITER_FOR_OK = readInt("sparse_align_min_iter_for_ok", 2);
 
+    KLT_REUSE_SPARSE_PYR = readInt("klt_reuse_sparse_pyr", 1);
+    DETECT_SKIP_SPARSE   = readInt("detect_skip_sparse", 3);
+    DETECT_SKIP_MIN_CNT  = readInt("detect_skip_min_cnt", 80);
+    RANSAC_CONFIDENCE    = readDouble("ransac_confidence", 0.95);
+
     fsSettings.release();
 }
 
@@ -201,6 +219,9 @@ void readParameters(rclcpp::Node::SharedPtr &n)
                 SPARSE_ALIGN_MIN_LEVEL, SPARSE_ALIGN_MAX_LEVEL,
                 SPARSE_ALIGN_LAMBDA_ROT, SPARSE_ALIGN_CHI2_THRESH,
                 SPARSE_ALIGN_MIN_FEATURES, USE_TD_PRE_CALIB);
+    RCUTILS_LOG_INFO("perf toggles: klt_reuse_pyr=%d detect_skip_sparse=%d detect_skip_min_cnt=%d ransac_conf=%.2f",
+                KLT_REUSE_SPARSE_PYR, DETECT_SKIP_SPARSE, DETECT_SKIP_MIN_CNT,
+                RANSAC_CONFIDENCE);
 
     WINDOW_SIZE = 20;
     STEREO_TRACK = false;

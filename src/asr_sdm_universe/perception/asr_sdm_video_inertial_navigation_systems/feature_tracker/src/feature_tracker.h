@@ -92,6 +92,9 @@ class FeatureTracker
     Eigen::Matrix3d R_prev_cur_ = Eigen::Matrix3d::Identity();
     bool have_imu_prior_ = false;
 
+    // detect_skip_sparse state: counter of frames since the last detect.
+    int detect_skip_cnt_ = 0;
+
     // Per-session sparse-align statistics (logged every 10 frames).
     int n_sparse_frames_   = 0;
     int n_sparse_success_  = 0;
@@ -107,6 +110,14 @@ class FeatureTracker
     int n_klt_l_           = 0;
     int n_klt_sparse_prior_ = 0;
     double n_klt_cost_sum_ = 0.0;
+
+    // Per-session whole-readImage statistics (logged every 50 frames).
+    // Mirrors the "Image Tracking Time [ms/frame]" column of
+    // SD-VIS Table 2 (Liu et al., Sensors 2020) so SPA-Lite can be
+    // compared apples-to-apples with ORB-SLAM2 / VINS-Mono /
+    // VINS-Fusion / SD-VIS on EuRoC.
+    int n_total_calls_     = 0;
+    double n_total_cost_sum_ = 0.0;
 
     static int n_id;
 };

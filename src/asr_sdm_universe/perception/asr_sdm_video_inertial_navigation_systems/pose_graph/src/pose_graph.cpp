@@ -345,7 +345,7 @@ int PoseGraph::detectLoop(KeyFrame* keyframe, int frame_index)
         }
     }
     // a good match with its nerghbour
-    if (ret.size() >= 1 &&ret[0].Score > 0.05)
+    if (ret.size() >= 1 && ret[0].Score > 0.05)
         for (unsigned int i = 1; i < ret.size(); i++)
         {
             //if (ret[i].Score > ret[0].Score * 0.3)
@@ -353,7 +353,6 @@ int PoseGraph::detectLoop(KeyFrame* keyframe, int frame_index)
             {
                 find_loop = true;
                 int tmp_index = ret[i].Id;
-                if (DEBUG_IMAGE && 0)
                 {
                     auto it = image_pool.find(tmp_index);
                     cv::Mat tmp_image = (it->second).clone();

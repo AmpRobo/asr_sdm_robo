@@ -293,3 +293,43 @@ ros2 launch vins_estimator vins_launch.py
 ros2 launch vins_estimator vins_launch.py vins_launch_config:=vins_d435i.yaml
 ```
 `enable_sparse: true` is configured in vins_estimator/config/.yaml, default is `true`.
+
+
+实验 1：sparse ON（当前 enable_sparse: true）
+先清理旧 CSV，然后启动 VINS：
+
+# 终端 1 — 启动 VINS
+cd /home/lxy/asr_sdm_robo
+source install/setup.bash
+rm -f output/vins_result_loop.csv
+ros2 launch vins_estimator vins_launch.py
+# 终端 2 — 播放 bag
+cd /home/lxy/asr_sdm_robo
+source install/setup.bash
+ros2 bag play datasheet/MH_03_medium_ros2/MH_03_medium_ros2.db3
+等 bag 播完（约 135 秒），再等 3 秒让 pose_graph 写完，然后 Ctrl+C 两个终端。
+
+保存 sparse ON 的结果：
+
+cp /home/lxy/asr_sdm_robo/output/vins_result_loop.csv /home/lxy/asr_sdm_robo/output/sparse_on/vins_sparse_on.csv
+wc -l /home/lxy/asr_sdm_robo/output/sparse_on/vins_sparse_on.csv
+实验 2：sparse OFF
+修改 enable_sparse: false：
+
+# 终端 1 — 启动 VINS（sparse OFF）
+cd /home/lxy/asr_sdm_robo
+sed -i 's/enable_sparse: true/enable_sparse: false/' src/asr_sdm_universe/perception/asr_sdm_video_inertial_navigation_systems/vins_estimator/config/vins.yaml
+# 重新编译（也可以直接改 euroc_config.yaml 的 use_sparse_align 参数）
+然后重复上面的 VINS 启动 + bag 播放流程，最后：
+
+cp /home/lxy/asr_sdm_robo/output/vins_result_loop.csv /home/lxy/asr_sdm_robo/output/sparse_off/vins_sparse_off.csv
+实验 3：重新绘图
+两个 CSV 都就位后：
+
+cd /home/lxy/asr_sdm_robo
+python3 experiments/sparse_compare/scripts/plot_compare.py
+
+cd /home/lxy/asr_sdm_robo && python3 experiments/sparse_compare/scripts/plot_compare.py --seq MH04 --align-mode gt_align --out output/MH04/gt_align_test 2>&1
+
+python3 experiments/sparse_compare/scripts/track_perf.py   --seq MH01   --mode sparse_off   --bag datasheet/MH_04_difficult_ros2/MH_04_dif
+ficult_ros2.db3   --runs 1   --bin-start 500   --bin-count 3
