@@ -1,38 +1,43 @@
+from pathlib import Path
+
 from launch import LaunchDescription
-from launch.actions import DeclareLaunchArgument
-from launch.substitutions import Command, LaunchConfiguration, PathJoinSubstitution
+from launch.actions import DeclareLaunchArgument, OpaqueFunction
+from launch.substitutions import LaunchConfiguration, PathJoinSubstitution
 from launch_ros.actions import Node
-from launch_ros.parameter_descriptions import ParameterValue
 from launch_ros.substitutions import FindPackageShare
 
 
 PACKAGE_NAME = 'asr_sdm'
 
 
-def generate_launch_description():
-    model = LaunchConfiguration('model')
-    use_sim_time = LaunchConfiguration('use_sim_time')
+def launch_setup(context):
+    model_path = Path(LaunchConfiguration('model').perform(context))
 
-    default_model = PathJoinSubstitution([
-        FindPackageShare(PACKAGE_NAME),
-        'urdf',
-        'asr_sdm_wrapper.urdf.xacro',
-    ])
+    if model_path.suffix == '.xacro':
+        import xacro
 
-    robot_description = ParameterValue(
-        Command(['xacro ', model]),
-        value_type=str,
-    )
+        robot_description = xacro.process_file(str(model_path)).toxml()
+    else:
+        robot_description = model_path.read_text(encoding='utf-8')
 
-    robot_state_publisher = Node(
+    return [Node(
         package='robot_state_publisher',
         executable='robot_state_publisher',
         parameters=[{
             'robot_description': robot_description,
-            'use_sim_time': use_sim_time,
+            'use_sim_time': LaunchConfiguration('use_sim_time'),
         }],
         output='screen',
-    )
+    )]
+
+
+def generate_launch_description():
+    default_model = PathJoinSubstitution([
+        FindPackageShare(PACKAGE_NAME),
+        'urdf',
+        'generated',
+        'asr_sdm_segments_4.urdf',
+    ])
 
     return LaunchDescription([
         DeclareLaunchArgument(
@@ -45,5 +50,5 @@ def generate_launch_description():
             default_value='false',
             description='是否使用仿真时钟',
         ),
-        robot_state_publisher,
+        OpaqueFunction(function=launch_setup),
     ])

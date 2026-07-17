@@ -29,7 +29,8 @@ def generate_launch_description():
     default_model = PathJoinSubstitution([
         package_share,
         'urdf',
-        'asr_sdm_wrapper.urdf.xacro',
+        'generated',
+        'asr_sdm_segments_4.urdf',
     ])
     custom_world_path = PathJoinSubstitution([
         package_share,
