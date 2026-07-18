@@ -226,7 +226,7 @@ Visualization Manager:
           Size (Pixels): 3
           Size (m): 0.100000001
           Style: Flat Squares
-          Topic: /map_generator/global_cloud
+          Topic: /asr_sdm_map_generator/global_cloud
           Unreliable: false
           Use Fixed Frame: true
           Use rainbow: true

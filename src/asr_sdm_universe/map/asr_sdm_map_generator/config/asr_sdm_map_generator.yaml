@@ -1,0 +1,32 @@
+random_map_sensing:
+  ros__parameters:
+    init_state_x: 0.0
+    init_state_y: 0.0
+
+    map:
+      x_size: 50.0
+      y_size: 50.0
+      z_size: 5.0
+      obs_num: 30
+      resolution: 0.1
+      circle_num: 30
+      clear_radius: 2.0
+      protect_x: 19.0
+      protect_y: 0.0
+
+    ObstacleShape:
+      lower_rad: 0.3
+      upper_rad: 0.8
+      lower_hei: 3.0
+      upper_hei: 7.0
+      radius_l: 7.0
+      radius_h: 7.0
+      z_l: 7.0
+      z_h: 7.0
+      theta: 7.0
+
+    sensing:
+      radius: 10.0
+      rate: 10.0
+      publish_local: false
+      enable_click_map: false
