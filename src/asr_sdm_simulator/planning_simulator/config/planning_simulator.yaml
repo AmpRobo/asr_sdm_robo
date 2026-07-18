@@ -1,0 +1,12 @@
+# Launch / simulator configuration for planning_simulator_launch.py
+
+# Set true to start asr_sdm_map_generator (random forest map).
+use_asr_sdm_map_generator: true
+
+rate:
+  odom: 100.0
+
+simulator:
+  init_state_x: -5.0
+  init_state_y: 0.0
+  init_state_z: 3.0

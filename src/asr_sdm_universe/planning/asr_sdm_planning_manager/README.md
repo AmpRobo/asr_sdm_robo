@@ -36,7 +36,7 @@ __Video__:
 </p>
 
 This package contains the implementation of __Fast-Planner__ (in folder __fast_planner__) and a lightweight
-quadrotor simulator (in __uav_simulator__). Key components are:
+quadrotor simulator (in __planning_simulator__). Key components are:
 
 - __plan_env__: The online mapping algorithms. It takes in depth image (or point cloud) and camera pose (odometry) pairs as input, do raycasting to update a probabilistic volumetric map, and build an Euclidean signed distance filed (ESDF) for the planning system. 
 - __asr_sdm_local_path_modifier__: Front-end path searching algorithms. Currently it includes a kinodynamic version of A* algorithm that respects the dynamics of quadrotors. The standard A* is also available. 
@@ -66,9 +66,9 @@ If you use __Fast-Planner__ for your application or research, please cite our re
 
 - We use [**NLopt**](https://nlopt.readthedocs.io/en/latest/NLopt_Installation) to solve the non-linear optimization problem.
 
-- The __uav_simulator__ depends on the C++ linear algebra library __Armadillo__, which can be installed by ``` sudo apt-get install libarmadillo-dev ```.
+- The __planning_simulator__ depends on the C++ linear algebra library __Armadillo__, which can be installed by ``` sudo apt-get install libarmadillo-dev ```.
 
-- _Optional_: If you want to run the more realistic depth camera in __uav_simulator__, installation of [CUDA Toolkit](https://developer.nvidia.com/cuda-toolkit) is needed. Otherwise, a less realistic depth sensor model will be used (See section _Use GPU Depth Rendering_ below).
+- _Optional_: If you want to run the more realistic depth camera in __planning_simulator__, installation of [CUDA Toolkit](https://developer.nvidia.com/cuda-toolkit) is needed. Otherwise, a less realistic depth sensor model will be used (See section _Use GPU Depth Rendering_ below).
 
 ## 2. Build on ROS
 
@@ -82,7 +82,7 @@ After the prerequisites are satisfied, you can clone this repository to your cat
 
 ### Use GPU Depth Rendering (Optional)
 
- The **local_sensing** package in __uav_simulator__ has the option of using GPU or CPU to render the depth sensor measurement. By default, it is set to CPU version in CMakeLists:
+ The **local_sensing** package in __planning_simulator__ has the option of using GPU or CPU to render the depth sensor measurement. By default, it is set to CPU version in CMakeLists:
  
  ```
  set(ENABLE_CUDA false)

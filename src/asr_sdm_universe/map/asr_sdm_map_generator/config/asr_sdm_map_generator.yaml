@@ -4,12 +4,12 @@ random_map_sensing:
     init_state_y: 0.0
 
     map:
-      x_size: 50.0
-      y_size: 50.0
+      x_size: 20.0
+      y_size: 20.0
       z_size: 5.0
       obs_num: 30
       resolution: 0.1
-      circle_num: 30
+      circle_num: 10
       clear_radius: 2.0
       protect_x: 19.0
       protect_y: 0.0

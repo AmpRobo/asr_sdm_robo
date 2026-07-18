@@ -71,6 +71,6 @@ install(DIRECTORY include/
 
 ament_export_targets(export_${PROJECT_NAME} HAS_LIBRARY_TARGET)
 ament_export_include_directories(include)
-ament_export_dependencies(rosidl_default_runtime geometry_msgs nav_msgs std_msgs)
+ament_export_dependencies(rosidl_default_runtime geometry_msgs nav_msgs std_msgs Eigen3)
 
 ament_package()
