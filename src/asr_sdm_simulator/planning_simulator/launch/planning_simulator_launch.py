@@ -56,7 +56,7 @@ def _make_map_generator_node(cfg: dict[str, Any], map_generator_config: str) -> 
                 'init_state_x': float(sim.get('init_state_x', -5.0)),
                 'init_state_y': float(sim.get('init_state_y', 0.0)),
                 'sensing.enable_click_map': bool(features.get('enable_click_map', True)),
-                'topics.goal': topics.get('add_static_obstacle', '/simulator/planning_simulator/add_static_obstacle'),
+                'topics.add_static_obstacle': topics.get('add_static_obstacle', '/simulator/planning_simulator/add_static_obstacle'),
             },
         ],
         remappings=[

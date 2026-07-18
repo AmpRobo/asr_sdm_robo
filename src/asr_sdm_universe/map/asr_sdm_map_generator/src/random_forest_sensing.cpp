@@ -24,7 +24,7 @@ RandomForestSensing::RandomForestSensing(const rclcpp::NodeOptions & options)
 
   if (enable_click_map_) {
     click_sub_ = create_subscription<geometry_msgs::msg::PoseStamped>(
-      goal_topic_, 10, std::bind(&RandomForestSensing::clickCallback, this, std::placeholders::_1));
+      add_static_obstacle_, 10, std::bind(&RandomForestSensing::clickCallback, this, std::placeholders::_1));
   }
 
   x_l_ = -x_size_ / 2.0;
@@ -79,7 +79,7 @@ void RandomForestSensing::declareParameters()
   declare_parameter("topics.global_cloud", global_cloud_topic_);
   declare_parameter("topics.click_map", click_map_topic_);
   declare_parameter("topics.odometry", odometry_topic_);
-  declare_parameter("topics.goal", goal_topic_);
+  declare_parameter("topics.add_static_obstacle", add_static_obstacle_);
 }
 
 void RandomForestSensing::loadParameters()
@@ -116,7 +116,7 @@ void RandomForestSensing::loadParameters()
   global_cloud_topic_ = get_parameter("topics.global_cloud").as_string();
   click_map_topic_ = get_parameter("topics.click_map").as_string();
   odometry_topic_ = get_parameter("topics.odometry").as_string();
-  goal_topic_ = get_parameter("topics.goal").as_string();
+  add_static_obstacle_ = get_parameter("topics.add_static_obstacle").as_string();
 }
 
 bool RandomForestSensing::isTooCloseToProtectedPoint(double x, double y) const

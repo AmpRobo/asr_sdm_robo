@@ -60,7 +60,7 @@ private:
   std::string global_cloud_topic_{"/asr_sdm_map_generator/global_cloud"};
   std::string click_map_topic_{"/pcl_render_node/local_map"};
   std::string odometry_topic_{"odometry"};
-  std::string goal_topic_{"/simulator/planning_simulator/add_static_obstacle"};
+  std::string add_static_obstacle_{"/simulator/planning_simulator/add_static_obstacle"};
 
   int obs_num_{30};
   int circle_num_{30};

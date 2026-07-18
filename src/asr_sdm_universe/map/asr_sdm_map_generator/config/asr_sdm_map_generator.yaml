@@ -37,4 +37,4 @@ random_map_sensing:
       click_map: /pcl_render_node/local_map
       odometry: odometry
       # RViz "Static Obstacle" tool publishes PoseStamped here.
-      goal: /simulator/planning_simulator/add_static_obstacle
+      add_static_obstacle: /simulator/planning_simulator/add_static_obstacle
