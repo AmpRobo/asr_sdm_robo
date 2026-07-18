@@ -1,9 +1,12 @@
+import math
 import os
 
 import yaml
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
+from launch.actions import IncludeLaunchDescription
 from launch.conditions import IfCondition
+from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch_ros.actions import Node
 
 
@@ -14,11 +17,16 @@ def generate_launch_description():
     map_generator_config = os.path.join(
         get_package_share_directory('asr_sdm_map_generator'),
         'config', 'asr_sdm_map_generator.yaml')
+    asr_sdm_share = get_package_share_directory('asr_sdm')
+    asr_sdm_model = os.path.join(asr_sdm_share, 'urdf', 'asr_sdm_wrapper.urdf.xacro')
+    asr_sdm_description_launch = os.path.join(
+        asr_sdm_share, 'launch', 'description.launch.py')
 
     with open(config_path, 'r', encoding='utf-8') as f:
         cfg = yaml.safe_load(f) or {}
 
     use_map_generator = bool(cfg.get('use_asr_sdm_map_generator', True))
+    use_asr_sdm_model = bool(cfg.get('use_asr_sdm_model', True))
     rate_odom = float(cfg.get('rate', {}).get('odom', 100.0))
     sim_cfg = cfg.get('simulator', {})
     init_x = float(sim_cfg.get('init_state_x', -5.0))
@@ -63,6 +71,7 @@ def generate_launch_description():
             ('imu', 'sim/imu'),
             ('force_disturbance', 'force_disturbance'),
             ('moment_disturbance', 'moment_disturbance'),
+            ('initialpose', '/initialpose'),
         ],
     )
 
@@ -124,9 +133,44 @@ def generate_launch_description():
             'color.g': 0.0,
             'color.b': 0.0,
             'covariance_scale': 100.0,
+            # Publish world->base TF so the asr_sdm model can follow odometry.
+            'tf45': use_asr_sdm_model,
         }],
         remappings=[
             ('odom', '/visual_slam/odom'),
+        ],
+    )
+
+    # asr_sdm robot model (robot_state_publisher + joint states + mesh TF offset)
+    asr_sdm_robot_description = IncludeLaunchDescription(
+        PythonLaunchDescriptionSource(asr_sdm_description_launch),
+        condition=IfCondition('true' if use_asr_sdm_model else 'false'),
+        launch_arguments={
+            'model': asr_sdm_model,
+            'use_sim_time': 'false',
+        }.items(),
+    )
+
+    joint_state_publisher = Node(
+        package='joint_state_publisher',
+        executable='joint_state_publisher',
+        name='joint_state_publisher',
+        output='screen',
+        condition=IfCondition('true' if use_asr_sdm_model else 'false'),
+    )
+
+    # Mesh is modeled along +Z; pitch +90 deg lays the body in the XY plane.
+    # Yaw +180 deg aligns the visual heading with odom / 2D Pose Estimate.
+    base_to_asr_sdm = Node(
+        package='tf2_ros',
+        executable='static_transform_publisher',
+        name='base_to_asr_sdm',
+        condition=IfCondition('true' if use_asr_sdm_model else 'false'),
+        arguments=[
+            '--frame-id', 'base',
+            '--child-frame-id', 'screwdrive_segment_0',
+            '--yaw', str(math.pi),
+            '--pitch', str(math.pi / 2.0),
         ],
     )
 
@@ -143,5 +187,8 @@ def generate_launch_description():
         so3_control,
         so3_disturbance_generator,
         odom_visualization_ukf,
+        asr_sdm_robot_description,
+        joint_state_publisher,
+        base_to_asr_sdm,
         rviz,
     ])

@@ -6,6 +6,7 @@ Panels:
       Expanded:
         - /Global Options1
         - /Global Map1
+        - /RobotModel1
         - /UAV1
       Splitter Ratio: 0.5
     Tree Height: 711
@@ -84,8 +85,22 @@ Visualization Manager:
       Use Fixed Frame: true
       Use rainbow: true
       Value: true
-    - Class: rviz_default_plugins/Marker
+    - Alpha: 1
+      Class: rviz_default_plugins/RobotModel
+      Collision Enabled: false
+      Description Source: Topic
+      Description Topic:
+        Depth: 5
+        Durability Policy: Transient Local
+        History Policy: Keep Last
+        Reliability Policy: Reliable
+        Value: /robot_description
       Enabled: true
+      Name: RobotModel
+      Visual Enabled: true
+      Value: true
+    - Class: rviz_default_plugins/Marker
+      Enabled: false
       Name: UAV
       Namespaces:
         mesh: true

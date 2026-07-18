@@ -1,7 +1,9 @@
 #include <Eigen/Geometry>
 #include <cassert>
-#include <nav_msgs/msg/odometry.hpp>
+#include <cmath>
+#include <geometry_msgs/msg/pose_with_covariance_stamped.hpp>
 #include <geometry_msgs/msg/vector3.hpp>
+#include <nav_msgs/msg/odometry.hpp>
 #include <quadrotor_msgs/msg/so3_command.hpp>
 #include <planning_simulator/Quadrotor.h>
 #include <rclcpp/rclcpp.hpp>
@@ -32,6 +34,18 @@ typedef struct _Disturbance
 
 static Command     command;
 static Disturbance disturbance;
+
+struct PoseResetRequest
+{
+  bool   pending{false};
+  double x{0.0};
+  double y{0.0};
+  double z{0.0};
+  double yaw{0.0};
+  bool   use_msg_z{false};
+};
+
+static PoseResetRequest pose_reset;
 
 void stateToOdomMsg(const QuadrotorSimulator::Quadrotor::State& state,
                     nav_msgs::msg::Odometry&                    odom);
@@ -198,6 +212,24 @@ moment_disturbance_callback(const geometry_msgs::msg::Vector3::ConstSharedPtr m)
   disturbance.m(2) = m->z;
 }
 
+static void
+initial_pose_callback(
+  const geometry_msgs::msg::PoseWithCovarianceStamped::ConstSharedPtr msg)
+{
+  const auto & pose = msg->pose.pose;
+  const Eigen::Quaterniond q(
+    pose.orientation.w, pose.orientation.x, pose.orientation.y, pose.orientation.z);
+  const Eigen::Vector3d ypr = uav_utils::R_to_ypr(q.normalized().toRotationMatrix());
+
+  pose_reset.x = pose.position.x;
+  pose_reset.y = pose.position.y;
+  pose_reset.z = pose.position.z;
+  // RViz 2D Pose Estimate publishes z=0; keep current altitude unless z is set.
+  pose_reset.use_msg_z = std::abs(pose.position.z) > 1e-3;
+  pose_reset.yaw = ypr(0);
+  pose_reset.pending = true;
+}
+
 int
 main(int argc, char** argv)
 {
@@ -216,6 +248,9 @@ main(int argc, char** argv)
   auto m_sub =
     n->create_subscription<geometry_msgs::msg::Vector3>("moment_disturbance", 100,
                 &moment_disturbance_callback);
+  auto initial_pose_sub =
+    n->create_subscription<geometry_msgs::msg::PoseWithCovarianceStamped>(
+      "initialpose", 10, &initial_pose_callback);
 
   QuadrotorSimulator::Quadrotor quad;
   double                        _init_x, _init_y, _init_z;
@@ -271,6 +306,28 @@ main(int argc, char** argv)
   while (rclcpp::ok())
   {
     rclcpp::spin_some(n);
+
+    if (pose_reset.pending)
+    {
+      QuadrotorSimulator::Quadrotor::State reset_state = quad.getState();
+      reset_state.x(0) = pose_reset.x;
+      reset_state.x(1) = pose_reset.y;
+      if (pose_reset.use_msg_z)
+      {
+        reset_state.x(2) = pose_reset.z;
+      }
+      reset_state.v.setZero();
+      reset_state.omega.setZero();
+      reset_state.motor_rpm.setZero();
+      reset_state.R = Eigen::AngleAxisd(pose_reset.yaw, Eigen::Vector3d::UnitZ()).toRotationMatrix();
+      quad.setState(reset_state);
+      pose_reset.pending = false;
+
+      RCLCPP_INFO(
+        n->get_logger(),
+        "Reset pose from /initialpose: x=%.2f y=%.2f z=%.2f yaw=%.2f",
+        reset_state.x(0), reset_state.x(1), reset_state.x(2), pose_reset.yaw);
+    }
 
     auto last = control;
     control   = getControl(quad, command);

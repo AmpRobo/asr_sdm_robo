@@ -3,6 +3,9 @@
 # Set true to start asr_sdm_map_generator (random forest map).
 use_asr_sdm_map_generator: true
 
+# Set true to load and display the asr_sdm robot model in RViz.
+use_asr_sdm_model: true
+
 rate:
   odom: 100.0
 
