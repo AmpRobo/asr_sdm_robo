@@ -24,7 +24,8 @@ RandomForestSensing::RandomForestSensing(const rclcpp::NodeOptions & options)
 
   if (enable_click_map_) {
     click_sub_ = create_subscription<geometry_msgs::msg::PoseStamped>(
-      add_static_obstacle_, 10, std::bind(&RandomForestSensing::clickCallback, this, std::placeholders::_1));
+      add_static_obstacle_, 10,
+      std::bind(&RandomForestSensing::clickCallback, this, std::placeholders::_1));
   }
 
   x_l_ = -x_size_ / 2.0;

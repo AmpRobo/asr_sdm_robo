@@ -1,0 +1,63 @@
+# Launch / simulator configuration for logging_simulator_launch.py
+
+features:
+  # Start asr_sdm_map_generator (random forest map).
+  use_asr_sdm_map_generator: true
+  # Click RViz "Static Obstacle" tool (/simulator/logging_simulator/add_static_obstacle) to add pillar obstacles.
+  enable_click_map: true
+  # Load and display the asr_sdm robot model in RViz.
+  use_asr_sdm_model: true
+  # Start RViz with the package rviz config.
+  use_rviz: true
+  # Start so3_control_node.
+  use_so3_control: false
+
+rate:
+  odom: 100.0
+
+simulator:
+  init_state_x: -5.0
+  init_state_y: 0.0
+  init_state_z: 3.0
+
+topics:
+  visual_slam_odom: /visual_slam/odom
+  state_ukf_odom: /state_ukf/odom
+  visual_slam_correction: /visual_slam/correction
+  so3_cmd: so3_cmd
+  imu: sim/imu
+  force_disturbance: force_disturbance
+  moment_disturbance: moment_disturbance
+  initialpose: /initialpose
+  position_cmd: position_cmd
+  motors: motors
+  corrections: corrections
+  goal_pose: /goal_pose
+  add_static_obstacle: /simulator/logging_simulator/add_static_obstacle
+
+so3_control:
+  mass: 0.98
+  use_angle_corrections: false
+  use_external_yaw: false
+  gains:
+    rot: {x: 1.0, y: 1.0, z: 1.0}
+    ang: {x: 0.07, y: 0.07, z: 0.1}
+  corrections:
+    z: 0.0
+    r: 0.0
+    p: 0.0
+
+odom_visualization:
+  color: {a: 0.8, r: 1.0, g: 0.0, b: 0.0}
+  covariance_scale: 100.0
+
+robot_model:
+  # Mesh is modeled along +Z; pitch +90 deg lays the body in the XY plane.
+  # Yaw +180 deg aligns the visual heading with odom / 2D Pose Estimate.
+  parent_frame: base
+  child_frame: screwdrive_segment_0
+  yaw_rad: 3.141592653589793
+  pitch_rad: 1.5707963267948966
+  use_sim_time: false
+  model_xacro: urdf/asr_sdm_wrapper.urdf.xacro
+  description_launch: launch/description.launch.py
