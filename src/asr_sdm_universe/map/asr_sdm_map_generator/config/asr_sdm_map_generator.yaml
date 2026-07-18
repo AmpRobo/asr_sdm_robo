@@ -29,4 +29,12 @@ random_map_sensing:
       radius: 10.0
       rate: 10.0
       publish_local: false
-      enable_click_map: false
+      enable_click_map: true
+
+    topics:
+      local_cloud: /asr_sdm_map_generator/local_cloud
+      global_cloud: /asr_sdm_map_generator/global_cloud
+      click_map: /pcl_render_node/local_map
+      odometry: odometry
+      # RViz "Static Obstacle" tool publishes PoseStamped here.
+      goal: /simulator/planning_simulator/add_static_obstacle

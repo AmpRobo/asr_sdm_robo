@@ -22,6 +22,7 @@ set(CMAKE_AUTOMOC ON)
 
 qt5_wrap_cpp(MOC_FILES
   src/goal_tool.h
+  src/static_obstacle_tool.h
   src/probmap_display.h
   src/aerialmap_display.h
   src/multi_probmap_display.h
@@ -30,6 +31,7 @@ qt5_wrap_cpp(MOC_FILES
 set(SOURCE_FILES
   src/pose_tool.cpp
   src/goal_tool.cpp
+  src/static_obstacle_tool.cpp
   src/probmap_display.cpp
   src/aerialmap_display.cpp
   src/multi_probmap_display.cpp

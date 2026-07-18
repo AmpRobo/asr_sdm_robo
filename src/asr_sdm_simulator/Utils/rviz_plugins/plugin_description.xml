@@ -7,6 +7,14 @@
     </description>
   </class>
 
+  <class name="rviz_plugins/StaticObstacleTool"
+         type="rviz_plugins::StaticObstacleTool"
+         base_class_type="rviz_common::Tool">
+    <description>
+      Tool for placing a static obstacle in the planning map
+    </description>
+  </class>
+
   <class name="rviz_plugins/ProbMapDisplay"
          type="rviz_plugins::ProbMapDisplay"
          base_class_type="rviz_common::Display">

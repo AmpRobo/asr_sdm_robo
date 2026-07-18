@@ -18,6 +18,7 @@ Panels:
       - /2D Nav Goal1
       - /Publish Point1
       - /3D Nav Goal1
+      - /Static Obstacle1
     Name: Tool Properties
     Splitter Ratio: 0.588679016
   - Class: rviz_common/Views
@@ -213,7 +214,9 @@ Visualization Manager:
         Reliability Policy: Reliable
         Value: /clicked_point
     - Class: rviz_plugins/Goal3DTool
-      Topic: goal
+      Topic: /goal_pose
+    - Class: rviz_plugins/StaticObstacleTool
+      Topic: /simulator/planning_simulator/add_static_obstacle
   Value: true
   Views:
     Current:

@@ -1,9 +1,9 @@
 #include "asr_sdm_map_generator/random_forest_sensing.hpp"
 
+#include <pcl_conversions/pcl_conversions.h>
+
 #include <algorithm>
 #include <chrono>
-
-#include <pcl_conversions/pcl_conversions.h>
 
 namespace asr_sdm_map_generator
 {
@@ -14,21 +14,17 @@ RandomForestSensing::RandomForestSensing(const rclcpp::NodeOptions & options)
   declareParameters();
   loadParameters();
 
-  // Topics used by planning RViz configs.
-  local_map_pub_ =
-    create_publisher<sensor_msgs::msg::PointCloud2>("/asr_sdm_map_generator/local_cloud", 1);
-  all_map_pub_ =
-    create_publisher<sensor_msgs::msg::PointCloud2>("/asr_sdm_map_generator/global_cloud", 1);
-  click_map_pub_ = create_publisher<sensor_msgs::msg::PointCloud2>("/pcl_render_node/local_map", 1);
+  local_map_pub_ = create_publisher<sensor_msgs::msg::PointCloud2>(local_cloud_topic_, 1);
+  all_map_pub_ = create_publisher<sensor_msgs::msg::PointCloud2>(global_cloud_topic_, 1);
+  click_map_pub_ = create_publisher<sensor_msgs::msg::PointCloud2>(click_map_topic_, 1);
 
   odom_sub_ = create_subscription<nav_msgs::msg::Odometry>(
-    "odometry", 50,
+    odometry_topic_, 50,
     std::bind(&RandomForestSensing::odometryCallback, this, std::placeholders::_1));
 
   if (enable_click_map_) {
     click_sub_ = create_subscription<geometry_msgs::msg::PoseStamped>(
-      "/goal", 10,
-      std::bind(&RandomForestSensing::clickCallback, this, std::placeholders::_1));
+      goal_topic_, 10, std::bind(&RandomForestSensing::clickCallback, this, std::placeholders::_1));
   }
 
   x_l_ = -x_size_ / 2.0;
@@ -78,6 +74,12 @@ void RandomForestSensing::declareParameters()
   declare_parameter("sensing.rate", 10.0);
   declare_parameter("sensing.publish_local", false);
   declare_parameter("sensing.enable_click_map", false);
+
+  declare_parameter("topics.local_cloud", local_cloud_topic_);
+  declare_parameter("topics.global_cloud", global_cloud_topic_);
+  declare_parameter("topics.click_map", click_map_topic_);
+  declare_parameter("topics.odometry", odometry_topic_);
+  declare_parameter("topics.goal", goal_topic_);
 }
 
 void RandomForestSensing::loadParameters()
@@ -109,6 +111,12 @@ void RandomForestSensing::loadParameters()
   sense_rate_ = get_parameter("sensing.rate").as_double();
   publish_local_ = get_parameter("sensing.publish_local").as_bool();
   enable_click_map_ = get_parameter("sensing.enable_click_map").as_bool();
+
+  local_cloud_topic_ = get_parameter("topics.local_cloud").as_string();
+  global_cloud_topic_ = get_parameter("topics.global_cloud").as_string();
+  click_map_topic_ = get_parameter("topics.click_map").as_string();
+  odometry_topic_ = get_parameter("topics.odometry").as_string();
+  goal_topic_ = get_parameter("topics.goal").as_string();
 }
 
 bool RandomForestSensing::isTooCloseToProtectedPoint(double x, double y) const
@@ -271,9 +279,9 @@ void RandomForestSensing::publishSensedPoints()
 
   std::vector<int> point_idx_radius_search;
   std::vector<float> point_radius_squared_distance;
-  if (kdtree_local_map_.radiusSearch(
-        search_point, sensing_range_, point_idx_radius_search, point_radius_squared_distance) <= 0)
-  {
+  if (
+    kdtree_local_map_.radiusSearch(
+      search_point, sensing_range_, point_idx_radius_search, point_radius_squared_distance) <= 0) {
     RCLCPP_ERROR_THROTTLE(get_logger(), *get_clock(), 2000, "[Map server] No obstacles in range.");
     return;
   }
@@ -331,7 +339,18 @@ void RandomForestSensing::clickCallback(const geometry_msgs::msg::PoseStamped::C
   click_map_msg.header.stamp = now();
   click_map_pub_->publish(click_map_msg);
 
+  // Refresh global map immediately so RViz Global Map updates without waiting
+  // for the sensing timer.
+  sensor_msgs::msg::PointCloud2 global_map_msg;
+  pcl::toROSMsg(cloud_map_, global_map_msg);
+  global_map_msg.header.frame_id = "world";
+  global_map_msg.header.stamp = now();
+  all_map_pub_->publish(global_map_msg);
+
   kdtree_local_map_.setInputCloud(cloud_map_.makeShared());
+  RCLCPP_INFO(
+    get_logger(), "Added click obstacle at (%.2f, %.2f), map points=%zu", x, y,
+    cloud_map_.points.size());
 }
 
 }  // namespace asr_sdm_map_generator

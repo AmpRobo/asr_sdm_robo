@@ -2,6 +2,7 @@
 
 #include <cmath>
 #include <random>
+#include <string>
 #include <vector>
 
 #include <Eigen/Eigen>
@@ -54,6 +55,12 @@ private:
   std::uniform_real_distribution<double> rand_z_;
 
   std::vector<double> state_;
+
+  std::string local_cloud_topic_{"/asr_sdm_map_generator/local_cloud"};
+  std::string global_cloud_topic_{"/asr_sdm_map_generator/global_cloud"};
+  std::string click_map_topic_{"/pcl_render_node/local_map"};
+  std::string odometry_topic_{"odometry"};
+  std::string goal_topic_{"/simulator/planning_simulator/add_static_obstacle"};
 
   int obs_num_{30};
   int circle_num_{30};
