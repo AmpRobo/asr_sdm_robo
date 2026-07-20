@@ -10,7 +10,7 @@ https://github.com/ddz16/UIE_Benckmark
 sudo apt install python3-venv
 python3 -m venv venvs/uieb
 source venvs/uieb/bin/activate
-pip3 install torch torchvision wandb pyiqa pytorch_lightning
+pip3 install torch torchvision wandb pyiqa pytorch_lightning onnx onnxscript onnxruntime
 ```
 
 ## Layout
