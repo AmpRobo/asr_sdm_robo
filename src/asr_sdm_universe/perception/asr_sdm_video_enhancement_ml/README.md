@@ -5,6 +5,14 @@ ROS 2 Jazzy C++ node for FiveA+ underwater image enhancement with ONNX Runtime C
 The model architecture is adapted from UIE_Benckmark's MIT-licensed FiveA+ implementation:
 https://github.com/ddz16/UIE_Benckmark
 
+## Dependency Installation
+```sh
+sudo apt install python3-venv
+python3 -m venv venvs/uieb
+source venvs/uieb/bin/activate
+pip3 install torch torchvision wandb pyiqa pytorch_lightning
+```
+
 ## Layout
 
 - `src/`, `include/`: C++ ROS 2 node that loads the ONNX model and runs inference.
