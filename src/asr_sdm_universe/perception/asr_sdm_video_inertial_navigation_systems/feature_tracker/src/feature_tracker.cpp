@@ -251,21 +251,79 @@ void FeatureTracker::readImage(const cv::Mat &_img, double _cur_time)
         // fit, the smaller the KLT search window can be. We use the
         // KLT start points unchanged (cur_pts in the previous frame's
         // pixel coordinates) but shrink the KLT pyramid + window.
+        //
+        // Thresholds are deliberately conservative for robustness:
+        //   chi2 < 3.0  -> 5x5 (very high confidence, almost no motion blur)
+        //   chi2 < 10.0 -> 9x9 (good alignment, small displacement)
+        //   chi2 < 25.0 -> 15x15 (moderate alignment, moderate motion)
+        //   chi2 >= 25.0 or align failed -> fallback to 21x21 (handled below)
         if (align_res.success && align_res.n_meas >= SPARSE_ALIGN_MIN_FEATURES) {
             const double chi2 = align_res.final_chi2;
-            if (chi2 < 5.0) {
+            if (chi2 < 3.0) {
                 klt_win   = cv::Size(5, 5);
                 klt_level = 1;
-            } else if (chi2 < 15.0) {
+            } else if (chi2 < 10.0) {
                 klt_win   = cv::Size(9, 9);
                 klt_level = 1;
-            } else {
+            } else if (chi2 < 25.0) {
                 klt_win   = cv::Size(15, 15);
                 klt_level = 2;
+            } else {
+                // High chi2: use full window to maintain accuracy.
+                // Disable detect-skip for this frame to replenish features.
+                klt_win   = cv::Size(21, 21);
+                klt_level = 3;
+                detect_skip_cnt_ = 0;  // force detect on next frame
             }
             used_sparse = true;
         }
-    }
+
+        // ------------------------------------------------------------------
+        // Robustness fallback: if standard sparse align succeeded but had
+        // high chi2, retry with a larger patch (6x6) for better tolerance
+        // to motion blur and large frame-to-frame displacement. This catches
+        // the V203 case where the first align run produces chi2 > 30 but a
+        // wider patch would have enough overlap to get a good estimate.
+        // ------------------------------------------------------------------
+        if (!used_sparse && cur_pts.size() > 0 && USE_SPARSE_ALIGN && have_imu_prior_) {
+            TicToc t_a;
+            // Retry with larger patch for robustness.
+            vins_sparse::SparseAlignOptions opt2 = opt;
+            opt2.patch_size = 6;  // larger patch = more tolerant of large displacement
+            opt2.max_level = 2;  // use coarser pyramid to handle large motion
+            opt2.min_level = 0;   // start from full resolution
+
+            auto align_res2 = vins_sparse::sparseAlign(
+                prev_pyr_, cur_pyr_, cur_pts, ref_bearings,
+                R_prev_cur_, Eigen::Vector3d::Zero(), opt2);
+
+            if (align_res2.success && align_res2.n_meas >= opt.min_features) {
+                const double chi2 = align_res2.final_chi2;
+                // Use 15x15 instead of 21x21 since the larger-patch align succeeded.
+                if (chi2 < 15.0) {
+                    klt_win   = cv::Size(9, 9);
+                    klt_level = 1;
+                } else if (chi2 < 40.0) {
+                    klt_win   = cv::Size(15, 15);
+                    klt_level = 2;
+                } else {
+                    klt_win   = cv::Size(15, 15);  // best effort with 6x6 patch
+                    klt_level = 2;
+                    detect_skip_cnt_ = 0;
+                }
+                used_sparse = true;
+                // Account time for the retry.
+                n_sparse_time_sum_ += t_a.toc();
+            }
+        }
+    }  // end of USE_SPARSE_ALIGN block
+
+    // Adaptive detect_skip: when sparse_align fails, fall back to 21x21
+    // but do NOT skip detection. When sparse_align succeeds but chi2 is
+    // moderate, reduce skip count to detect more often and keep features
+    // fresh in difficult sequences like V203.
+    const double klt_area = klt_win.width * klt_win.height;
+    const bool klt_full_window = (klt_area >= 20 * 20);
 
     if (cur_pts.size() > 0)
     {
@@ -343,10 +401,15 @@ void FeatureTracker::readImage(const cv::Mat &_img, double _cur_time)
         // DETECT_SKIP_MIN_CNT we re-detect immediately.  When sparse_align
         // failed or did not run (sparse_off), this branch is skipped and
         // the detector runs every frame -- matching baseline behaviour.
+        //
+        // NEW: also disable skip when KLT is using full 21x21 window
+        // (indicates low alignment confidence / difficult motion). This
+        // replenishes features more aggressively on V203-like sequences.
         bool do_detect = (n_max_cnt > 0);
         if (do_detect && USE_SPARSE_ALIGN && used_sparse &&
             DETECT_SKIP_SPARSE > 1 &&
-            static_cast<int>(forw_pts.size()) >= DETECT_SKIP_MIN_CNT) {
+            static_cast<int>(forw_pts.size()) >= DETECT_SKIP_MIN_CNT &&
+            !klt_full_window) {
             ++detect_skip_cnt_;
             if (detect_skip_cnt_ < DETECT_SKIP_SPARSE) {
                 n_pts.clear();

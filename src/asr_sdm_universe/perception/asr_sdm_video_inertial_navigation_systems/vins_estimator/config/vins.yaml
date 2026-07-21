@@ -3,7 +3,7 @@
     params_file: config/euroc/euroc_config.yaml
     calibration_file: config/euroc/euroc_cam_calibration.yaml
     config_file: ""
-    enable_sparse: true
+    enable_sparse: false
     sparse_align:
       use_sparse_align: 1
       use_td_pre_calib: 0

@@ -333,3 +333,19 @@ cd /home/lxy/asr_sdm_robo && python3 experiments/sparse_compare/scripts/plot_com
 
 python3 experiments/sparse_compare/scripts/track_perf.py   --seq MH01   --mode sparse_off   --bag datasheet/MH_04_difficult_ros2/MH_04_dif
 ficult_ros2.db3   --runs 1   --bin-start 500   --bin-count 3
+
+# TUM-VI sparse off（推荐加 --no-rviz）
+python3 experiments/sparse_compare/scripts/track_perf.py \
+  --seq room1_512_16 --mode sparse_off --no-rviz \
+  --bag datasheet/room1_512_16/room1_512_16.db3 \
+  --runs 1 --bin-start 500 --bin-count 3
+# TUM-VI sparse on（同样选 vins_tumvi.yaml，enable_sparse:=1）
+python3 experiments/sparse_compare/scripts/track_perf.py \
+  --seq room1_512_16 --mode sparse_on --no-rviz \
+  --bag datasheet/room1_512_16/room1_512_16.db3 \
+  --runs 1 --bin-start 500 --bin-count 3
+# EuRoC 路径完全兼容旧用法
+python3 experiments/sparse_compare/scripts/track_perf.py \
+  --seq MH04 --mode sparse_off \
+  --bag datasheet/MH_04_difficult_ros2/MH_04.db3 \
+  --runs 5 --bin-start 1500 --bin-count 3
