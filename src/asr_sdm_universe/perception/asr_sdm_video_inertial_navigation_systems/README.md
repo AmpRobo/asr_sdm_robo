@@ -297,68 +297,82 @@ ros2 launch vins_estimator vins_launch.py vins_launch_config:=vins_d435i.yaml
 `enable_sparse: true` is configured in vins_estimator/config/.yaml, default is `true`.
 
 
-实验 1：sparse ON（当前 enable_sparse: true）
-先清理旧 CSV，然后启动 VINS：
+# 完整 sparse ON/OFF 对比实验
+下面给出在 *EuRoC* 与 *TUM-VI* 上的最小可复现流程。所有 `<...>` 均为**占位符**，请按本地实际路径替换：
+
+- `<path_to_workspace>` ：colcon workspace 根目录（含 `src/`、`install/`）
+- `<path_to_dataset>`   ：rosbag 所在根目录（包含 `MH_03_medium_ros2/`、`room1_512_16/` 等子目录）
+- `<path_to_vins_yaml>` ：本仓库 `src/.../vins_estimator/config/vins.yaml`
+
+> 说明：以下示例与 README 第 9、10 节的 launch 入口完全等价，只是把环境变量写法的 `$WORKSPACE_ROOT` / `$DATASET_DIR` 显式展开为占位符，方便新人无需再去查 `~/.bashrc` 也能跑通。
+
+实验 1：sparse ON（当前 `enable_sparse: true`）
 
 ```bash
 # 终端 1 — 启动 VINS
-cd $WORKSPACE_ROOT
+cd <path_to_workspace>
 source install/setup.bash
 rm -f output/vins_result_loop.csv
 ros2 launch vins_estimator vins_launch.py
+
 # 终端 2 — 播放 bag
-cd $WORKSPACE_ROOT
+cd <path_to_workspace>
 source install/setup.bash
-ros2 bag play $DATASET_DIR/MH_03_medium_ros2/MH_03_medium_ros2.db3
+ros2 bag play <path_to_dataset>/MH_03_medium_ros2/MH_03_medium_ros2.db3
 ```
-等 bag 播完（约 135 秒），再等 3 秒让 pose_graph 写完，然后 Ctrl+C 两个终端。
+
+等 bag 播完（约 135 秒），再等 3 秒让 `pose_graph` 写完，然后 Ctrl+C 两个终端。
 
 保存 sparse ON 的结果：
 
 ```bash
-cp $WORKSPACE_ROOT/output/vins_result_loop.csv $WORKSPACE_ROOT/output/sparse_on/vins_sparse_on.csv
-wc -l $WORKSPACE_ROOT/output/sparse_on/vins_sparse_on.csv
+cp <path_to_workspace>/output/vins_result_loop.csv <path_to_workspace>/output/sparse_on/vins_sparse_on.csv
+wc -l <path_to_workspace>/output/sparse_on/vins_sparse_on.csv
 ```
 
 实验 2：sparse OFF
-修改 enable_sparse: false：
+
+把 `<path_to_vins_yaml>` 中 `enable_sparse: true` 改成 `false`（也可以直接改 `euroc_config.yaml` 的 `use_sparse_align` 参数）：
 
 ```bash
-# 终端 1 — 启动 VINS（sparse OFF）
-cd $WORKSPACE_ROOT
-sed -i 's/enable_sparse: true/enable_sparse: false/' $WORKSPACE_ROOT/src/asr_sdm_universe/perception/asr_sdm_video_inertial_navigation_systems/vins_estimator/config/vins.yaml
+sed -i 's/enable_sparse: true/enable_sparse: false/' <path_to_vins_yaml>
 # 重新编译（也可以直接改 euroc_config.yaml 的 use_sparse_align 参数）
 ```
+
 然后重复上面的 VINS 启动 + bag 播放流程，最后：
 
 ```bash
-cp $WORKSPACE_ROOT/output/vins_result_loop.csv $WORKSPACE_ROOT/output/sparse_off/vins_sparse_off.csv
+cp <path_to_workspace>/output/vins_result_loop.csv <path_to_workspace>/output/sparse_off/vins_sparse_off.csv
 ```
 
-实验 3：重新绘图
-两个 CSV 都就位后：
+实验 3：重新绘图 / 跟踪性能
 
 ```bash
-cd $WORKSPACE_ROOT
+cd <path_to_workspace>
 python3 experiments/sparse_compare/scripts/plot_compare.py
 
-cd /home/lxy/asr_sdm_robo && python3 experiments/sparse_compare/scripts/plot_compare.py --seq MH04 --align-mode gt_align --out output/MH04/gt_align_test 2>&1
+cd <path_to_workspace> && python3 experiments/sparse_compare/scripts/plot_compare.py \
+  --seq MH04 --align-mode gt_align --out output/MH04/gt_align_test
 
-python3 experiments/sparse_compare/scripts/track_perf.py   --seq MH01   --mode sparse_off   --bag datasheet/MH_04_difficult_ros2/MH_04_dif
-ficult_ros2.db3   --runs 1   --bin-start 500   --bin-count 3
+python3 experiments/sparse_compare/scripts/track_perf.py \
+  --seq MH01 --mode sparse_off \
+  --bag <path_to_dataset>/MH_04_difficult_ros2/MH_04_difficult_ros2.db3 \
+  --runs 1 --bin-start 500 --bin-count 3
 
 # TUM-VI sparse off（推荐加 --no-rviz）
 python3 experiments/sparse_compare/scripts/track_perf.py \
   --seq room1_512_16 --mode sparse_off --no-rviz \
-  --bag datasheet/room1_512_16/room1_512_16.db3 \
+  --bag <path_to_dataset>/room1_512_16/room1_512_16.db3 \
   --runs 1 --bin-start 500 --bin-count 3
+
 # TUM-VI sparse on（同样选 vins_tumvi.yaml，enable_sparse:=1）
 python3 experiments/sparse_compare/scripts/track_perf.py \
   --seq room1_512_16 --mode sparse_on --no-rviz \
-  --bag datasheet/room1_512_16/room1_512_16.db3 \
+  --bag <path_to_dataset>/room1_512_16/room1_512_16.db3 \
   --runs 1 --bin-start 500 --bin-count 3
+
 # EuRoC 路径完全兼容旧用法
 python3 experiments/sparse_compare/scripts/track_perf.py \
   --seq MH04 --mode sparse_off \
-  --bag datasheet/MH_04_difficult_ros2/MH_04.db3 \
+  --bag <path_to_dataset>/MH_04_difficult_ros2/MH_04.db3 \
   --runs 5 --bin-start 1500 --bin-count 3

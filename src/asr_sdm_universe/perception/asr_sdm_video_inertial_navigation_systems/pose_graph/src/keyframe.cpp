@@ -596,8 +596,19 @@ bool KeyFrame::findConnection(KeyFrame* old_kf)
         //   sparse_rot topic is reworked to publish R_cur_old for a loop
         //   candidate, this branch can be re-enabled.
         //
-        //   We also keep the log line so it is obvious the path was reached
-        //   and intentionally bypassed.
+        // TODO(sparse_rot_loop_gate):
+        //   旋转几何门原本写在这里,被删除的原因:
+        //   1) 上游 sparse_R_ 当前只发布 *相邻帧* 之间的相对旋转 R(k, k-1),
+        //      而回环一致性检查需要的是 *cur ↔ loop_candidate_old* 之间的相对旋转.
+        //      两者语义不一致,直接把 R(k, k-1) 与 R(cur, old) 相乘算出来的角度无物理意义.
+        //   2) 实际后果:只要 |cur yaw - old yaw| 超过 SPARSE_ANGLE_THRESH (~25°),
+        //      即使 PnP 重投影校验完全正确,也会错误地 reject 合法回环 (false rejection).
+        //   3) 修复路径:等上游 sparse_rot topic 改造为发布 loop 候选两帧之间的
+        //      R_sparse(cur, old),再恢复下方的旋转几何门:
+        //          double theta_sparse = ||log(R_sparse(cur, old))||;
+        //          double theta_bow    = ||log(R_bow(cur, old))||;
+        //          bool sparse_ok = |theta_sparse - theta_bow| < θ_th;
+        //      当前只能 bypass,否则会误杀真实回环.
         if (geometric_ok && has_sparse_R_ && old_kf->has_sparse_R_) {
             // Adjacent-frame sparse rotation: semantically incompatible with
             // cross-loop consistency check.  Bypass to avoid false REJECTs.
