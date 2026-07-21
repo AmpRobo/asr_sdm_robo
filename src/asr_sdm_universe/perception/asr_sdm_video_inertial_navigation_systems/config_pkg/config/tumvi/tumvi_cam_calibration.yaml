@@ -1,0 +1,34 @@
+%YAML:1.0
+# TUM-VI room1 (dataset-room1_512_16) cam0 calibration for VINS-Mono.
+#
+# camodocal's EquidistantCamera corresponds to the Kannala-Brandt model
+# (PAMI 2006); VINS-Mono's feature_tracker instantiates it via
+# `CameraFactory::generateCameraFromYamlFile(calib_file)`.
+#
+# Fixed YAML schema (see EquidistantCamera::Parameters::readFromYamlFile):
+#   model_type            -> "KANNALA_BRANDT"  (case-sensitive!)
+#   camera_name, image_width, image_height
+#   projection_parameters -> k2, k3, k4, k5, mu, mv, u0, v0  (all in pixel units)
+#
+# Source: datasheet/dataset-room1_512_16_origin/dso/camchain.yaml (cam0)
+#   intrinsics:        [190.97847715128717, 190.9733070521226,
+#                       254.93170605935475, 256.8974428996504]   # fx fy cx cy
+#   distortion_model:  equidistant
+#   distortion_coeffs: [0.0034823894022493434, 0.0007150348452162257,
+#                      -0.0020532361418706202, 0.00020293673591811182]
+#   resolution:        [512, 512]
+
+model_type: KANNALA_BRANDT
+camera_name: cam0
+image_width: 512
+image_height: 512
+
+projection_parameters:
+   k2:  3.4823894e-03
+   k3:  7.1503485e-04
+   k4: -2.0532361e-03
+   k5:  2.0293674e-04
+   mu:  1.9097848e+02
+   mv:  1.9097848e+02
+   u0:  2.5493171e+02
+   v0:  2.5689744e+02
