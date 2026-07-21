@@ -11,6 +11,10 @@ sudo apt install python3-venv
 python3 -m venv venvs/uieb
 source venvs/uieb/bin/activate
 pip3 install torch torchvision wandb pyiqa pytorch_lightning onnx onnxscript onnxruntime
+
+# Install TensorRT, go to https://developer.nvidia.com/tensorrt/download/11x
+# Download specific version you need. For example, TensorRT 11.1.0 GA for Ubuntu 24.04 and CUDA 13.0 to 13.3 DEB local repo Package
+sudo dpkg -i ~/Downloads/nv-tensorrt-local-repo-ubuntu2404-11.1.0-cuda-13.3_1.0-1_amd64.deb
 ```
 
 ## Layout
