@@ -89,12 +89,14 @@ We use ros1 version of [VINS MONO](https://github.com/HKUST-Aerial-Robotics/VINS
 The source code is released under [GPLv3](https://www.gnu.org/licenses/) license.
 
 # 8 . D435i Demo
-cd /home/lxy/asr_sdm_robo && colcon build --packages-up-to camera_model feature_tracker vins_estimator pose_graph benchmark_publisher ar_demo config_pkg
-
+```bash
+cd $WORKSPACE_ROOT
+colcon build --packages-up-to camera_model feature_tracker vins_estimator pose_graph benchmark_publisher ar_demo config_pkg
 
 colcon build --packages-select asr_sdm_video_inertial_navigation_systems
 ros2 launch vins_estimator d435i_combined.launch.py
-ros2 bag play datasheet/d435if_20260530_080612_resized
+ros2 bag play $DATASET_DIR/d435if_20260530_080612_resized
+```
 
 # 9. SVO-style 稀疏前端改造（Sparse-prior KLT）
 
@@ -154,7 +156,7 @@ cv::calcOpticalFlowPyrLK(cur_img, forw_img, cur_pts, forw_pts,
 最简：一键起两条链路（ORIGINAL vs SPARSE1），共用 bag。
 
 ```bash
-cd /home/lxy/asr_sdm_robo
+cd $WORKSPACE_ROOT
 source /opt/ros/jazzy/setup.bash
 source install/setup.bash
 
@@ -173,24 +175,24 @@ colcon build --packages-up-to camera_model feature_tracker \
                                  benchmark_publisher ar_demo config_pkg
 
 # 2) launch（同时跑 ORIGINAL + SPARSE1，对比用）
-ros2 launch src/asr_sdm_universe/perception/asr_sdm_video_inertial_navigation_systems/vins_estimator/launch/d435i_combined.launch.py enable_sparse1:=1
+ros2 launch asr_sdm_video_inertial_navigation_systems vins_estimator/d435i_combined.launch.py enable_sparse1:=1
 
 # 3) 另起一个终端跑 bag
-ros2 bag play datasheet/d435if_20260530_080612_resized/d435if_20260530_080612_resized_0.mcap --rate 1.0
+ros2 bag play $DATASET_DIR/d435if_20260530_080612_resized/d435if_20260530_080612_resized_0.mcap --rate 1.0
 ```
 
-输出分别落在 `/home/lxy/output/original/` 和 `/home/lxy/output/sparse1/`，便于对比轨迹 csv。
+输出分别落在 `$OUTPUT_DIR/original/` 和 `$OUTPUT_DIR/sparse1/`，便于对比轨迹 csv。
 
 只跑 ORIGINAL（关闭 SPARSE1）：
 
 ```bash
-ros2 launch src/asr_sdm_universe/perception/asr_sdm_video_inertial_navigation_systems/vins_estimator/launch/d435i_combined.launch.py enable_sparse1:=0
+ros2 launch asr_sdm_video_inertial_navigation_systems vins_estimator/d435i_combined.launch.py enable_sparse1:=0
 ```
 
 只跑 SPARSE1（ORIGINAL 不起，节省资源）：
 
 ```bash
-ros2 launch src/asr_sdm_universe/perception/asr_sdm_video_inertial_navigation_systems/vins_estimator/launch/d435i_combined.launch.py enable_sparse1:=1 skip_original:=1
+ros2 launch asr_sdm_video_inertial_navigation_systems vins_estimator/d435i_combined.launch.py enable_sparse1:=1 skip_original:=1
 ```
 
 ## 9.5 效果（95s D435i bag，1x 速率）
@@ -298,35 +300,46 @@ ros2 launch vins_estimator vins_launch.py vins_launch_config:=vins_d435i.yaml
 实验 1：sparse ON（当前 enable_sparse: true）
 先清理旧 CSV，然后启动 VINS：
 
+```bash
 # 终端 1 — 启动 VINS
-cd /home/lxy/asr_sdm_robo
+cd $WORKSPACE_ROOT
 source install/setup.bash
 rm -f output/vins_result_loop.csv
 ros2 launch vins_estimator vins_launch.py
 # 终端 2 — 播放 bag
-cd /home/lxy/asr_sdm_robo
+cd $WORKSPACE_ROOT
 source install/setup.bash
-ros2 bag play datasheet/MH_03_medium_ros2/MH_03_medium_ros2.db3
+ros2 bag play $DATASET_DIR/MH_03_medium_ros2/MH_03_medium_ros2.db3
+```
 等 bag 播完（约 135 秒），再等 3 秒让 pose_graph 写完，然后 Ctrl+C 两个终端。
 
 保存 sparse ON 的结果：
 
-cp /home/lxy/asr_sdm_robo/output/vins_result_loop.csv /home/lxy/asr_sdm_robo/output/sparse_on/vins_sparse_on.csv
-wc -l /home/lxy/asr_sdm_robo/output/sparse_on/vins_sparse_on.csv
+```bash
+cp $WORKSPACE_ROOT/output/vins_result_loop.csv $WORKSPACE_ROOT/output/sparse_on/vins_sparse_on.csv
+wc -l $WORKSPACE_ROOT/output/sparse_on/vins_sparse_on.csv
+```
+
 实验 2：sparse OFF
 修改 enable_sparse: false：
 
+```bash
 # 终端 1 — 启动 VINS（sparse OFF）
-cd /home/lxy/asr_sdm_robo
-sed -i 's/enable_sparse: true/enable_sparse: false/' src/asr_sdm_universe/perception/asr_sdm_video_inertial_navigation_systems/vins_estimator/config/vins.yaml
+cd $WORKSPACE_ROOT
+sed -i 's/enable_sparse: true/enable_sparse: false/' $WORKSPACE_ROOT/src/asr_sdm_universe/perception/asr_sdm_video_inertial_navigation_systems/vins_estimator/config/vins.yaml
 # 重新编译（也可以直接改 euroc_config.yaml 的 use_sparse_align 参数）
+```
 然后重复上面的 VINS 启动 + bag 播放流程，最后：
 
-cp /home/lxy/asr_sdm_robo/output/vins_result_loop.csv /home/lxy/asr_sdm_robo/output/sparse_off/vins_sparse_off.csv
+```bash
+cp $WORKSPACE_ROOT/output/vins_result_loop.csv $WORKSPACE_ROOT/output/sparse_off/vins_sparse_off.csv
+```
+
 实验 3：重新绘图
 两个 CSV 都就位后：
 
-cd /home/lxy/asr_sdm_robo
+```bash
+cd $WORKSPACE_ROOT
 python3 experiments/sparse_compare/scripts/plot_compare.py
 
 cd /home/lxy/asr_sdm_robo && python3 experiments/sparse_compare/scripts/plot_compare.py --seq MH04 --align-mode gt_align --out output/MH04/gt_align_test 2>&1
