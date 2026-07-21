@@ -42,4 +42,12 @@ extern double SPARSE_ALIGN_CHI2_THRESH;
 extern int    SPARSE_ALIGN_MIN_FEATURES;
 extern int    SPARSE_ALIGN_MIN_ITER_FOR_OK;
 
+// Performance toggles (sparse_on path).  See feature_tracker.cpp for
+// the exact effect; each is gated on USE_SPARSE_ALIGN so the baseline
+// (sparse_off) stays bit-exact with the original VINS-Mono front-end.
+extern int    KLT_REUSE_SPARSE_PYR;   // 1: feed cur_pyr_ to calcOpticalFlowPyrLK
+extern int    DETECT_SKIP_SPARSE;     // N>0: detect every N-th sparse-on frame
+extern int    DETECT_SKIP_MIN_CNT;    // re-detect early if forw_pts drops below
+extern double RANSAC_CONFIDENCE;      // cv::findFundamentalMat confidence (0.95)
+
 void readParameters(rclcpp::Node::SharedPtr &n);

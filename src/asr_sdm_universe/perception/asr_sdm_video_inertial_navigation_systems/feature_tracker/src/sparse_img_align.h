@@ -14,7 +14,7 @@ struct SparseAlignOptions {
     double eps              = 1e-4;    // stop when max(|dx|) < eps
     double lambda_rot       = 0.5;     // IMU rotation prior weight (added to Hessian diag)
     double lambda_trans     = 0.0;     // IMU translation prior weight
-    double chi2_thresh      = 50.0;    // success threshold on final mean intensity residual
+    double chi2_thresh      = 25.0;   // success threshold on final mean intensity residual (tightened from 50)
     int    min_features     = 30;      // minimum n_meas to declare success
     int    min_iter_for_ok  = 2;       // at least this many meaningful iterations
     bool   estimate_alpha   = false;   // affine brightness gain
