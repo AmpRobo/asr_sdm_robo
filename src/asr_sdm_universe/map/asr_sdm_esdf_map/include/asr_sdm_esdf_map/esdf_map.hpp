@@ -1,80 +1,35 @@
-/**
-* This file is part of Fast-Planner.
-*
-* Copyright 2019 Boyu Zhou, Aerial Robotics Group, Hong Kong University of Science and Technology, <uav.ust.hk>
-* Developed by Boyu Zhou <bzhouai at connect dot ust dot hk>, <uv dot boyuzhou at gmail dot com>
-* for more information see <https://github.com/HKUST-Aerial-Robotics/Fast-Planner>.
-* If you use this code, please cite the respective publications as
-* listed on the above website.
-*
-* Fast-Planner is free software: you can redistribute it and/or modify
-* it under the terms of the GNU Lesser General Public License as published by
-* the Free Software Foundation, either version 3 of the License, or
-* (at your option) any later version.
-*
-* Fast-Planner is distributed in the hope that it will be useful,
-* but WITHOUT ANY WARRANTY; without even the implied warranty of
-* MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-* GNU General Public License for more details.
-*
-* You should have received a copy of the GNU Lesser General Public License
-* along with Fast-Planner. If not, see <http://www.gnu.org/licenses/>.
-*/
-
-
-
-#ifndef _ESDF_MAP_HPP_
-#define _ESDF_MAP_HPP_
+#ifndef ESDF_MAP_HPP_
+#define ESDF_MAP_HPP_
 
 #include <Eigen/Eigen>
-#include <Eigen/StdVector>
-#include <chrono>
 #include <cv_bridge/cv_bridge.hpp>
-#include <geometry_msgs/msg/point.hpp>
-#include <geometry_msgs/msg/pose_with_covariance_stamped.hpp>
-#include <geometry_msgs/msg/pose_stamped.hpp>
-#include <iostream>
-#include <memory>
-#include <nav_msgs/msg/odometry.hpp>
-#include <queue>
-#include <random>
-#include <rclcpp/rclcpp.hpp>
-#include <sensor_msgs/msg/image.hpp>
-#include <sensor_msgs/msg/point_cloud2.hpp>
-#include <std_msgs/msg/color_rgba.hpp>
-#include <sensor_msgs/image_encodings.hpp>
-#include <tuple>
-#include <unordered_map>
-#include <visualization_msgs/msg/marker.hpp>
-
 #include <message_filters/subscriber.h>
 #include <message_filters/sync_policies/approximate_time.h>
 #include <message_filters/synchronizer.h>
-
+#include <nav_msgs/msg/odometry.hpp>
 #include <pcl/point_cloud.h>
 #include <pcl/point_types.h>
 #include <pcl_conversions/pcl_conversions.h>
+#include <rclcpp/rclcpp.hpp>
+#include <sensor_msgs/image_encodings.hpp>
+#include <sensor_msgs/msg/image.hpp>
+#include <sensor_msgs/msg/point_cloud.hpp>
+#include <sensor_msgs/msg/point_cloud2.hpp>
+
+#include <cmath>
+#include <cstddef>
+#include <iostream>
+#include <memory>
+#include <queue>
+#include <random>
+#include <string>
+#include <vector>
 
 #include <asr_sdm_esdf_map/raycast.hpp>
 
 #define logit(x) (log((x) / (1 - (x))))
 
 using namespace std;
-
-// voxel hashing
-template <typename T>
-struct matrix_hash {
-  std::size_t operator()(T const& matrix) const {
-    size_t seed = 0;
-    for (size_t i = 0; i < matrix.size(); ++i) {
-      auto elem = *(matrix.data() + i);
-      seed ^= std::hash<typename T::Scalar>()(elem) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
-    }
-    return seed;
-  }
-};
-
-// constant parameters
 
 struct MappingParameters {
 
@@ -86,20 +41,16 @@ struct MappingParameters {
   Eigen::Vector3d local_update_range_;
   double resolution_, resolution_inv_;
   double obstacles_inflation_;
-  string frame_id_;
-  int pose_type_;
-  string map_input_;  // 1: pose+depth; 2: odom + cloud
 
   /* input topics and input mode */
-  string input_mode_;
-  string depth_topic_, pose_topic_, odom_topic_, cloud_topic_;
-  string vio_pose_topic_, vio_points_topic_, vio_points_ns_filter_;
-  bool vio_points_accumulate_;
+  string depth_topic_, odom_topic_, cloud_topic_;
+  bool enable_depth_odom_, enable_pointcloud_odom_;
 
   /* preloaded binary map files */
   string preload_map_directory_;
   string preload_occupancy_filename_;
   string preload_esdf_filename_;
+  double preload_source_resolution_;
 
   /* camera parameters */
   double cx_, cy_, fx_, fy_;
@@ -122,22 +73,11 @@ struct MappingParameters {
   int local_map_margin_;
 
   /* visualization and computation time display */
-  double esdf_slice_height_, visualization_truncate_height_, virtual_ceil_height_, ground_height_;
-  double esdf_3d_min_distance_, esdf_3d_max_distance_;
-  int esdf_3d_stride_;
+  double virtual_ceil_height_, ground_height_;
   bool show_esdf_time_, show_occ_time_;
-  bool publish_esdf_3d_, esdf_3d_local_only_, esdf_3d_publish_negative_distance_;
-  bool publish_esdf_distance_;
-
-  /* occupied voxel map visualization */
-  double occupied_map_alpha_;
-  double occupied_map_mesh_resolution_, occupied_map_mesh_max_height_gap_;
-  int occupied_map_stride_;
-  bool publish_occupied_map_, occupied_map_local_only_, occupied_map_use_inflated_;
 
   /* active mapping */
   double unknown_flag_;
-
 };
 
 // intermediate mapping data for fusion, esdf
@@ -145,14 +85,14 @@ struct MappingParameters {
 struct MappingData {
   // main map data, occupancy of each voxel and Euclidean distance
 
-  std::vector<double> occupancy_buffer_;
-  std::vector<char> occupancy_buffer_neg;
-  std::vector<char> occupancy_buffer_inflate_;
-  std::vector<double> distance_buffer_;
-  std::vector<double> distance_buffer_neg_;
-  std::vector<double> distance_buffer_all_;
-  std::vector<double> tmp_buffer1_;
-  std::vector<double> tmp_buffer2_;
+  vector<double> occupancy_buffer_;
+  vector<char> occupancy_buffer_neg;
+  vector<char> occupancy_buffer_inflate_;
+  vector<double> distance_buffer_;
+  vector<double> distance_buffer_neg_;
+  vector<double> distance_buffer_all_;
+  vector<double> tmp_buffer1_;
+  vector<double> tmp_buffer2_;
 
   // camera position and pose data
 
@@ -162,13 +102,12 @@ struct MappingData {
   // depth image data
 
   cv::Mat depth_image_, last_depth_image_;
-  int image_cnt_;
 
   // flags of map state
 
   bool occ_need_update_, local_updated_, esdf_need_update_;
   bool has_first_depth_;
-  bool has_odom_, has_cloud_;
+  bool has_odom_;
 
   // depth image projected point cloud
 
@@ -194,60 +133,51 @@ struct MappingData {
   EIGEN_MAKE_ALIGNED_OPERATOR_NEW
 };
 
-class ESDFMap {
+class ESDFMap
+{
 public:
-  ESDFMap() {}
-  ~ESDFMap() {}
+  ESDFMap() = default;
+  ~ESDFMap() = default;
 
-  enum { POSE_STAMPED = 1, ODOMETRY = 2, INVALID_IDX = -10000 };
+  enum { INVALID_IDX = -10000 };
 
   // occupancy map management
   void resetBuffer();
   void resetBuffer(Eigen::Vector3d min, Eigen::Vector3d max);
 
-  inline void posToIndex(const Eigen::Vector3d& pos, Eigen::Vector3i& id);
-  inline void indexToPos(const Eigen::Vector3i& id, Eigen::Vector3d& pos);
-  inline int toAddress(const Eigen::Vector3i& id);
-  inline int toAddress(const int x, const int y, const int z);
-  inline bool isInMap(const Eigen::Vector3d& pos);
-  inline bool isInMap(const Eigen::Vector3i& idx);
+  inline void posToIndex(const Eigen::Vector3d & pos, Eigen::Vector3i & id);
+  inline void indexToPos(const Eigen::Vector3i & id, Eigen::Vector3d & pos);
+  inline int toAddress(const Eigen::Vector3i & id);
+  inline int toAddress(int x, int y, int z);
+  inline bool isInMap(const Eigen::Vector3d & pos);
+  inline bool isInMap(const Eigen::Vector3i & idx);
 
   inline void setOccupancy(Eigen::Vector3d pos, double occ = 1);
   inline void setOccupied(Eigen::Vector3d pos);
   inline int getOccupancy(Eigen::Vector3d pos);
   inline int getOccupancy(Eigen::Vector3i id);
   inline int getInflateOccupancy(Eigen::Vector3d pos);
+  inline int getInflateOccupancy(const Eigen::Vector3i & id);
 
-  inline void boundIndex(Eigen::Vector3i& id);
-  inline bool isUnknown(const Eigen::Vector3i& id);
-  inline bool isUnknown(const Eigen::Vector3d& pos);
-  inline bool isKnownFree(const Eigen::Vector3i& id);
-  inline bool isKnownOccupied(const Eigen::Vector3i& id);
+  inline void boundIndex(Eigen::Vector3i & id);
+  inline bool isUnknown(const Eigen::Vector3i & id);
+  inline bool isUnknown(const Eigen::Vector3d & pos);
+  inline bool isKnownFree(const Eigen::Vector3i & id);
+  inline bool isKnownOccupied(const Eigen::Vector3i & id);
 
   // distance field management
-  inline double getDistance(const Eigen::Vector3d& pos);
-  inline double getDistance(const Eigen::Vector3i& id);
-  inline double getDistWithGradTrilinear(Eigen::Vector3d pos, Eigen::Vector3d& grad);
-  void getSurroundPts(const Eigen::Vector3d& pos, Eigen::Vector3d pts[2][2][2], Eigen::Vector3d& diff);
-  // /inline void setLocalRange(Eigen::Vector3d min_pos, Eigen::Vector3d
-  // max_pos);
+  inline double getDistance(const Eigen::Vector3d & pos);
+  inline double getDistance(const Eigen::Vector3i & id);
+  inline double getDistWithGradTrilinear(Eigen::Vector3d pos, Eigen::Vector3d & grad);
+  void getSurroundPts(
+    const Eigen::Vector3d & pos, Eigen::Vector3d pts[2][2][2], Eigen::Vector3d & diff);
 
   void updateESDF3d();
-  void getSliceESDF(const double height, const double res, const Eigen::Vector4d& range,
-                    vector<Eigen::Vector3d>& slice, vector<Eigen::Vector3d>& grad,
-                    int sign = 1);  // 1 pos, 2 neg, 3 combined
-  void initMap(const std::shared_ptr<rclcpp::Node>& nh);
-
-  void publishMap();
-  void publishMapInflate(bool all_info = false);
-  void publishESDF();
-  void publishESDF3D();
-  void publishESDFDistance();
-  void publishOccupiedMap();
-  void publishUpdateRange();
-
-  void publishUnknown();
-  void publishDepth();
+  void getSliceESDF(
+    const double height, const double res, const Eigen::Vector4d & range,
+    vector<Eigen::Vector3d> & slice, vector<Eigen::Vector3d> & grad,
+    int sign = 1);  // 1 pos, 2 neg, 3 combined
+  void initMap(const std::shared_ptr<rclcpp::Node> & nh);
 
   void checkDist();
   bool hasDepthObservation();
@@ -255,9 +185,9 @@ public:
 
   // preloaded binary map (occupancy.bin / esdf.bin) loading
   bool loadPreloadedMaps();
-  bool loadOccupancyBinary(const std::string& path, std::string& status);
-  bool loadEsdfBinary(const std::string& path, std::string& status);
-  void getRegion(Eigen::Vector3d& ori, Eigen::Vector3d& size);
+  bool loadOccupancyBinary(const std::string & path, std::string & status);
+  bool loadEsdfBinary(const std::string & path, std::string & status);
+  void getRegion(Eigen::Vector3d & ori, Eigen::Vector3d & size);
   double getResolution();
   Eigen::Vector3d getOrigin();
   int getVoxelNum();
@@ -274,77 +204,56 @@ private:
   void fillESDF(F_get_val f_get_val, F_set_val f_set_val, int start, int end, int dim);
 
   // get depth image and camera pose
-  void depthPoseCallback(sensor_msgs::msg::Image::ConstSharedPtr img,
-                         geometry_msgs::msg::PoseStamped::ConstSharedPtr pose);
-  void depthOdomCallback(sensor_msgs::msg::Image::ConstSharedPtr img,
-                         nav_msgs::msg::Odometry::ConstSharedPtr odom);
-  void depthCallback(sensor_msgs::msg::Image::ConstSharedPtr img);
+  void depthOdomCallback(
+    sensor_msgs::msg::Image::ConstSharedPtr img,
+    nav_msgs::msg::Odometry::ConstSharedPtr odom);
+  void pointCloudCallback(sensor_msgs::msg::PointCloud::ConstSharedPtr msg);
   void cloudCallback(sensor_msgs::msg::PointCloud2::ConstSharedPtr msg);
-  void poseCallback(geometry_msgs::msg::PoseStamped::ConstSharedPtr pose);
-  void odomCallback(nav_msgs::msg::Odometry::ConstSharedPtr odom);
-  void vioPoseCallback(geometry_msgs::msg::PoseWithCovarianceStamped::ConstSharedPtr pose);
-  void vioPointsCallback(visualization_msgs::msg::Marker::ConstSharedPtr marker);
   void insertPointCloud(const pcl::PointCloud<pcl::PointXYZ> & latest_cloud);
+  void odomCallback(nav_msgs::msg::Odometry::ConstSharedPtr odom);
 
   // update occupancy by raycasting, and update ESDF
   void updateOccupancyCallback();
   void updateESDFCallback();
-  void visCallback();
-
 
   // main update process
   void projectDepthImage();
   void raycastProcess();
   void clearAndInflateLocalMap();
+  void rebuildEsdfFromOccupancy();
+  bool setPreloadedOccupiedVoxel(
+    const Eigen::Vector3i & target_id, std::size_t & inserted_target_voxels);
+  bool insertPreloadedSourceVoxel(
+    const Eigen::Vector3d & source_center, double source_resolution,
+    std::size_t & inserted_target_voxels);
 
-  inline void inflatePoint(const Eigen::Vector3i& pt, int step, vector<Eigen::Vector3i>& pts);
+  inline void inflatePoint(const Eigen::Vector3i & pt, int step, vector<Eigen::Vector3i> & pts);
   int setCacheOccupancy(Eigen::Vector3d pos, int occ);
-  Eigen::Vector3d closetPointInMap(const Eigen::Vector3d& pt, const Eigen::Vector3d& camera_pt);
+  Eigen::Vector3d closetPointInMap(
+    const Eigen::Vector3d & pt, const Eigen::Vector3d & camera_pt);
 
   // typedef message_filters::sync_policies::ExactTime<sensor_msgs::Image,
   // nav_msgs::Odometry> SyncPolicyImageOdom; typedef
-  // message_filters::sync_policies::ExactTime<sensor_msgs::Image,
-  // geometry_msgs::PoseStamped> SyncPolicyImagePose;
-  typedef message_filters::sync_policies::ApproximateTime<sensor_msgs::msg::Image, nav_msgs::msg::Odometry>
-      SyncPolicyImageOdom;
-  typedef message_filters::sync_policies::ApproximateTime<sensor_msgs::msg::Image,
-                                                          geometry_msgs::msg::PoseStamped>
-      SyncPolicyImagePose;
-  typedef shared_ptr<message_filters::Synchronizer<SyncPolicyImagePose>> SynchronizerImagePose;
+  typedef message_filters::sync_policies::ApproximateTime<
+    sensor_msgs::msg::Image, nav_msgs::msg::Odometry> SyncPolicyImageOdom;
   typedef shared_ptr<message_filters::Synchronizer<SyncPolicyImageOdom>> SynchronizerImageOdom;
 
   shared_ptr<rclcpp::Node> node_;
   shared_ptr<message_filters::Subscriber<sensor_msgs::msg::Image>> depth_sub_;
-  shared_ptr<message_filters::Subscriber<geometry_msgs::msg::PoseStamped>> pose_sub_;
   shared_ptr<message_filters::Subscriber<nav_msgs::msg::Odometry>> odom_sub_;
-  SynchronizerImagePose sync_image_pose_;
   SynchronizerImageOdom sync_image_odom_;
 
-  rclcpp::Subscription<sensor_msgs::msg::Image>::SharedPtr depth_image_sub_;
-  rclcpp::Subscription<sensor_msgs::msg::PointCloud2>::SharedPtr indep_cloud_sub_;
+  rclcpp::Subscription<sensor_msgs::msg::PointCloud>::SharedPtr indep_cloud_sub_;
   rclcpp::Subscription<nav_msgs::msg::Odometry>::SharedPtr indep_odom_sub_;
-  rclcpp::Subscription<geometry_msgs::msg::PoseWithCovarianceStamped>::SharedPtr pose_cov_sub_;
-  rclcpp::Subscription<visualization_msgs::msg::Marker>::SharedPtr vio_points_sub_;
-
-  std::unordered_map<std::string, std::vector<Eigen::Vector3d>> vio_marker_points_;
-
-  rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr map_pub_;
-  rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr esdf_pub_;
-  rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr esdf_3d_pub_;
-  rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr esdf_distance_pub_;
-  rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr map_inf_pub_;
-  rclcpp::Publisher<visualization_msgs::msg::Marker>::SharedPtr occupied_map_pub_;
-  rclcpp::Publisher<visualization_msgs::msg::Marker>::SharedPtr update_range_pub_;
-  rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr unknown_pub_;
-  rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr depth_pub_;
 
   rclcpp::TimerBase::SharedPtr occ_timer_;
   rclcpp::TimerBase::SharedPtr esdf_timer_;
-  rclcpp::TimerBase::SharedPtr vis_timer_;
-  //
+
   uniform_real_distribution<double> rand_noise_;
   normal_distribution<double> rand_noise2_;
   default_random_engine eng_;
+
+  bool preloaded_occupancy_grid_matches_target_{false};
 };
 
 /* ============================== definition of inline function
@@ -495,6 +404,12 @@ inline int ESDFMap::getInflateOccupancy(Eigen::Vector3d pos) {
 
   Eigen::Vector3i id;
   posToIndex(pos, id);
+
+  return int(md_.occupancy_buffer_inflate_[toAddress(id)]);
+}
+
+inline int ESDFMap::getInflateOccupancy(const Eigen::Vector3i& id) {
+  if (!isInMap(id)) return -1;
 
   return int(md_.occupancy_buffer_inflate_[toAddress(id)]);
 }

@@ -1,69 +1,136 @@
 # asr_sdm_esdf_map
 
-Incremental ESDF map package for ROS 2.
+ROS 2 library adaptation of Fast-Planner `plan_env` mapping code.
 
-## Launch
+## Core library
 
-```sh
-ros2 launch asr_sdm_esdf_map esdf_map_launch.py
-```
+The core target is `asr_sdm_esdf_map`. `src/esdf_map.cpp` keeps the Fast-Planner mapping pipeline:
 
-The input mode is selected in `config/esdf_map_config.yaml`:
+- synchronized depth image + odometry input through `message_filters::ApproximateTime`
+- independent world-frame point cloud + odometry input
+- probabilistic raycasting into `occupancy_buffer_`
+- local clearing and obstacle inflation into `occupancy_buffer_inflate_`
+- positive and negative Euclidean distance transforms
+- combined signed distance in `distance_buffer_all_`
 
-```yaml
-esdf_map.input_mode: "vio"    # VIO sparse points + VIO pose
-# esdf_map.input_mode: "depth" # depth image + VIO pose
-```
-
-`vio` and `depth` are mutually exclusive. The node only subscribes to the topics needed by the selected mode.
-
-## Input modes
-
-### `vio`
-
-Uses sparse VIO map points and the VIO pose:
-
-```yaml
-esdf_map.vio_pose_topic: "/localization/video_inertial_odom/pose"
-esdf_map.vio_points_topic: "/localization/video_inertial_odom/points"
-esdf_map.vio_points_ns_filter: "pts"
-esdf_map.vio_points_accumulate: true
-```
-
-### `depth`
-
-Uses the RealSense depth image and the existing VIO pose. No odometry topic is required:
-
-```yaml
-esdf_map.depth_topic: "/sensing/camera/realsense/depth"
-esdf_map.pose_topic: "/localization/video_inertial_odom/pose"
-```
-
-`/localization/video_inertial_odom/pose` is expected to be `geometry_msgs/msg/PoseWithCovarianceStamped`.
-The VIO sparse `/points` topic is not required in `depth` mode.
-
-## Output topics
+Default inputs:
 
 ```text
-/esdf_map/cloud
-/esdf_map/occupancy_inflate
-/esdf_map/esdf
-/esdf_map/occupied_map
-/esdf_map/esdf_3d
-/esdf_map/esdf_distance
-/esdf_map/update_range
+/localization/vins/point_cloud       sensor_msgs/msg/PointCloud
+/localization/vins/odometry          nav_msgs/msg/Odometry
+/sensing/camera/realsense/depth      sensor_msgs/msg/Image
 ```
 
-`/esdf_map/esdf_3d` is kept as the RViz visualization topic. Its `intensity` is normalized from `abs(signed_distance)`, so it is not intended as the planner or binary-map source.
+The VINS point-cloud topic remains `sensor_msgs/msg/PointCloud`. Its subscription callback converts the message to `sensor_msgs/msg/PointCloud2` and then forwards it to the existing PointCloud2 processing entry.
 
-`/esdf_map/esdf_distance` is published as a `sensor_msgs/msg/PointCloud2` using `pcl::PointXYZI`. The fields are `x y z intensity`, where `intensity` is the real signed ESDF distance in meters from `distance_buffer_all_`, without normalization and without `abs()`. Use this topic when saving `esdf.bin` for planning.
+The class is used as a library:
 
-`/esdf_map/occupied_map` is published as a `visualization_msgs/msg/Marker` with `TRIANGLE_LIST` mesh faces. The occupied cells are rendered as a cube-shaped surface mesh, so RViz2 shows square/cube occupied blocks while still using mesh triangles instead of `CUBE_LIST`. The marker alpha is set explicitly for RViz2, and `demo.rviz` enables the `occupied_map` marker namespace.
+```cpp
+ESDFMap::Ptr esdf_map(new ESDFMap);
+esdf_map->initMap(node);
 
+amprobo::EDTEnvironment::Ptr edt_environment(new amprobo::EDTEnvironment);
+edt_environment->setMap(esdf_map);
+```
 
-Occupied map mesh parameters:
+The library does not publish visualization topics. The standalone visualization node is located in `test/`.
+
+At initialization, the library can also load `maps/occupancy.bin` and
+`maps/esdf.bin`. Set `esdf_map.preload_map_directory` to an empty string to
+disable this data path. Absolute directories are accepted; relative directories
+are resolved from the installed package share directory.
+
+### Binary-map resolution conversion
+
+`esdf_map.resolution` is the **target map resolution**. It is used by the
+occupancy buffers, ESDF computation, point-cloud voxel centers, and the RViz
+`CUBE_LIST` cube edge length. There is no separate visualization resolution.
+
+The current `.bin` files contain world-frame voxel centers but do not store the
+source voxel size. Set the independent source-resolution parameter:
 
 ```yaml
-esdf_map.occupied_map_mesh_resolution: 0.30
-esdf_map.occupied_map_mesh_max_height_gap: 0.60
+esdf_map:
+  preload_source_resolution: 0.15
 ```
+
+When the source and target grids align and have the same resolution, records are
+loaded directly. Otherwise, each source occupied record is treated as a physical
+cube with edge length `preload_source_resolution`. Every target voxel with a
+positive-volume AABB intersection is marked occupied. This conservative rule
+works for both coarse-to-fine and fine-to-coarse conversion and does not require
+an integer resolution ratio.
+
+When conversion is required, the old `esdf.bin` is ignored. The library rebuilds
+the complete ESDF from the converted occupancy grid using
+`esdf_map.resolution`. The preloaded occupancy map is already treated as
+inflated, so no second inflation pass is applied.
+
+## Test
+
+The launch file loads only `config/esdf_map_config.yaml`. It does not declare or
+inject duplicate feature switches, so the YAML file is the single source of
+truth for all node parameters.
+
+For the VINS point-cloud chain, use:
+
+```yaml
+esdf_map:
+  ros__parameters:
+    esdf_map:
+      enable_depth_odom: false
+      enable_pointcloud_odom: true
+```
+
+For the synchronized depth-image chain, switch the two values accordingly. For
+preload-only operation, set both live-input switches to `false` and configure
+`preload_map_directory`.
+
+After editing the YAML file, launch normally:
+
+```bash
+ros2 launch asr_sdm_esdf_map esdf_map_test.launch.py
+```
+
+Test-only outputs:
+
+```text
+/map/esdf_map/cloud               sensor_msgs/msg/PointCloud2
+/map/esdf_map/occupancy_inflate   sensor_msgs/msg/PointCloud2
+/map/esdf_map/esdf_distance       sensor_msgs/msg/PointCloud2
+/map/esdf_map/esdf                sensor_msgs/msg/PointCloud2
+/map/esdf_map/occupied_map        visualization_msgs/msg/Marker
+```
+
+`/map/esdf_map/cloud` contains only raw occupied voxels reconstructed from the live
+VINS point cloud or synchronized depth-image/odometry input. Preloaded
+`occupancy.bin` data is deliberately excluded. `/map/esdf_map/occupancy_inflate`
+contains the collision voxels; `occupancy.bin` is treated as already inflated
+and is published here without another inflation pass.
+
+`/map/esdf_map/esdf_distance` contains the actual 3D voxel centers and the
+unmodified signed ESDF distance in metres in its `intensity` field. It is the
+serialization input for `asr_sdm_map_saver`. `/map/esdf_map/esdf` contains the
+same voxel centers, but its `intensity` field is normalized to `[0, 1]` for
+deterministic RViz coloring. Both clouds and `occupancy_inflate` use the same
+`header.stamp` and `header.frame_id` for exact snapshot matching.
+`/map/esdf_map/occupied_map` is a
+height-colored `visualization_msgs/msg/Marker::CUBE_LIST` built from the same
+inflated collision voxels. Each marker point is one occupied voxel center, and
+its cube edge length is read directly from `ESDFMap::getResolution()`. Therefore
+the target map grid and RViz voxel geometry always use the same
+`esdf_map.resolution` parameter. A preloaded `.bin` source resolution is used
+only while converting source occupied cubes into that target grid.
+
+The supplied RViz configuration uses the ROS 2
+`rviz_default_plugins/PointCloud2` display for `/map/esdf_map/occupancy_inflate`
+and `/map/esdf_map/esdf`, with Reliable + Transient Local QoS matching the test
+publishers. The ESDF display uses the normalized `intensity` field in `[0, 1]`.
+RViz also displays `/localization/vins/odometry` directly with the Odometry plugin.
+
+The only test source is `test/esdf_map_test.cpp`; it links the exported
+`asr_sdm_esdf_map` target in the same way as a downstream package.
+
+## Dynamic-object support retained from Fast-Planner
+
+- `src/obj_predictor.cpp` remains part of the shared library, matching Fast-Planner `plan_env`.
