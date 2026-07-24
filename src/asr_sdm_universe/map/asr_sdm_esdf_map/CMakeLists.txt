@@ -3,90 +3,73 @@ cmake_minimum_required(VERSION 3.8)
 if(POLICY CMP0074)
   cmake_policy(SET CMP0074 NEW)
 endif()
-
 if(POLICY CMP0144)
   cmake_policy(SET CMP0144 NEW)
+  set(CMAKE_POLICY_DEFAULT_CMP0144 NEW)
 endif()
-
-set(CMAKE_POLICY_DEFAULT_CMP0074 NEW)
-set(CMAKE_POLICY_DEFAULT_CMP0144 NEW)
-set(CMAKE_SUPPRESS_DEVELOPER_WARNINGS 1 CACHE BOOL "Suppress CMake developer warnings" FORCE)
-
-unset(FLANN_ROOT CACHE)
-unset(FLANN_ROOT)
 
 project(asr_sdm_esdf_map)
 
 if(NOT CMAKE_CXX_STANDARD)
-  set(CMAKE_CXX_STANDARD 14)
+  set(CMAKE_CXX_STANDARD 17)
 endif()
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall -O3")
+add_compile_options(-Wall -O3)
 
 find_package(ament_cmake REQUIRED)
 find_package(ament_index_cpp REQUIRED)
 find_package(rclcpp REQUIRED)
 find_package(sensor_msgs REQUIRED)
+find_package(std_msgs REQUIRED)
 find_package(geometry_msgs REQUIRED)
 find_package(nav_msgs REQUIRED)
-find_package(std_msgs REQUIRED)
 find_package(visualization_msgs REQUIRED)
 find_package(cv_bridge REQUIRED)
 find_package(message_filters REQUIRED)
 find_package(pcl_conversions REQUIRED)
-
 find_package(PCL REQUIRED)
 find_package(OpenCV REQUIRED)
 find_package(Eigen3 REQUIRED)
 
-add_library(asr_sdm_esdf_map SHARED
+add_library(${PROJECT_NAME} SHARED
+  src/binary_map_io.cpp
   src/esdf_map.cpp
-  src/obj_predictor.cpp
   src/edt_environment.cpp
+  src/obj_predictor.cpp
   src/raycast.cpp
 )
 
-target_include_directories(asr_sdm_esdf_map PUBLIC
+target_include_directories(${PROJECT_NAME} PUBLIC
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
   $<INSTALL_INTERFACE:include>
-  ${OpenCV_INCLUDE_DIRS}
   ${PCL_INCLUDE_DIRS}
+  ${OpenCV_INCLUDE_DIRS}
 )
 
-ament_target_dependencies(asr_sdm_esdf_map
-  rclcpp
+ament_target_dependencies(${PROJECT_NAME}
   ament_index_cpp
+  rclcpp
   sensor_msgs
   geometry_msgs
   nav_msgs
-  std_msgs
   visualization_msgs
   cv_bridge
   message_filters
   pcl_conversions
 )
 
-if(TARGET Eigen3::Eigen)
-  target_link_libraries(asr_sdm_esdf_map Eigen3::Eigen)
-else()
-  target_include_directories(asr_sdm_esdf_map PUBLIC ${EIGEN3_INCLUDE_DIR})
-endif()
-
-target_link_libraries(asr_sdm_esdf_map ${PCL_LIBRARIES} ${OpenCV_LIBS})
+target_link_libraries(${PROJECT_NAME}
+  Eigen3::Eigen
+  ${PCL_LIBRARIES}
+  ${OpenCV_LIBS}
+)
 
 add_executable(obj_generator
   src/obj_generator.cpp
 )
 
-add_executable(esdf_map_node
-  src/esdf_map_node.cpp
-)
-
 target_include_directories(obj_generator PRIVATE
-  ${CMAKE_CURRENT_SOURCE_DIR}/include
-)
-
-target_include_directories(esdf_map_node PRIVATE
   ${CMAKE_CURRENT_SOURCE_DIR}/include
 )
 
@@ -97,18 +80,50 @@ ament_target_dependencies(obj_generator
   visualization_msgs
 )
 
-ament_target_dependencies(esdf_map_node
+target_link_libraries(obj_generator
+  Eigen3::Eigen
+)
+
+add_executable(esdf_map_test
+  test/esdf_map_test.cpp
+)
+
+target_include_directories(esdf_map_test PRIVATE
+  ${CMAKE_CURRENT_SOURCE_DIR}/include
+  ${PCL_INCLUDE_DIRS}
+)
+
+ament_target_dependencies(esdf_map_test
+  cv_bridge
+  message_filters
+  nav_msgs
   rclcpp
+  sensor_msgs
+  std_msgs
+  geometry_msgs
+  visualization_msgs
+  pcl_conversions
 )
 
-target_link_libraries(esdf_map_node
-  asr_sdm_esdf_map
+target_link_libraries(esdf_map_test
+  ${PROJECT_NAME}
+  ${PCL_LIBRARIES}
 )
 
-install(TARGETS asr_sdm_esdf_map obj_generator esdf_map_node
+# Export only the reusable library. Executables must not be part of the
+# package export set, otherwise downstream packages try to link them as
+# imported library targets.
+install(
+  TARGETS ${PROJECT_NAME}
   EXPORT export_${PROJECT_NAME}
   ARCHIVE DESTINATION lib
   LIBRARY DESTINATION lib
+  RUNTIME DESTINATION bin
+  INCLUDES DESTINATION include
+)
+
+install(
+  TARGETS esdf_map_test obj_generator
   RUNTIME DESTINATION lib/${PROJECT_NAME}
 )
 
@@ -116,31 +131,26 @@ install(DIRECTORY include/
   DESTINATION include
 )
 
-install(DIRECTORY launch
+install(DIRECTORY config launch maps test
   DESTINATION share/${PROJECT_NAME}
+  PATTERN "*.cpp" EXCLUDE
 )
 
-install(DIRECTORY config
-  DESTINATION share/${PROJECT_NAME}
-)
-
-install(DIRECTORY maps
-  DESTINATION share/${PROJECT_NAME}
-)
-
-ament_export_targets(export_${PROJECT_NAME})
+ament_export_targets(export_${PROJECT_NAME} HAS_LIBRARY_TARGET)
 ament_export_include_directories(include)
 ament_export_dependencies(
-  rclcpp
   ament_index_cpp
+  rclcpp
   sensor_msgs
   geometry_msgs
   nav_msgs
-  std_msgs
   visualization_msgs
   cv_bridge
   message_filters
   pcl_conversions
+  Eigen3
+  PCL
+  OpenCV
 )
 
 ament_package()
