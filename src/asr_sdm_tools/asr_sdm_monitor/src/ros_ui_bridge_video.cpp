@@ -252,7 +252,9 @@ void RosUiBridge::applyDiscoveredVideoTopics(const QStringList &topicNames, cons
 
 bool RosUiBridge::isPerceptionImageTopic(const QString &topicName, const QString &topicType)
 {
-    return topicName.startsWith(QStringLiteral("/perception"))
+    const bool is_supported_prefix = topicName.startsWith(QStringLiteral("/perception"))
+                                     || topicName.startsWith(QStringLiteral("/sensing"));
+    return is_supported_prefix
            && (topicType == QString::fromLatin1(kImageType)
                || topicType == QString::fromLatin1(kCompressedImageType));
 }

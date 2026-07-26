@@ -5,7 +5,7 @@
 The interface is organized into 3 main modules:
 
 - **Hardware**: run the integrated CPU, memory, disk, and network monitors and visualize `/diagnostics`; compatible external NTP diagnostics can also be displayed
-- **Video**: display `/perception*` image streams in selectable video windows
+- **Video**: display `/perception*` and `/sensing*` image streams in selectable video windows
 - **Plot**: distinguish normal ROS 2 publishers from active `ros2 bag play` sources, visualize selected live data, record selected topics, and open rosbag / MCAP data independently for playback
 
 The top bar provides **Theme** and **Language** selectors. 
@@ -294,9 +294,9 @@ ros2 topic echo /diagnostics --once
 
 #### Function
 
-The **Video** module displays image streams from ROS 2 perception topics. The implementation automatically scans the ROS graph and lists topics that satisfy both conditions:
+The **Video** module displays image streams from ROS 2 perception and sensing topics. The implementation automatically scans the ROS graph and lists topics that satisfy both conditions:
 
-- The topic name starts with `/perception`
+- The topic name starts with `/perception` or `/sensing`
 - The topic type is `sensor_msgs/msg/Image` or `sensor_msgs/msg/CompressedImage`
 
 Each selected topic is subscribed directly by the monitor and rendered in the corresponding video window. Image display uses aspect-ratio preserving scaling, so the full image remains visible when the window is resized.
@@ -317,11 +317,11 @@ Each selected topic is subscribed directly by the monitor and rendered in the co
 | Parameter | Options / Range | Default | Description |
 |---|---:|---:|---|
 | **Video Windows** | 1, 2, 3, 4 | 2 | Number of active video windows |
-| **Topic** | `None` or discovered `/perception*` image topics | `None` | Image topic shown in each window |
+| **Topic** | `None` or discovered `/perception*` / `/sensing*` image topics | `None` | Image topic shown in each window |
 
 #### Video window behavior
 
-- When no topic is selected, the window displays **Select a /perception* topic to start streaming**.
+- When no topic is selected, the window displays **Select a /perception* or /sensing* topic to start streaming**.
 - When a topic is selected but no image has arrived yet, the window displays **Waiting for video frame ...**.
 - When a valid image arrives, the frame is rendered inside the window.
 - If the same topic is selected in another window, the previous window is cleared so that one topic is displayed by only one active window.
@@ -344,19 +344,19 @@ The monitor supports common raw image encodings handled by the implementation, i
 
 #### Typical workflow
 
-1. Start the ROS 2 nodes that publish image topics under `/perception*`.
+1. Start the ROS 2 nodes that publish image topics under `/perception*` or `/sensing*`.
 
 2. Start `asr_sdm_monitor` and open **Video** from the sidebar.
 
 3. Set **Video Windows** to `1`, `2`, `3`, or `4` as needed.
 
-4. In each active video window, use the **Topic** drop-down menu to select one `/perception*` image topic.
+4. In each active video window, use the **Topic** drop-down menu to select one `/perception*` or `/sensing*` image topic.
 
    ![Video multi-window topic display](docs/images/video_windows_4_topics.png)
 
 5. If a window no longer needs to display images, reduce the number of video windows or set the window **Topic** to **None**.
 
-6. If no selectable topic appears, check whether the image topic name starts with `/perception` and whether its type is `sensor_msgs/msg/Image` or `sensor_msgs/msg/CompressedImage`.
+6. If no selectable topic appears, check whether the image topic name starts with `/perception` or `/sensing` and whether its type is `sensor_msgs/msg/Image` or `sensor_msgs/msg/CompressedImage`.
 
 
 ### Plot
@@ -869,7 +869,7 @@ ros2 topic echo /diagnostics --once
 
 **Video** 模块用于显示 ROS 2 图像话题。程序会自动扫描 ROS graph，并列出同时满足下面两个条件的话题：
 
-- 话题名以 `/perception` 开头
+- 话题名以 `/perception` 或 `/sensing` 开头
 - 话题类型是 `sensor_msgs/msg/Image` 或 `sensor_msgs/msg/CompressedImage`
 
 每个窗口会直接订阅所选图像话题并渲染图像。图像显示采用保持长宽比的缩放方式，因此窗口大小变化时不会拉伸变形。
@@ -890,11 +890,11 @@ ros2 topic echo /diagnostics --once
 | 参数 | 选项 / 范围 | 默认值 | 说明 |
 |---|---:|---:|---|
 | **Video Windows** | 1, 2, 3, 4 | 2 | 当前显示的视频窗口数量 |
-| **Topic** | `None` 或扫描到的 `/perception*` 图像话题 | `None` | 每个窗口显示的图像话题 |
+| **Topic** | `None` 或扫描到的 `/perception*` / `/sensing*` 图像话题 | `None` | 每个窗口显示的图像话题 |
 
 #### 视频窗口行为
 
-- 没有选择话题时，窗口显示 **Select a /perception* topic to start streaming**。
+- 没有选择话题时，窗口显示 **Select a /perception* or /sensing* topic to start streaming**。
 - 选择了话题但还没有收到图像时，窗口显示 **Waiting for video frame ...**。
 - 收到有效图像后，图像会显示在窗口中。
 - 如果同一个话题被选择到另一个窗口，原来的窗口会被清空，避免一个话题同时占用多个窗口。
@@ -916,19 +916,19 @@ monitor 支持实现中处理的常见 raw image encoding：
 
 #### 典型使用流程
 
-1. 启动会发布 `/perception*` 图像话题的 ROS 2 节点。
+1. 启动会发布 `/perception*` 或 `/sensing*` 图像话题的 ROS 2 节点。
 
 2. 启动 `asr_sdm_monitor`，并在侧边栏打开 **Video**。
 
 3. 根据需要把 **Video Windows** 设置为 `1`、`2`、`3` 或 `4`。
 
-4. 在每个启用的视频窗口中，通过 **Topic** 下拉菜单选择一个 `/perception*` 图像话题。
+4. 在每个启用的视频窗口中，通过 **Topic** 下拉菜单选择一个 `/perception*` 或 `/sensing*` 图像话题。
 
    ![Video 双窗口话题显示](docs/images/video_windows_4_topics.png)
 
 5. 如果某个窗口不再需要显示图像，可以减少窗口数量，或把该窗口的 **Topic** 设为 **None**。
 
-6. 如果没有出现可选话题，检查图像话题名称是否以 `/perception` 开头，并确认类型是 `sensor_msgs/msg/Image` 或 `sensor_msgs/msg/CompressedImage`。
+6. 如果没有出现可选话题，检查图像话题名称是否以 `/perception` 或 `/sensing` 开头，并确认类型是 `sensor_msgs/msg/Image` 或 `sensor_msgs/msg/CompressedImage`。
 
 
 ### Plot

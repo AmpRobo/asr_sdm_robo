@@ -59,27 +59,37 @@ std::string resolveTestImage(const std::string& onnxModelPath, int argc, char* a
         "No test image found. Pass one as argv[2], or place inputs/test_image.png in the package.");
 }
 
-// Convert NCHW RGB float tensor (optionally in [0,1]) to BGR uint8 image.
-cv::Mat chwRgbToBgrU8(const std::vector<float>& data, int channels, int height, int width) {
+// Convert NCHW RGB float tensor (optionally in [0,1]) to BGR uint8, cropping letterbox padding.
+cv::Mat chwRgbToBgrU8(
+    const std::vector<float>& data, int channels, int height, int width,
+    int cropWidth, int cropHeight) {
     if (channels != 3) {
         throw std::runtime_error("Expected 3-channel image output, got channels=" + std::to_string(channels));
+    }
+    if (cropWidth <= 0 || cropHeight <= 0 || cropWidth > width || cropHeight > height) {
+        throw std::runtime_error("Invalid crop size for output tensor");
     }
     const size_t plane = static_cast<size_t>(height) * static_cast<size_t>(width);
     if (data.size() < plane * 3) {
         throw std::runtime_error("Output tensor too small for HxWxC image");
     }
 
-    // Detect whether values look normalized to [0,1].
+    // Detect whether content (excluding letterbox pad) looks normalized to [0,1].
     float maxAbs = 0.f;
-    for (size_t i = 0; i < std::min(data.size(), plane * 3); ++i) {
-        maxAbs = std::max(maxAbs, std::abs(data[i]));
+    for (int y = 0; y < cropHeight; ++y) {
+        for (int x = 0; x < cropWidth; ++x) {
+            const size_t idx = static_cast<size_t>(y) * width + x;
+            maxAbs = std::max(maxAbs, std::abs(data[0 * plane + idx]));
+            maxAbs = std::max(maxAbs, std::abs(data[1 * plane + idx]));
+            maxAbs = std::max(maxAbs, std::abs(data[2 * plane + idx]));
+        }
     }
     const bool normalized = maxAbs <= 1.5f;
     const float scale = normalized ? 255.f : 1.f;
 
-    cv::Mat bgr(height, width, CV_8UC3);
-    for (int y = 0; y < height; ++y) {
-        for (int x = 0; x < width; ++x) {
+    cv::Mat bgr(cropHeight, cropWidth, CV_8UC3);
+    for (int y = 0; y < cropHeight; ++y) {
+        for (int x = 0; x < cropWidth; ++x) {
             const size_t idx = static_cast<size_t>(y) * width + x;
             const float r = data[0 * plane + idx] * scale;
             const float g = data[1 * plane + idx] * scale;
@@ -156,17 +166,27 @@ int main(int argc, char *argv[]) {
     const auto& outputDims = engine.getOutputDims();
     std::vector<std::vector<cv::cuda::GpuMat>> inputs;
     std::vector<cv::cuda::GpuMat> input;
+    // getInputDims() returns Dims3(C, H, W)
     int netH = 256;
     int netW = 256;
     for (size_t j = 0; j < inputDims.size(); ++j) {
         const auto& dims = inputDims[j];
-        netH = dims.d[2] > 0 ? dims.d[2] : 256;
-        netW = dims.d[3] > 0 ? dims.d[3] : 256;
+        netH = dims.d[1] > 0 ? dims.d[1] : 256;
+        netW = dims.d[2] > 0 ? dims.d[2] : 256;
         auto resized = Engine::resizeKeepAspectRatioPadRightBottom(
             img, static_cast<size_t>(netH), static_cast<size_t>(netW));
         input.emplace_back(std::move(resized));
     }
     inputs.emplace_back(std::move(input));
+
+    // Match Engine::resizeKeepAspectRatioPadRightBottom so letterbox padding can be removed.
+    const int origH = cpuImg.rows;
+    const int origW = cpuImg.cols;
+    const float letterboxScale = std::min(
+        static_cast<float>(netW) / static_cast<float>(origW),
+        static_cast<float>(netH) / static_cast<float>(origH));
+    const int unpadW = static_cast<int>(letterboxScale * origW);
+    const int unpadH = static_cast<int>(letterboxScale * origH);
 
     // One timed inference for the saved output
     std::vector<std::vector<std::vector<float>>> featureVectors;
@@ -191,8 +211,12 @@ int main(int argc, char *argv[]) {
         outW = outputDims[0].d[3] > 0 ? outputDims[0].d[3] : outW;
     }
 
+    const int cropW = std::min(unpadW, outW);
+    const int cropH = std::min(unpadH, outH);
     const auto& outVec = featureVectors[0][0];
-    cv::Mat outBgr = chwRgbToBgrU8(outVec, outC, outH, outW);
+    cv::Mat croppedBgr = chwRgbToBgrU8(outVec, outC, outH, outW, cropW, cropH);
+    cv::Mat outBgr;
+    cv::resize(croppedBgr, outBgr, cv::Size(origW, origH), 0.0, 0.0, cv::INTER_LINEAR);
 
     const fs::path outPath =
         fs::path(inputImagePath).parent_path() / (fs::path(inputImagePath).stem().string() + "_out.png");
@@ -201,18 +225,13 @@ int main(int argc, char *argv[]) {
     }
     std::cout << "Wrote inference output: " << outPath.string() << std::endl;
     std::cout << "Output shape: [" << outC << ", " << outH << ", " << outW
-              << "], values: " << outVec.size() << std::endl;
+              << "], crop: " << cropW << "x" << cropH
+              << ", restored: " << origW << "x" << origH
+              << ", values: " << outVec.size() << std::endl;
 
-    // Also write a side-by-side comparison (network input | output)
-    cv::Mat netInputBgr;
-    {
-        cv::cuda::GpuMat netIn = inputs[0][0];
-        cv::Mat netInRgb;
-        netIn.download(netInRgb);
-        cv::cvtColor(netInRgb, netInputBgr, cv::COLOR_RGB2BGR);
-    }
+    // Side-by-side comparison at original resolution (input | enhanced)
     cv::Mat comparison;
-    cv::hconcat(netInputBgr, outBgr, comparison);
+    cv::hconcat(cpuImg, outBgr, comparison);
     const fs::path cmpPath =
         fs::path(inputImagePath).parent_path() / (fs::path(inputImagePath).stem().string() + "_compare.png");
     cv::imwrite(cmpPath.string(), comparison);
