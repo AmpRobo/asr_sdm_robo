@@ -24,10 +24,7 @@ If the Qt 6 development and QML runtime modules are not installed, install them 
 
 ```bash
 sudo apt update
-sudo apt install qt6-base-dev qt6-declarative-dev \
-  qml6-module-qtquick qml6-module-qtquick-controls \
-  qml6-module-qtquick-layouts qml6-module-qtquick-window \
-  qml6-module-qtqml-workerscript
+sudo apt install qt6-base-dev qt6-declarative-dev qml6-module-qtquick qml6-module-qtquick-controls qml6-module-qtquick-layouts qml6-module-qtquick-window qml6-module-qtquick-templates qml6-module-qtqml-workerscript
 ```
 
 Build and run:
