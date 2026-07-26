@@ -17,6 +17,7 @@ Target environment: Ubuntu 24.04, ROS 2 Jazzy, and Qt 6. Run the following comma
 ```bash
 source /opt/ros/jazzy/setup.bash
 rosdep install --from-paths src --ignore-src -r -y
+sudo apt-get install ros-jazzy-diagnostic-updater
 ```
 
 If the Qt 6 development and QML runtime modules are not installed, install them explicitly:
