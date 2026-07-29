@@ -11,6 +11,7 @@
 #include <asr_sdm_planning_manager/msg/bspline.hpp>
 #include <rclcpp/rclcpp.hpp>
 
+#include <geometry_msgs/msg/pose_stamped.hpp>
 #include <nav_msgs/msg/odometry.hpp>
 #include <nav_msgs/msg/path.hpp>
 #include <std_msgs/msg/empty.hpp>
@@ -63,6 +64,7 @@ private:
   std::shared_ptr<rclcpp::Node> node_;
   rclcpp::TimerBase::SharedPtr exec_timer_, safety_timer_, vis_timer_, frontier_timer_;
   rclcpp::Subscription<nav_msgs::msg::Path>::SharedPtr waypoint_sub_;
+  rclcpp::Subscription<geometry_msgs::msg::PoseStamped>::SharedPtr goalpose_sub_;
   rclcpp::Subscription<nav_msgs::msg::Odometry>::SharedPtr odom_sub_;
   rclcpp::Publisher<std_msgs::msg::Empty>::SharedPtr replan_pub_, new_pub_;
   rclcpp::Publisher<asr_sdm_planning_manager::msg::Bspline>::SharedPtr bspline_pub_;
@@ -78,6 +80,7 @@ private:
   void execFSMCallback();
   void checkCollisionCallback();
   void waypointCallback(const nav_msgs::msg::Path::SharedPtr msg);
+  void goalposeCallback(const geometry_msgs::msg::PoseStamped::SharedPtr msg);
   void odometryCallback(const nav_msgs::msg::Odometry::SharedPtr msg);
 
 public:
