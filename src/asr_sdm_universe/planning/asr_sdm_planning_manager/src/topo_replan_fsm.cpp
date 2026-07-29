@@ -52,6 +52,9 @@ void TopoReplanFSM::init(const std::shared_ptr<rclcpp::Node> & nh)
   waypoint_sub_ = node_->create_subscription<nav_msgs::msg::Path>(
     "/waypoint_generator/waypoints", 1,
     std::bind(&TopoReplanFSM::waypointCallback, this, std::placeholders::_1));
+  goalpose_sub_ = node_->create_subscription<geometry_msgs::msg::PoseStamped>(
+    "/goal_pose", 1,
+    std::bind(&TopoReplanFSM::goalposeCallback, this, std::placeholders::_1));
   odom_sub_ = node_->create_subscription<nav_msgs::msg::Odometry>(
     "/odom_world", 1, std::bind(&TopoReplanFSM::odometryCallback, this, std::placeholders::_1));
 
@@ -103,6 +106,14 @@ void TopoReplanFSM::waypointCallback(const nav_msgs::msg::Path::SharedPtr msg)
   if (exec_state_ == WAIT_TARGET) {
     changeFSMExecState(GEN_NEW_TRAJ, "TRIG");
   }
+}
+
+void TopoReplanFSM::goalposeCallback(const geometry_msgs::msg::PoseStamped::SharedPtr msg)
+{
+  auto waypoint_msg = std::make_shared<nav_msgs::msg::Path>();
+  waypoint_msg->header = msg->header;
+  waypoint_msg->poses.push_back(*msg);
+  waypointCallback(waypoint_msg);
 }
 
 void TopoReplanFSM::odometryCallback(const nav_msgs::msg::Odometry::SharedPtr msg)
