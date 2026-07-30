@@ -12,6 +12,17 @@ constexpr size_t kNum3dLinks = 4;
 constexpr size_t kNum3dPoints = kNum3dLinks + 1;
 constexpr size_t kNum3dJointDofs = 2 * kNum3dJoints;
 
+// Each physical serial joint pair is yaw first, then pitch.
+constexpr size_t yawIndex(size_t joint)
+{
+  return 2 * joint;
+}
+
+constexpr size_t pitchIndex(size_t joint)
+{
+  return 2 * joint + 1;
+}
+
 struct Vec3
 {
   double x;
@@ -39,12 +50,14 @@ struct HeadCommand3D
 
 struct JointState3D
 {
-  std::array<double, kNum3dJointDofs> theta{};  // theta[2*j] = pitch, theta[2*j + 1] = yaw
+  // theta[2*j] = yaw, theta[2*j + 1] = pitch
+  std::array<double, kNum3dJointDofs> theta{};
 };
 
 struct JointVelocity3D
 {
-  std::array<double, kNum3dJointDofs> theta_dot{};  // theta_dot[2*j] = pitch, theta_dot[2*j + 1] = yaw
+  // theta_dot[2*j] = yaw rate, theta_dot[2*j + 1] = pitch rate
+  std::array<double, kNum3dJointDofs> theta_dot{};
 };
 
 struct FrontUnitController3DParameters

@@ -482,10 +482,10 @@ int main()
     plt::tiledlayout(2, 2);
 
     auto pitch_axes = plt::nexttile();
-    plt::plot(pitch_axes, time_history, theta_history[0], "b-");
+    plt::plot(pitch_axes, time_history, theta_history[asr::pitchIndex(0)], "b-");
     plt::hold(pitch_axes, true);
-    plt::plot(pitch_axes, time_history, theta_history[2], "r--");
-    plt::plot(pitch_axes, time_history, theta_history[4], "m-.");
+    plt::plot(pitch_axes, time_history, theta_history[asr::pitchIndex(1)], "r--");
+    plt::plot(pitch_axes, time_history, theta_history[asr::pitchIndex(2)], "m-.");
     plt::title(pitch_axes, "Pitch joint angles");
     plt::xlabel(pitch_axes, "time [s]");
     plt::ylabel(pitch_axes, "pitch [rad]");
@@ -493,10 +493,10 @@ int main()
     plt::legend(pitch_axes, {"joint1 pitch", "joint2 pitch", "joint3 pitch"});
 
     auto yaw_axes = plt::nexttile();
-    plt::plot(yaw_axes, time_history, theta_history[1], "b-");
+    plt::plot(yaw_axes, time_history, theta_history[asr::yawIndex(0)], "b-");
     plt::hold(yaw_axes, true);
-    plt::plot(yaw_axes, time_history, theta_history[3], "r--");
-    plt::plot(yaw_axes, time_history, theta_history[5], "m-.");
+    plt::plot(yaw_axes, time_history, theta_history[asr::yawIndex(1)], "r--");
+    plt::plot(yaw_axes, time_history, theta_history[asr::yawIndex(2)], "m-.");
     plt::title(yaw_axes, "Yaw joint angles");
     plt::xlabel(yaw_axes, "time [s]");
     plt::ylabel(yaw_axes, "yaw [rad]");
@@ -690,7 +690,8 @@ int main()
     for (size_t k = 0; k < yaw_steps; ++k) {
       const auto vel = controller.step(yaw_cmd, yaw_dt, yaw_state);
       for (size_t j = 0; j < asr::kNum3dJoints; ++j) {
-        max_pitch_dot = std::max(max_pitch_dot, std::abs(vel.theta_dot[2*j]));
+        max_pitch_dot = std::max(
+          max_pitch_dot, std::abs(vel.theta_dot[asr::pitchIndex(j)]));
       }
     }
     const bool yaw_only_ok = max_pitch_dot < 1e-9;
@@ -709,7 +710,8 @@ int main()
     for (size_t k = 0; k < yaw_steps; ++k) {
       const auto vel = controller.step(pitch_cmd, yaw_dt, pitch_state);
       for (size_t j = 0; j < asr::kNum3dJoints; ++j) {
-        max_yaw_dot = std::max(max_yaw_dot, std::abs(vel.theta_dot[2*j+1]));
+        max_yaw_dot = std::max(
+          max_yaw_dot, std::abs(vel.theta_dot[asr::yawIndex(j)]));
       }
     }
     const bool pitch_only_ok = max_yaw_dot < 1e-9;
@@ -808,7 +810,9 @@ int main()
 
     std::array<double, asr::kNum3dJoints> bend{};
     for (size_t j = 0; j < asr::kNum3dJoints; ++j) {
-      bend[j] = std::hypot(chain_state.joints.theta[2*j], chain_state.joints.theta[2*j+1]);
+      bend[j] = std::hypot(
+        chain_state.joints.theta[asr::yawIndex(j)],
+        chain_state.joints.theta[asr::pitchIndex(j)]);
     }
     const bool chain_ok = bend[0] > 0.35 && bend[1] > 0.20 && bend[2] > 0.20;
     std::cout << "  8.6 Chain propagation: bend joint0/1/2=" << bend[0]
@@ -836,8 +840,8 @@ int main()
 
       // 检查所有关节角在限位内
       for (size_t j = 0; j < asr::kNum3dJoints; ++j) {
-        const double p = limit_state.joints.theta[2*j];
-        const double y = limit_state.joints.theta[2*j+1];
+        const double y = limit_state.joints.theta[asr::yawIndex(j)];
+        const double p = limit_state.joints.theta[asr::pitchIndex(j)];
         if (std::abs(p) > params.joint_limit + 1e-9 || std::abs(y) > params.joint_limit + 1e-9) {
           stable = false;
         }
@@ -932,20 +936,27 @@ int main()
     }
   }
 
-  std::cout << "Final pitch-yaw joint angles:" << std::endl;
-  for (size_t i = 0; i < state.joints.theta.size(); i += 2) {
-    std::cout << "  joint " << (i / 2 + 1) << ": pitch=" << state.joints.theta[i]
-              << ", yaw=" << state.joints.theta[i + 1] << std::endl;
+  std::cout << "Final yaw-pitch joint angles:" << std::endl;
+  for (size_t joint = 0; joint < asr::kNum3dJoints; ++joint) {
+    std::cout << "  joint " << (joint + 1)
+              << ": yaw=" << state.joints.theta[asr::yawIndex(joint)]
+              << ", pitch=" << state.joints.theta[asr::pitchIndex(joint)] << std::endl;
   }
 
   std::cout << "Delayed joint angle RMS error relative to joint 1:" << std::endl;
   std::cout << "  joint 2 lag=" << fixed_lag_steps * dt << "s pitch="
-            << rms_lagged_difference(theta_history[0], theta_history[2], fixed_lag_steps)
-            << ", yaw=" << rms_lagged_difference(theta_history[1], theta_history[3], fixed_lag_steps)
+            << rms_lagged_difference(
+                 theta_history[asr::pitchIndex(0)], theta_history[asr::pitchIndex(1)], fixed_lag_steps)
+            << ", yaw="
+            << rms_lagged_difference(
+                 theta_history[asr::yawIndex(0)], theta_history[asr::yawIndex(1)], fixed_lag_steps)
             << std::endl;
   std::cout << "  joint 3 lag=" << 2 * fixed_lag_steps * dt << "s pitch="
-            << rms_lagged_difference(theta_history[0], theta_history[4], 2 * fixed_lag_steps)
-            << ", yaw=" << rms_lagged_difference(theta_history[1], theta_history[5], 2 * fixed_lag_steps)
+            << rms_lagged_difference(
+                 theta_history[asr::pitchIndex(0)], theta_history[asr::pitchIndex(2)], 2 * fixed_lag_steps)
+            << ", yaw="
+            << rms_lagged_difference(
+                 theta_history[asr::yawIndex(0)], theta_history[asr::yawIndex(2)], 2 * fixed_lag_steps)
             << std::endl;
 
   auto print_path_lag_rms = [&](const std::string & label, size_t follower_point, double lag_distance) {
