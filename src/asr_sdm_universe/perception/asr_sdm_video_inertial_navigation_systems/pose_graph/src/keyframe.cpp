@@ -1,6 +1,12 @@
 #include "keyframe.h"
 #include "loop_geometric_verifier/loop_geometric_verifier.h"
 
+extern bool USE_SPARSE_ROTATION_GATE;
+extern double SPARSE_GATE_ANGLE_THRESH_DEG;
+extern double SPARSE_GATE_MAX_YAW_DIFF_DEG;
+extern double SPARSE_GATE_VIO_DIFF_DEG;
+extern int SPARSE_GATE_MIN_INLIERS;
+
 template <typename Derived>
 static void reduceVector(vector<Derived> &v, vector<uchar> status)
 {
@@ -259,39 +265,119 @@ void KeyFrame::PnPRANSAC(const vector<cv::Point2f> &matched_2d_old_norm,
 }
 
 
-// D2 W1: geometric consistency check using sparse_align rotation.
+// Safe sparse rotation geometric gate for loop-closure verification.
 //
-// Both cur_kf and old_kf may carry a sparse_align rotation (R_21 = cur_old).
-// We verify that PnP's estimate of R_old_cur is consistent with this
-// independent measurement by checking that the angular deviation is
-// below a threshold.
+// Design principles:
+//   1) Parameter-gated:  only active when USE_SPARSE_ROTATION_GATE == true.
+//   2) Inverted logic: sparse acts as a "voucher" for PnP, not as a judge.
+//      Gate fires ONLY when sparse and PnP AGREE (sparse endorses PnP),
+//      AND PnP and VIO DISAGREE — meaning VIO has drifted and PnP may be
+//      a false loop that happens to look geometrically plausible.
+//   3) Conservative floor: if PnP inliers < threshold, skip gate to avoid
+//      rejecting real loops on low-inlier frames.
+//   4) Strict-yaw guard: only fires on small PnP yaw diff, because
+//      adjacent-frame sparse R cannot represent large inter-frame rotation.
+//   5) Zero frontend impact: all logic in pose_graph, after BRIEF+PnP.
 //
-// R_pnp: PnP estimate of world -> old camera rotation.
-// R_cur_old_sparse: sparse_align rotation from cur -> old (camera frame).
-// Returns true if angle between PnP and sparse is < SPARSE_ANGLE_THRESH deg,
-// or if either frame lacks sparse data (pass-through).
-inline bool sparse_rotation_consistency_check(const Eigen::Matrix3d& R_pnp,
-                                              const Eigen::Matrix3d& R_cur_old_sparse,
-                                              bool has_cur_sparse, bool has_old_sparse)
+// Rejection condition:
+//   Gate rejects when ALL of the following hold:
+//     - |sparse_yaw - PnP_yaw| < SPARSE_GATE_ANGLE_THRESH_DEG  (sparse endorses PnP)
+//     - |PnP_yaw - VIO_yaw|   > SPARSE_GATE_VIO_DIFF_DEG       (PnP contradicts VIO)
+//     - |PnP_yaw| < SPARSE_GATE_MAX_YAW_DIFF_DEG               (small rotation)
+//     - pnp_inliers >= SPARSE_GATE_MIN_INLIERS                  (reliable PnP)
+//
+// References:
+//   - paper §IV-B: sparse rotation geometric gate, Eq.(4) rotation consistency.
+//   - code: keyframe.cpp findConnection() → this function.
+inline bool sparse_rotation_geometric_gate(
+    int cur_index, int old_index,
+    const Eigen::Matrix3d& R_vio_cur,          // VIO R of current frame (world->IMU)
+    const Eigen::Matrix3d& R_vio_old,          // VIO R of old frame (world->IMU)
+    const Eigen::Matrix3d& R_pnp_old,          // PnP R: world -> old camera
+    const Eigen::Matrix3d& R_sparse_cur,       // sparse_align R: cur(k) -> prev(k-1)
+    const Eigen::Matrix3d& R_sparse_old,       // sparse_align R: old -> prev(old-1)
+    bool has_cur_sparse, bool has_old_sparse,
+    int pnp_inliers)
 {
-    constexpr double SPARSE_ANGLE_THRESH = 20.0;  // degrees
     constexpr double DEG_TO_RAD = M_PI / 180.0;
 
-    if (!has_cur_sparse || !has_old_sparse)
-        return true;  // no sparse data — fall back to PnP only
+    // Safety: gate disabled
+    if (!USE_SPARSE_ROTATION_GATE)
+        return true;
 
-    Eigen::Matrix3d R_pnp_old_cur = R_pnp.transpose();
-    double angle_diff = std::acos(std::min(1.0,
-        0.5 * (R_pnp_old_cur.trace() + R_cur_old_sparse.trace() - 2.0)));
-    double angle_deg = angle_diff / DEG_TO_RAD;
+    // Safety: no sparse data on either frame
+    if (!has_cur_sparse || !has_old_sparse) {
+        printf("[SPARSE_GATE] cur=%d old=%d -> PASS (no sparse data)\n",
+               cur_index, old_index);
+        return true;
+    }
 
-    if (angle_deg > SPARSE_ANGLE_THRESH) {
-        printf("[SPARSE_VERIF] angle diff %.1f deg > %.0f deg -> REJECT\n",
-               angle_deg, SPARSE_ANGLE_THRESH);
+    // Safety: PnP inliers below conservative floor — skip gate to avoid
+    // false rejection on low-inlier frames (e.g. degenerate rotation-only motion).
+    if (pnp_inliers < SPARSE_GATE_MIN_INLIERS) {
+        printf("[SPARSE_GATE] cur=%d old=%d inliers=%d < min=%d -> PASS (low inliers)\n",
+               cur_index, old_index, pnp_inliers, SPARSE_GATE_MIN_INLIERS);
+        return true;
+    }
+
+    // Step 1: compute PnP relative yaw between cur and old.
+    //   PnP gives world->old_cam (R_pnp_old).  VIO gives world->IMU (R_vio_cur/old).
+    //   Transform PnP to IMU frame: R_imu_old = qic * R_pnp_old.
+    //   Then PnP IMU yaw diff: R_vio_cur^T * R_imu_old.
+    Eigen::Matrix3d R_imu_old = qic * R_pnp_old;
+    Eigen::Matrix3d R_pnp_yaw_diff = R_vio_cur.transpose() * R_imu_old;
+    double pnp_yaw_diff = Utility::R2ypr(R_pnp_yaw_diff).x();   // in radians
+
+    // Step 2: compute sparse relative yaw between cur and old.
+    //   R_sparse_cur: cur -> prev_adjacent  (adjacent frame)
+    //   R_sparse_old: old -> prev_old_adjacent
+    //   Both are adjacent-frame measurements, so their yaw difference captures
+    //   the same-frame yaw gap that the sparse aligner "sees" locally.
+    Eigen::Matrix3d R_sparse_yaw_diff = R_sparse_cur.transpose() * R_sparse_old;
+    double sparse_yaw_diff = Utility::R2ypr(R_sparse_yaw_diff).x();  // in radians
+
+    // Step 3: strict-yaw guard — only gate loops with small PnP yaw diff.
+    // Large-rotation loops (e.g. |PnP_yaw| > max) are excluded because:
+    //   a) adjacent-frame sparse R cannot represent large inter-frame rotation.
+    //   b) PnP rotation may be unreliable under large viewpoint change.
+    double pnp_yaw_deg = std::abs(pnp_yaw_diff) / DEG_TO_RAD;
+    if (pnp_yaw_deg > SPARSE_GATE_MAX_YAW_DIFF_DEG) {
+        printf("[SPARSE_GATE] cur=%d old=%d pnp_yaw=%.1f > max=%.1f deg -> PASS (large rotation)\n",
+               cur_index, old_index, pnp_yaw_deg, SPARSE_GATE_MAX_YAW_DIFF_DEG);
+        return true;
+    }
+
+    // Step 4: sparse endorses PnP?
+    //   If sparse and PnP disagree (large yaw mismatch), sparse does NOT trust PnP.
+    //   We let it pass — sparse itself is uncertain, so we should not reject.
+    double yaw_error = std::abs(pnp_yaw_diff - sparse_yaw_diff) / DEG_TO_RAD;
+    bool sparse_endorses_pnp = (yaw_error <= SPARSE_GATE_ANGLE_THRESH_DEG);
+
+    // Step 5: PnP contradicts VIO?
+    //   Compute VIO yaw diff between cur and old: R_vio_old^T * R_vio_cur.
+    Eigen::Matrix3d R_vio_yaw_diff = R_vio_old.transpose() * R_vio_cur;
+    double vio_yaw_diff = Utility::R2ypr(R_vio_yaw_diff).x();
+    double vio_error = std::abs(pnp_yaw_diff - vio_yaw_diff) / DEG_TO_RAD;
+    bool pnp_contradicts_vio = (vio_error > SPARSE_GATE_VIO_DIFF_DEG);
+
+    printf("[SPARSE_GATE] cur=%d old=%d pnp_yaw=%.1f sparse_yaw=%.1f err_pnp_sparse=%.1f "
+           "vio_yaw=%.1f err_pnp_vio=%.1f inliers=%d endorse=%d contradict_vio=%d\n",
+           cur_index, old_index, pnp_yaw_deg, sparse_yaw_diff / DEG_TO_RAD,
+           yaw_error, vio_yaw_diff / DEG_TO_RAD, vio_error,
+           pnp_inliers, sparse_endorses_pnp, pnp_contradicts_vio);
+
+    // Gate fires only when: sparse endorses PnP AND PnP contradicts VIO.
+    // This means: the visual loop agrees with sparse locally, but disagrees with VIO.
+    // Likely scenario: VIO has drifted and this loop would drag the map back —
+    // rejecting it can prevent spurious loop closure from corrupting the map.
+    if (sparse_endorses_pnp && pnp_contradicts_vio) {
+        printf("[SPARSE_GATE] -> REJECT (sparse endorses PnP but PnP contradicts VIO, "
+               "err=%.1f deg > %.1f deg)\n",
+               vio_error, SPARSE_GATE_VIO_DIFF_DEG);
         return false;
     }
-    printf("[SPARSE_VERIF] angle diff %.1f deg < %.0f deg -> PASS\n",
-           angle_deg, SPARSE_ANGLE_THRESH);
+
+    printf("[SPARSE_GATE] -> PASS\n");
     return true;
 }
 
@@ -442,12 +528,16 @@ bool KeyFrame::findConnection(KeyFrame* old_kf)
 	Eigen::Vector3d relative_t;
 	Quaterniond relative_q;
 	double relative_yaw;
+	int pnp_inliers = 0;
 	if ((int)matched_2d_cur.size() > MIN_LOOP_NUM)
 	{
         // printf("[LOOP_CONN] frame=%d old=%d matched=%d > MIN_LOOP_NUM=%d -> try PnP\n",
         //        index, old_kf->index, (int)matched_2d_cur.size(), MIN_LOOP_NUM);
-		status.clear();
+        status.clear();
 	    PnPRANSAC(matched_2d_old_norm, matched_3d, status, PnP_T_old, PnP_R_old);
+	    pnp_inliers = 0;
+	    for (size_t i = 0; i < status.size(); ++i)
+	        if (status[i]) ++pnp_inliers;
 	    reduceVector(matched_2d_cur, status);
 	    reduceVector(matched_2d_old, status);
 	    reduceVector(matched_2d_cur_norm, status);
@@ -581,40 +671,35 @@ bool KeyFrame::findConnection(KeyFrame* old_kf)
                vr.n_inliers_backward, vr.median_residual_px,
                vr.inlier_ratio, vr.verified ? "PASS" : "REJECT");
 
-        // D2 W1: additional geometric gate using sparse_align rotation.
+        // D2 W1: sparse rotation geometric gate — safe yaw-consistency check.
         //
-        // BUG NOTE (kept here until the gate is fixed):
-        //   sparse_R_ currently carries R_k_kminus1 (cur -> prev adjacent frame)
-        //   rather than R_cur_old across the loop.  Multiplying it with
-        //   R_old_cur_vio mixes frames that are not geometrically related,
-        //   so this check rejects many real loops whenever |cur yaw - old yaw|
-        //   exceeds SPARSE_ANGLE_THRESH (~25 deg), even when PnP is correct.
+        // Key insight: upstream sparse_R_ carries adjacent-frame R(cur -> prev),
+        // NOT cross-loop R(cur -> old).  Directly comparing them would reject
+        // real loops whenever |cur_yaw - old_yaw| exceeds the threshold.
         //
-        //   To remove the side-effect without changing public behavior we
-        //   skip the gate entirely when sparse_R is the per-frame adjacent
-        //   measurement (which is what we have today).  When the upstream
-        //   sparse_rot topic is reworked to publish R_cur_old for a loop
-        //   candidate, this branch can be re-enabled.
+        // Safe gate design:
+        //   - Uses yaw consistency (not cross-frame R comparison).
+        //   - Strict-yaw: only fires when |PnP_yaw_diff| < max_yaw_diff_deg.
+        //   - Conservative inlier floor: bypasses if PnP_inliers < min_inliers.
+        //   - Disabled by default (USE_SPARSE_ROTATION_GATE=false).
         //
-        // TODO(sparse_rot_loop_gate):
-        //   旋转几何门原本写在这里,被删除的原因:
-        //   1) 上游 sparse_R_ 当前只发布 *相邻帧* 之间的相对旋转 R(k, k-1),
-        //      而回环一致性检查需要的是 *cur ↔ loop_candidate_old* 之间的相对旋转.
-        //      两者语义不一致,直接把 R(k, k-1) 与 R(cur, old) 相乘算出来的角度无物理意义.
-        //   2) 实际后果:只要 |cur yaw - old yaw| 超过 SPARSE_ANGLE_THRESH (~25°),
-        //      即使 PnP 重投影校验完全正确,也会错误地 reject 合法回环 (false rejection).
-        //   3) 修复路径:等上游 sparse_rot topic 改造为发布 loop 候选两帧之间的
-        //      R_sparse(cur, old),再恢复下方的旋转几何门:
-        //          double theta_sparse = ||log(R_sparse(cur, old))||;
-        //          double theta_bow    = ||log(R_bow(cur, old))||;
-        //          bool sparse_ok = |theta_sparse - theta_bow| < θ_th;
-        //      当前只能 bypass,否则会误杀真实回环.
-        if (geometric_ok && has_sparse_R_ && old_kf->has_sparse_R_) {
-            // Adjacent-frame sparse rotation: semantically incompatible with
-            // cross-loop consistency check.  Bypass to avoid false REJECTs.
-            printf("[SPARSE_VERIF] cur=%d old=%d -> BYPASS "
-                   "(sparse_R_ is per-adjacent-frame, not cross-loop)\n",
-                   index, old_kf->index);
+        // When gate is enabled AND all preconditions are met AND a severe
+        // yaw mismatch is detected -> REJECT.  Otherwise -> PASS (no effect).
+        if (geometric_ok) {
+            bool sparse_ok = sparse_rotation_geometric_gate(
+                index, old_kf->index,
+                origin_vio_R,                         // R_vio_cur
+                old_kf->origin_vio_R,                  // R_vio_old
+                PnP_R_old,                            // R_pnp_old
+                sparse_R_,                             // R_sparse_cur (cur -> prev_adj)
+                old_kf->sparse_R_,                     // R_sparse_old (old -> prev_old_adj)
+                has_sparse_R_, old_kf->has_sparse_R_,
+                pnp_inliers);
+            if (!sparse_ok) {
+                printf("[LOOP_FINAL] frame=%d old=%d REJECT: yaw mismatch (sparse gate)\n",
+                       index, old_kf->index);
+                return false;
+            }
         }
     }
 

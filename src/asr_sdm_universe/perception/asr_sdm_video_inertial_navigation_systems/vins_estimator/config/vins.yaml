@@ -3,7 +3,7 @@
     params_file: config/euroc/euroc_config.yaml
     calibration_file: config/euroc/euroc_cam_calibration.yaml
     config_file: ""
-    enable_sparse: false
+    enable_sparse: true
     sparse_align:
       use_sparse_align: 1
       use_td_pre_calib: 0
@@ -28,3 +28,10 @@
       visualization_shift_y: 0
       skip_cnt: 0
       skip_dis: 0.0
+
+    sparse_rotation_gate:
+      enable: false
+      angle_thresh_deg: 30.0
+      max_yaw_diff_deg: 45.0
+      vio_diff_deg: 20.0
+      min_inliers: 20

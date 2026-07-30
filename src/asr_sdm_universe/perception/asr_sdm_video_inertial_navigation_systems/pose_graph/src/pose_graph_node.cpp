@@ -66,6 +66,12 @@ int VISUALIZE_IMU_FORWARD;
 int LOOP_CLOSURE;
 int FAST_RELOCALIZATION;
 
+bool USE_SPARSE_ROTATION_GATE = false;
+double SPARSE_GATE_ANGLE_THRESH_DEG = 30.0;
+double SPARSE_GATE_MAX_YAW_DIFF_DEG = 45.0;
+double SPARSE_GATE_VIO_DIFF_DEG = 20.0;
+int SPARSE_GATE_MIN_INLIERS = 20;
+
 camodocal::CameraPtr m_camera;
 Eigen::Vector3d tic;
 Eigen::Matrix3d qic;
@@ -580,6 +586,15 @@ int main(int argc, char **argv)
             VISUALIZE_IMU_FORWARD = getParamOrDeclare<int>(n, "visualize_imu_forward", 0);
             LOAD_PREVIOUS_POSE_GRAPH = getParamOrDeclare<int>(n, "load_previous_pose_graph", 0);
             FAST_RELOCALIZATION = getParamOrDeclare<int>(n, "fast_relocalization", 0);
+            USE_SPARSE_ROTATION_GATE = getParamOrDeclare<int>(n, "pose_graph.sparse_rotation_gate.enable", 0);
+            SPARSE_GATE_ANGLE_THRESH_DEG = getParamOrDeclare<double>(n, "pose_graph.sparse_rotation_gate.angle_thresh_deg", 30.0);
+            SPARSE_GATE_MAX_YAW_DIFF_DEG = getParamOrDeclare<double>(n, "pose_graph.sparse_rotation_gate.max_yaw_diff_deg", 45.0);
+            SPARSE_GATE_VIO_DIFF_DEG = getParamOrDeclare<double>(n, "pose_graph.sparse_rotation_gate.vio_diff_deg", 20.0);
+            SPARSE_GATE_MIN_INLIERS = getParamOrDeclare<int>(n, "pose_graph.sparse_rotation_gate.min_inliers", 20);
+            printf("[SPARSE_GATE] enable=%d angle_thresh=%.1f max_yaw_diff=%.1f vio_diff=%.1f min_inliers=%d\n",
+                   USE_SPARSE_ROTATION_GATE, SPARSE_GATE_ANGLE_THRESH_DEG,
+                   SPARSE_GATE_MAX_YAW_DIFF_DEG, SPARSE_GATE_VIO_DIFF_DEG,
+                   SPARSE_GATE_MIN_INLIERS);
             VINS_RESULT_PATH = VINS_RESULT_PATH + "/vins_result_loop.csv";
             std::ofstream fout(VINS_RESULT_PATH, std::ios::out);
             fout.close();
@@ -639,6 +654,15 @@ int main(int argc, char **argv)
             VISUALIZE_IMU_FORWARD = fsSettings["visualize_imu_forward"];
             LOAD_PREVIOUS_POSE_GRAPH = fsSettings["load_previous_pose_graph"];
             FAST_RELOCALIZATION = fsSettings["fast_relocalization"];
+            USE_SPARSE_ROTATION_GATE = static_cast<int>(fsSettings["pose_graph"]["sparse_rotation_gate"]["enable"]);
+            SPARSE_GATE_ANGLE_THRESH_DEG = static_cast<double>(fsSettings["pose_graph"]["sparse_rotation_gate"]["angle_thresh_deg"]);
+            SPARSE_GATE_MAX_YAW_DIFF_DEG = static_cast<double>(fsSettings["pose_graph"]["sparse_rotation_gate"]["max_yaw_diff_deg"]);
+            SPARSE_GATE_VIO_DIFF_DEG = static_cast<double>(fsSettings["pose_graph"]["sparse_rotation_gate"]["vio_diff_deg"]);
+            SPARSE_GATE_MIN_INLIERS = static_cast<int>(fsSettings["pose_graph"]["sparse_rotation_gate"]["min_inliers"]);
+            printf("[SPARSE_GATE] enable=%d angle_thresh=%.1f max_yaw_diff=%.1f vio_diff=%.1f min_inliers=%d\n",
+                   USE_SPARSE_ROTATION_GATE, SPARSE_GATE_ANGLE_THRESH_DEG,
+                   SPARSE_GATE_MAX_YAW_DIFF_DEG, SPARSE_GATE_VIO_DIFF_DEG,
+                   SPARSE_GATE_MIN_INLIERS);
             VINS_RESULT_PATH = VINS_RESULT_PATH + "/vins_result_loop.csv";
             std::ofstream fout(VINS_RESULT_PATH, std::ios::out);
             fout.close();

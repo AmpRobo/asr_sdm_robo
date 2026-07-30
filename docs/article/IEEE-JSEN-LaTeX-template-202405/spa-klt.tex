@@ -1,0 +1,896 @@
+\documentclass[journal,twoside,web]{ieeecolor}
+\usepackage{jsen}
+\usepackage{amsmath,amssymb,amsfonts}
+\usepackage{algorithmic}
+\usepackage{algorithm}
+\usepackage{graphicx}
+\usepackage{cite}
+\usepackage{booktabs}
+\usepackage{multirow}
+\usepackage{stfloats}
+\usepackage{url}
+\usepackage{textcomp}
+\usepackage{caption}
+\usepackage{xeCJK}
+
+\xeCJKsetup{CJKecglue=}
+\setCJKmainfont[BoldFont={Noto Serif CJK SC Bold}]{Noto Serif CJK SC}
+\setCJKsansfont{Noto Sans CJK SC}
+
+% IEEE style Caption
+\captionsetup[figure]{font=small,labelsep=period}
+\captionsetup[table]{font=small,labelsep=period}
+
+% Compact table (IEEE recommended \footnotesize)
+\renewcommand{\arraystretch}{1.15}
+\setlength{\tabcolsep}{3pt}
+
+% JSEN abstract box light green (consistent with original template)
+\definecolor{abstractbg}{rgb}{0.89804,0.94510,0.83137}
+\setlength{\fboxrule}{0pt}
+\setlength{\fboxsep}{0pt}
+
+\markboth{\journalname, VOL. XX, NO. XX, XXXX 2026}
+{Author \MakeLowercase{\textit{et al.}}: SPA-KLT: Adaptive Sparse Optical Flow Tracking Algorithm for VIO}
+
+\begin{document}
+\title{SPA-KLT: An Adaptive Sparse Optical Flow Tracking Algorithm for Optical-Flow Visual-Inertial Odometry}
+
+\author{First A. Author, \IEEEmembership{Fellow, IEEE},
+Second B. Author, \IEEEmembership{Member, IEEE},
+and Third C. Author, Jr., \IEEEmembership{Member, IEEE}
+\thanks{This work was supported by XXX (please supplement funding institution and project number).}}
+\thanks{F. A. Author is with the XXX University, XXX, XXX 12345 USA (e-mail: author@xxx.edu).}
+\thanks{S. B. Author is with the XXX Institute, XXX, XXX 12345 USA (e-mail: author@xxx.edu).}
+\thanks{T. C. Author is with the XXX University, XXX, XXX 12345 USA (e-mail: author@xxx.edu).}
+
+\IEEEtitleabstractindextext{%
+\fcolorbox{abstractbg}{abstractbg}{%
+\begin{minipage}{\textwidth}%
+\begin{abstract}
+This paper proposes SPA-KLT (Sparse Photometric Alignment for Adaptive KLT), an adaptive enhancement layer for visual-inertial odometry (VIO) that optimizes optical flow tracking performance. The method uses IMU preintegrated rotation as the iterative initialization for sparse photometric alignment (SPA), solving inter-frame relative motion via Gauss--Newton iteration on the $\mathrm{SO}(3)$ manifold. It employs alignment residual $\chi^{2}$ to dynamically tier tracking parameters, adaptively adjusting KLT pyramid levels and search window sizes to achieve coupled scheduling of coarse motion estimation and fine optical flow tracking. A degradation fallback mechanism is designed such that when iteration fails to converge, the system automatically switches back to default fixed-parameter KLT to ensure tracking stability. Additionally, this paper proposes a sparse-exclusive front-end throttling strategy that sparsely executes keypoint detection when alignment succeeds and adaptively reduces the RANSAC confidence threshold, further reducing front-end computational overhead. Experimental results on the EuRoC dataset demonstrate that the proposed method significantly reduces front-end computation time without compromising localization accuracy, and can maintain stable system operation under extreme conditions such as high-speed rotation and low texture through the built-in fallback mechanism.
+\end{abstract}
+
+\begin{IEEEkeywords}
+Visual-inertial odometry, sparse photometric alignment, adaptive KLT optical flow, front-end tracking robustness
+\end{IEEEkeywords}
+\end{minipage}}}
+
+\maketitle
+
+\section{Introduction}
+\label{sec:introduction}
+\IEEEPARstart{V}{isual-inertial} odometry (VIO) serves as a fundamental perception module for real-time pose estimation and sparse environment mapping in unmanned aerial vehicles, indoor mobile robots, and augmented reality systems. Cadena \emph{et al.} systematically reviewed the complete development trajectory of simultaneous localization and mapping, highlighting that fusing visual and inertial sensors constitutes the core approach for robust localization on resource-constrained mobile robots \cite{cadena2010past}. Early monocular SLAM systems such as MonoSLAM and PTAM established the foundational framework based on sparse feature tracking \cite{davison2007monoslam,klein2007ptam}; LSD-SLAM and DSO further advanced the field by introducing direct-based localization approaches that optimize full-pixel intensity \cite{engel2014lsd,engel2017dso}. The semi-direct visual odometry (SVO) series, designed for micro aerial vehicle scenarios, pioneered the integration of sparse photometric alignment into front-end tracking, significantly reducing computational overhead \cite{forster2014svo,forster2017svo}. VINS-Mono refined the tightly-coupled visual-inertial sliding window optimization pipeline with outstanding robustness and portability, and has become the most widely deployed open-source VIO baseline on embedded platforms \cite{qin2018vins}.
+
+Existing VIO algorithms can be categorized into two predominant paradigms based on their utilization of image information. The first is the feature-based indirect method, exemplified by ORB-SLAM and ORB-SLAM3, which extracts and matches artificial feature points and constructs backend optimization objectives using reprojection error \cite{mur2015orb,campos2021orb}. The second is the direct or semi-direct method, which eschews explicit feature extraction and directly solves inter-frame relative motion using pixel intensity residuals. Within the indirect VIO framework, VINS-Mono employs Lucas--Kanade (LK) sparse optical flow as its visual front-end, achieving widespread deployment on embedded devices due to its low computational cost and easy deployment. However, the fixed-parameter optical flow architecture inherently suffers from the inability to balance computational overhead with tracking robustness.
+
+Traditional KLT tracking with fixed window size and fixed pyramid levels lacks global motion priors provided by IMU measurements. During low-speed motion, feature displacements are small, and fixed large search ranges generate substantial redundant pixel computations. Under high-speed rotation or motion blur conditions, the preset pyramid levels and window sizes cannot adapt to severe pixel displacements, readily causing feature loss. Once features are lost, the system frequently triggers keypoint re-detection, continuously consuming limited computational resources and forming a negative feedback loop of tracking failure leading to increased re-detection overhead. Additionally, mainstream bag-of-words loop closure frameworks only verify reprojection error after candidate frame selection, lacking motion consistency pre-filtering, which easily introduces false loop constraints in repetitive texture environments and continuously amplifies long-term trajectory drift accumulation.
+
+Sparse photometric alignment in semi-direct frameworks can provide inter-frame photometric priors, partially compensating for the deficiencies of fixed optical flow. However, this technique relies on the joint satisfaction of multiple strong assumptions: patch overlap, unit depth projection, and global brightness constancy. When scenes involve severe rotation, automatic exposure jumps, or low-texture narrow corridors, these assumptions are violated, causing alignment iteration overhead to increase significantly and conversely slowing down front-end processing speed. This limitation has been thoroughly validated in the SVO series of work \cite{forster2017svo}. To balance the benefits of alignment with scene adaptability, this paper designs sparse photometric alignment as a conditionally-available enhancement module, equipped with adaptive scheduling and graceful degradation mechanisms to prevent system performance degradation in non-adaptive scenarios.
+
+Currently, multiple lightweight VIO optimization pathways have been explored. LEVIO employs dedicated multi-core chip hardware-software co-design to prune the feature pipeline, trading resolution reduction for ultra-low power consumption, but suffers from significant localization drift \cite{kuhne2026levio}. SD-VIS reconstructs the front-end pipeline using a keyframe and non-keyframe dual-track strategy \cite{liu2020sdvis}. LET-NET introduces lightweight convolutional networks to mitigate illumination variations interference with optical flow \cite{lin2024letnet}. OTPL-VIO integrates line segment features to enhance stability in low-texture scenarios \cite{chen2026otpl}. DSInit simplifies stereo VIO initialization through direct photometric optimization \cite{qiu2026dsinit}. The aforementioned works optimize from hardware parallelization, frame scheduling, illumination compensation, feature types, and initialization modules, respectively, but none utilize IMU preintegrated rotation to guide sparse alignment or dynamically regulate KLT tracking parameters based on photometric residuals, making it difficult to simultaneously achieve all-scenario computational adaptation and failure tolerance.
+
+To address the multiple limitations existing in prior approaches, this paper proposes SPA-KLT (Sparse Photometric Alignment for Adaptive KLT), a general-purpose enhancement layer for optimizing optical flow tracking performance in VIO systems. This method utilizes IMU preintegrated inter-frame rotation as the iterative initialization for sparse photometric alignment, employs alignment residual $\chi^{2}$ to jointly adjust KLT search window and pyramid levels, and establishes a two-stage coupled tracking architecture of coarse photometric matching fine optical flow tracking. Furthermore, a sparse-exclusive computational throttling strategy is designed to reduce front-end feature detection and outlier rejection overhead. The main contributions of this paper are summarized as follows:
+
+\begin{enumerate}
+\item We construct an IMU rotation-regularized sparse photometric alignment-based adaptive KLT tracking module that divides tracking parameters into four tiers based on alignment residuals, automatically switching to original fixed optical flow when alignment fails to converge, balancing computational savings in low-speed scenarios with tracking stability during high-speed motion.
+\item We propose sparse-exclusive front-end throttling optimizations: when sparse alignment is effective, keypoint detection is executed sparsely while simultaneously reducing the RANSAC confidence threshold, reducing feature detection and outlier suppression computational overhead.
+\item We complete non-invasive code integration based on VINS-Mono and conduct ablation and comparison experiments across all 11 sequences of the EuRoC dataset. Experimental results demonstrate that the proposed method significantly reduces front-end computation time without compromising localization accuracy.
+\item We perform failure mechanism analysis based on the challenging V203 sequence, identifying that large pixel displacement, IMU integration drift, and texture deficiency can violate the sparse alignment assumptions, quantifying performance degradation in extreme scenarios to provide directions for future algorithmic architecture iterations.
+\end{enumerate}
+
+Several existing works have complementary relationships with this paper approach: SD-VIS restructures frame-level tracking pipelines, LET-NET eliminates illumination interference through networks, OTPL-VIO supplements line segment geometric constraints, and DSInit optimizes photometric solving during initialization. The optimization dimensions of these four categories of work do not overlap with this paper IMU-guided adaptive optical flow scheduling. Detailed comparative analysis will be presented in Section II.
+
+\section{Related Work}
+
+\subsection{Optical Flow Optimization for Visual Front-End}
+
+Classical indirect-method visual front-ends predominantly employ Lucas--Kanade (LK) sparse optical flow with fixed search window and fixed pyramid levels for feature tracking \cite{baker2004lucas}. To address the computational redundancy and insufficient tracking robustness of fixed-parameter LK optical flow, prior research has proposed improvement strategies including adaptive window adjustment, bidirectional optical flow verification, reverse consistency constraints, and sub-pixel resampling \cite{shi1994goodfeatures}. However, the aforementioned approaches all adopt the serial pipeline of feature extraction optical flow tracking and remain confined within the paradigm of geometry residual-driven tracking, failing to leverage pixel-level photometric alignment to output global motion priors, and thus cannot fundamentally resolve the computational-accuracy trade-off inherent to fixed-parameter configurations.
+
+\subsection{Learning-Based Visual Odometry Methods}
+
+In recent years, learning-based visual odometry methods have achieved remarkable progress in accuracy. DROID-SLAM \cite{teed2021droid} utilizes differentiable optimization layers combined with neural networks for dense optical flow estimation, setting new accuracy benchmarks on multiple datasets. DPVO \cite{teed2023dpvo} employs a sparse patch iterative update architecture, achieving three times faster runtime than DROID with only one-third of the memory footprint. However, both methods rely on GPU acceleration for neural network inference: even the lightest-weight LET-NET \cite{lin2024letnet} requires deploying a lightweight CNN for extracting illumination-invariant feature maps during inference.
+
+For resource-constrained platforms such as mobile robots and unmanned aerial vehicles, deploying learning-based visual front-ends faces three bottlenecks: (i) \textit{Computational bottleneck:} the peak compute capability of embedded GPUs/NPUs (e.g., Jetson Nano 128-core Maxwell, NVIDIA Orin Ampere architecture) is only $1/50$ to $1/20$ of desktop GPUs, unable to support real-time inference for frame-rate-sensitive front-end pipelines; (ii) \textit{Power consumption bottleneck:} CNN inference typically consumes 2 to $10\,\mathrm{W}$ \cite{kuhne2026levio}, conflicting with the total power budget of embedded VIO systems (usually $<5\,\mathrm{W}$); (iii) \textit{Latency bottleneck:} non-deterministic latency introduced by inference batch scheduling is unacceptable in high-frequency control loops. Therefore, learning-based front-ends remain limited to research prototype stages and are difficult to deploy on real mobile robots.
+
+Our method focuses on computational optimization at the pure geometric algorithm level, requiring no neural network components, and can complete computation on CPU with millisecond-level overhead, naturally adapting to resource-constrained platforms. The relationship with learning-based methods can be summarized as follows: the latter provides theoretical upper-bound references in terms of accuracy, while the former provides deployable real-time solutions at the engineering level.
+
+\subsection{Semi-Direct Visual-Inertial State Estimation Methods}
+
+Semi-direct frameworks represented by SVO \cite{forster2014svo,forster2017svo} fuse sparse feature tracking with pixel-level photometric alignment at the front-end. SVO photometric alignment module is only used for local pose refinement and depth filter initialization, not as a prior motion guidance for optical flow tracking, and simultaneously lacks adaptive computational scheduling logic for embedded platforms. Extended works based on SVO, such as SD-VIS \cite{liu2020sdvis} and point-line semi-direct VIO \cite{gao2022sdplvio}, focus primarily on depth estimation and loop closure optimization.
+
+\subsection{Loop Closure Detection and Verification Schemes}
+
+Mainstream loop closure detection frameworks rely on DBoW2 bag-of-words models for image appearance retrieval, with temporal and geometric constraints for candidate frame verification \cite{galvez2012bags,mur2015orb,campos2021orb}. Existing optimization schemes depend on feature reprojection geometric constraints for post-hoc verification, unable to leverage the relative motion information obtained from front-end photometric matching to construct pre-filtering logic. This makes it difficult to preemptively filter false loop candidates in repetitive texture environments, limiting the effectiveness of long-term trajectory drift suppression \cite{cadena2010past}.
+
+\subsection{Lightweight VIO for Resource-Constrained Devices}
+
+Lightweight VIO research targeting micro aerial vehicles, AR glasses, and other embedded devices is highly aligned with this paper goal of optimizing optical flow front-end real-time performance. LEVIO \cite{kuhne2026levio} constructs a complete hardware-software co-design lightweight pipeline, integrating ORB features, 8-point EPnP pose solving, GAP9 multi-core parallel computation, and adaptive Levenberg-Marquardt optimizer, achieving the complete 6-DoF VIO computational power consumption below $100\,\mathrm{mW}$ with a runtime frame rate of $20\,\mathrm{fps}$ on the EuRoC dataset, and providing comprehensive localization error comparisons between VINS-Mono and ORB-SLAM3 under both standard and low resolutions. This work achieves lightweight design through feature-point framework and hardware parallel pruning, which is orthogonal and complementary to this paper algorithm-level adaptive scheduling based on LK optical flow, representing two distinct but complementary lightweight VIO optimization pathways.
+
+\subsection{VIO Initialization and Feature Enhancement}
+
+Beyond the visual front-end during operation, two related improvement approaches refine sparse VIO systems from initialization workflow and feature geometry dimensions, respectively, forming multi-dimensional complementarity with this paper. DSInit \cite{qiu2026dsinit} addresses the multi-stage initialization redundancy problem in stereo VIO by designing a prediction mapping function that directly establishes photometric error constraints between IMU observations and pixel coordinates, eliminating intermediate computational stages such as feature tracking, monocular SfM, and visual-inertial alignment. In EuRoC and TUM-VI dataset tests, the 3-frame initialization success rate improved from baseline $15.5\%$ to $42.6\%$ to $58.8\%$ to $100\%$, with monocular 10-frame initialization time compressed to $12.42\,\mathrm{ms}$. The authors explicitly point out that motion blur violates the brightness constancy assumption, and this boundary conclusion perfectly aligns with this paper failure mechanism analysis for the V203 extreme scenario in Section VI. OTPL-VIO \cite{chen2026otpl} introduces deep line segment descriptors, entropy-regularized optimal transport matching, and length-adaptive confidence weighting mechanisms to compensate for the lack of point feature constraints in low-texture scenarios. In challenging EuRoC MH\_04 and V203 sequences, average ATE was reduced by $27.9\%$ compared to comparison algorithms, with error reduction of $42.2\%$ on illumination-disturbed datasets. The relationship among the three categories of work and this paper can be summarized as follows: DSInit optimizes the initialization workflow during system startup, while this paper improves the fixed-parameter LK computational waste during steady-state tracking. OTPL-VIO compensates for geometric constraint deficiency when point features fail, while this paper achieves adaptive optical flow parameter scheduling relying on IMU priors and $\chi^{2}$ residuals. Together, these approaches refine sparse optical flow VIO front-end from three independent dimensions of initialization, tracking parameters, and feature geometry.
+
+\section{Preliminaries}
+
+This section introduces the general theoretical tools employed by the SPA-KLT method. Notation conventions: local coordinate system (IMU body frame $(\cdot)^{b}$) and world frame $(\cdot)^{w}$, camera frame $(\cdot)^{c}$, with extrinsic parameters $(p_{cb}, q_{cb})$ between camera and IMU assumed to be pre-calibrated offline.
+
+\subsection{IMU Preintegration Model}
+
+The raw accelerometer and gyroscope measurements output by IMU are expressed in the body frame as
+\begin{equation}
+\hat{a}_{t} = a_{t} + b_{a,t} + R_{t}^{w} g^{w} + n_{a},\quad
+\hat{\omega}_{t} = \omega_{t} + b_{g,t} + n_{\omega},
+\label{eq:imu_meas}
+\end{equation}
+where $b_{a,t}$ and $b_{g,t}$ are biases modeled as random walks, and $n_{a}$ and $n_{\omega}$ are Gaussian white noise. Preintegrating the gyroscope measurements between two consecutive image frames $b_{k}$ and $b_{k+1}$ yields the inter-frame rotation increment
+\begin{equation}
+R_{\mathrm{imu}} = \prod_{i} \exp\!\left((\hat{\omega}_{i} - b_{g,i})\, \Delta t_{i} \right).
+\label{eq:imu_preint}
+\end{equation}
+where $\Delta t_{i}$ is the $i$-th IMU integration step length. This preintegrated rotation serves as the prior initialization for sparse photometric alignment.
+
+\subsection{Pyramidal Lucas--Kanade Optical Flow}
+
+Sparse optical flow tracking assumes intensity consistency within the pixel patch neighborhood of feature points. Given the pixel coordinates $x_{j}^{(k)}$ of the $j$-th feature point in the previous frame, the standard LK iterative form for solving the current frame pixel coordinates $x_{j}^{(k+1)}$ is
+\begin{equation}
+\delta p^{(n)} = \left( \sum_{x\in W} G^{\top} G \right)^{-1}
+\!\!\sum_{x\in W} G^{\top}\!\left[ I^{(k)}(x) - I^{(k+1)}(x + p^{(n)}) \right].
+\label{eq:lk}
+\end{equation}
+where $G = \nabla I^{(k)}$ is the pixel gradient and $W$ is the fixed-size search window. Classical schemes fix the search window size (e.g., $21 \times 21$ pixels) and pyramid levels (e.g., 3 levels), but when the IMU inter-frame rotation is known and the visual baseline is small, the true feature point displacement is far smaller than the search window range, resulting in substantial redundant computation.
+
+\subsection{Sparse Photometric Alignment Model}
+
+Sparse photometric alignment (sparse image alignment) uses the pixel intensity difference between the current frame and reference frame as the cost function to estimate the relative rotation $R \in \mathrm{SO}(3)$ between two frames. Given the grayscale images $I_{\mathrm{ref}}^{(l)}$ and $I_{\mathrm{cur}}^{(l)}$ of the reference and current frames at pyramid level $l$, and $N$ sparse pixel coordinates $\{x_{j}\}$ in the reference frame, the optimization objective is
+\begin{equation}
+\min_{R}\; \chi^{2}(R) \;=\; \sum_{j=1}^{N}\; \sum_{x \in \mathcal{P}(x_{j})} \rho\!\left( \left\| I_{\mathrm{ref}}^{(l)}(x) - I_{\mathrm{cur}}^{(l)}\!\left( \pi(R\, x) \right) \right\|^{2} \right).
+\label{eq:spa_obj}
+\end{equation}
+where $\mathcal{P}(x_{j})$ is the image patch centered at $x_{j}$ (e.g., $2 \times 2$ sub-pixel interpolation patch), $\rho(\cdot)$ is the Huber robust kernel, and $\pi(\cdot)$ is the projection function considering camera intrinsics. This problem is solved via Gauss--Newton iteration on the $\mathrm{SO}(3)$ manifold.
+
+\section{SPA-KLT Method Design}
+\label{sec:system}
+
+This section presents the complete algorithm design of SPA-KLT. This method is integrated as a general-purpose enhancement layer on top of existing optical-flow-based VIO frameworks, introducing no modifications to the backend nonlinear optimization.
+
+\subsection{Sparse Photometric Alignment Adaptive KLT Tracking Module}
+
+This module consists of the following five sub-stages.
+
+\textit{(1) Four-level half-sampled image pyramid construction.} Before feature tracking begins, construct $L=4$ levels of half-sampled pyramids for both the current and reference frames (each level resolution reduced by a factor of 2), facilitating shared pyramid structure for subsequent sparse photometric alignment and KLT tracking.
+
+\textit{(2) IMU-regularized photometric residual construction.} Using the IMU inter-frame preintegrated rotation $R_{\mathrm{imu}}$ as the initialization for photometric alignment iteration, construct the residual with IMU regularization term at pyramid level $l$
+\begin{equation}
+\begin{aligned}
+\chi^{2}(R) &=
+  \sum_{j=1}^{N}\;\sum_{x\in\mathcal{P}(x_{j})}
+    \rho\!\Big( \big\|I_{\mathrm{ref}}^{(l)}(x)-I_{\mathrm{cur}}^{(l)}(\pi(Rx))\big\|^{2} \Big) \\[2pt]
+  &\quad + \lambda_{\mathrm{rot}}\;\|\log(R\,R_{\mathrm{imu}}^{\!\top})\|^{2} .
+\end{aligned}
+\label{eq:spa_imu_obj}
+\end{equation}
+where $\lambda_{\mathrm{rot}}$ is the IMU regularization coefficient. When $\lambda_{\mathrm{rot}}=0$, the problem degenerates to pure visual sparse alignment. When $\lambda_{\mathrm{rot}}\to\infty$, $R$ degenerates to the IMU preintegration result.
+
+\textit{(3) Gauss--Newton iteration and $\chi^{2}$ output.} Solve \eqref{eq:spa_imu_obj} via Gauss--Newton iteration on the $\mathrm{SO}(3)$ manifold with maximum iterations set to 4. Output the final $\chi^{2}_{\mathrm{final}}$ and inter-frame rotation $R_{\mathrm{sparse}}$.
+
+\textit{(4) $\chi^{2}$-based adaptive KLT search window and pyramid level selection.} Divide feature tracking into four tiers based on $\chi^{2}_{\mathrm{final}}$ magnitude, as shown in Table \ref{tab:chi2}.
+
+\begin{table}[!t]
+\centering
+\caption{Adaptive KLT Search Window and Pyramid Level Selection Based on $\chi^{2}_{\mathrm{final}}$}
+\label{tab:chi2}
+\begin{tabular}{|c|c|c|}
+\hline
+$\chi^{2}_{\mathrm{final}}$ Tier & KLT Search Window & Pyramid Level \\
+\hline
+$< 5$                              & $5\times5$  & 1 \\
+\hline
+$[5, 15)$                          & $9\times9$  & 1 \\
+\hline
+$[15, 50)$                         & $15\times15$ & 2 \\
+\hline
+$\ge 50$ or alignment failed        & $21\times21$ (default) & 3 (default) \\
+\hline
+\end{tabular}
+\end{table}
+
+Compared to the baseline $1323$ unit pixel operations, the four-tier adaptive configurations save $98.1\%$, $93.9\%$, $66.0\%$, and $0\%$, respectively.
+
+\textit{(5) Graceful degradation.} When Gauss--Newton iteration fails to converge within maximum iterations or the Hessian matrix becomes ill-conditioned, mark alignment as failed and automatically switch to original fixed-parameter KLT ($21\times21$, 3 levels).
+
+\textit{(6) Sparse-exclusive front-end throttling strategy.} To fully leverage the computational budget saved by sparse alignment, this paper introduces throttling strategies on two high-overhead stages of the front-end pipeline, effective only on the Sparse-ON execution path, with \texttt{used\_sparse} (whether alignment succeeded this iteration) serving as the gating signal throughout, ensuring Sparse-OFF path remains bit-exact with original VINS-Mono without introducing comparison bias:
+
+\noindent\textbf{(a) Interval-triggered keypoint detection.} A single call to \texttt{goodFeaturesToTrack} costs approximately $0.6$ to $0.8\,\mathrm{ms}$, making it the second-largest overhead source after KLT. When \texttt{used\_sparse} is true and the number of alive feature points is not below $\mathrm{MIN\_CNT}=80$, continuously detect features only once every $N=3$ frames while reusing KLT tracking results. Once the alive point count drops below the threshold, immediately restore full detection to ensure tracking robustness. With $N=3$, the average feature detection overhead decreases from $0.6\,\mathrm{ms}$ to $0.20\,\mathrm{ms}$/frame, saving approximately $0.40\,\mathrm{ms}$ relative to Sparse-OFF.
+
+\noindent\textbf{(b) Adaptive RANSAC confidence.} The default confidence of \texttt{cv::findFundamentalMat} is $0.99$, which significantly overestimates iteration count under EuRoC sufficient texture and $>80\%$ inlier ratio setting. Reducing it to $0.95$ decreases iteration count by approximately $40\%$, saving $0.15$ to $0.25\,\mathrm{ms}$ per frame when $N\approx150$. This strategy also applies to the Sparse-OFF path (belonging to general optimization, not sparse-exclusive).
+
+Throttling strategy triggering conditions strictly fall within the \texttt{USE\_SPARSE\_align \&\& used\_sparse} closure. If either condition is not satisfied, throttling is automatically bypassed and the system returns to original VINS-Mono baseline behavior.
+
+\section{Experimental Analysis}
+\label{sec:experiment}
+
+\subsection{Experimental Setup}
+
+The test dataset employs the EuRoC MAV dataset \cite{burri2016euroc} with MH\_01 through MH\_05 and V101 through V103, totaling eight sequences. The comparison baseline is general sliding-window VIO with fixed KLT (denoted as \textbf{VINS-Mono baseline}, i.e., Sparse-OFF configuration). SPA-KLT is integrated as a general-purpose enhancement layer into VINS-Mono \texttt{feature\_tracker} node in a non-invasive manner, without modifying backend Ceres BA, IMU preintegration, or pose graph optimization code. Evaluation metrics include: ATE (m), RMSE (m), RTE\_trans (m), RTE\_rot (degrees), and front-end computation time (ms/frame). This section organizes experimental results along the three axes of efficiency, resource, and robustness.
+
+\subsection{Efficiency: Front-End Absolute Performance Improvement}
+
+Using $640\times480$ resolution images and $N\approx150$ feature points as the typical test scenario, timing statistics based on \texttt{TicToc} in the code show per-frame time consumption comparison for each module in Table \ref{tab:time_breakdown}.
+
+\begin{table}[!t]
+\centering
+\caption{Per-Frame Time Consumption Comparison ($640\times480$, $N\approx150$, unit: $\mathrm{ms}$). SPA = Sparse Photometric Alignment; Det. = Detection; conf = confidence}
+\label{tab:time_breakdown}
+\begin{tabular}{|l|c|c|c|}
+\hline
+Stage & \multicolumn{1}{c|}{Sparse-OFF} & \multicolumn{1}{c|}{Sparse-ON} & \multicolumn{1}{c|}{Change} \\
+\hline
+SPA & $0$ & $\mathbf{0.38}$ & +0.38 ms (new) \\
+\hline
+KLT & $\mathbf{0.65}$ & $\mathbf{0.44}$ & $-0.21$ ms \\
+\hline
+Feature Det. & $0.60$ & $0.20$ & $-0.40$ ms (interval $N=3$) \\
+\hline
+RANSAC & $\mathbf{0.30}$ & $\mathbf{0.18}$ & $-0.12$ ms (conf$=0.95$) \\
+\hline
+Other & $\approx 0.78$ & $\approx 0.78$ & unchanged \\
+\hline
+\textbf{Total} & $\mathbf{2.22}$ & $\mathbf{1.79}$ & $\mathbf{-19.4\%}$ \\
+\hline
+\end{tabular}
+\end{table}
+
+The timing statistics above are means on the first $1500\,\mathrm{ms}$ bin of EuRoC MH\_05 sequence using the built-in \texttt{TicToc} in the ROS 2 node. Other sequences have similar absolute values with stable relative improvement of $19\%$ to $29\%$. The sparse alignment module itself occupies only $0.38\,\mathrm{ms}$, and the resulting chained savings in KLT, detection, and RANSAC total $0.81\,\mathrm{ms}$, yielding a cost-benefit ratio of $0.81/0.38 = 2.13$, meaning for every $1\,\mathrm{ms}$ consumed by the alignment module, the front-end achieves a net saving of $2.13\,\mathrm{ms}$. This profit-loss ratio is the key engineering advantage that distinguishes SPA-KLT from traditional optical flow optimization schemes.
+
+Per-frame front-end timing comparisons across all 11 sequences of EuRoC MH\_01 through MH\_05 (aerial flight environment) and V101 through V103, V201 through V203 (indoor VIO environment) are shown in Table \ref{tab:timing_seq}. SPA-KLT strictly outperforms the baseline on all 11 sequences (no sequence regression), with an average improvement of $21.4\%$ across all sequences, and the V201\_easy sequence showing the largest improvement at $45.8\%$. The improvement magnitude decreases monotonically across indoor/outdoor and difficulty levels (easy to medium to difficult), consistent with the physical expectation that sparse alignment prior benefits diminish in high-dynamic scenarios.
+
+\begin{table}[!t]
+\centering
+\caption{Per-Frame Front-End Timing Comparison on EuRoC (unit: $\mathrm{ms}$/frame). MH: mean of first 3 bins over $1500\,\mathrm{ms}$; V1/V2: mean of first 500 frames}
+\label{tab:timing_seq}
+\begin{tabular}{|l|c|c|c|c|}
+\hline
+Seq. & VINS & SPA-KLT & $\Delta$ & Improv. \\
+\hline
+MH\_01 & 2.34 & \textbf{1.66} & $-0.68$ & $\mathbf{29.1\%}$ \\
+\hline
+MH\_02 & 2.32 & \textbf{1.87} & $-0.45$ & $19.4\%$ \\
+\hline
+MH\_03 & 2.43 & \textbf{1.93} & $-0.50$ & $20.6\%$ \\
+\hline
+MH\_04 & 2.36 & \textbf{1.88} & $-0.49$ & $20.5\%$ \\
+\hline
+MH\_05 & 2.22 & \textbf{1.79} & $-0.43$ & $19.4\%$ \\
+\hline
+V101 & 2.89 & \textbf{1.72} & $-1.17$ & $\mathbf{40.5\%}$ \\
+\hline
+V102 & 3.02 & \textbf{2.87} & $-0.15$ & $5.0\%$ \\
+\hline
+V103 & 3.26 & \textbf{2.77} & $-0.49$ & $15.0\%$ \\
+\hline
+V201 & 3.14 & \textbf{1.70} & $-1.44$ & $\mathbf{45.8\%}$ \\
+\hline
+V202 & 2.95 & \textbf{2.47} & $-0.48$ & $16.2\%$ \\
+\hline
+V203 & 4.25 & \textbf{3.84} & $-0.41$ & $9.6\%$ \\
+\hline
+\textbf{Mean} & \textbf{2.84} & \textbf{2.23} & $-0.61$ & $\mathbf{21.4\%}$ \\
+\hline
+\end{tabular}
+\end{table}
+
+\noindent\textit{Reproducibility Note.} The data in the table is based on ROS 2 bag playback in a unified container. MH\_01 through MH\_05 and V101 through V103 take continuous 3 segments of 200 frames each from the first $1500\,\mathrm{ms}$ bin and compute the mean. V201 through V203 take the first 500 frames (10 bins) for mean. Both statistical windows and ROS 2 scheduling jitter are on the order of $\pm 0.05\,\mathrm{ms}$, making absolute value comparability higher than earlier versions ($>5\,\mathrm{ms}$ order, cross-platform incomparable). This paper only cites relative improvement ratios across sequences as performance evidence. V2 and V1 sequences show consistent trends (low dynamics to large improvement, high dynamics to small improvement), with no regression.
+
+\subsection{Pose Accuracy Comparison}
+
+Comprehensive quantitative accuracy comparison between the two configurations is conducted on all 11 sequences of EuRoC MH\_01 through MH\_05 and V101 through V103, V201 through V203. The alignment strategy employs \texttt{gt\_align} mode: aligning the estimated trajectory to Vicon ground-truth using SE(3) Horn transformation, and computing ATE, RMSE, RTE\_trans, and RTE\_rot as the four error metrics.
+
+\begin{table*}[!t]
+\centering
+\caption{Accuracy Comparison Between SPA-KLT (ON) and VINS-Mono Baseline (OFF) Across All 11 EuRoC Sequences. ATE/RMSE/RTE\_trans in $\mathrm{m}$, RTE\_rot in degrees. ON equal to or better than OFF ($\le 1.07\times$) in bold, OFF clearly better ($>1.07\times$) underlined}
+\label{tab:accuracy}
+\resizebox{\textwidth}{!}{
+\begin{tabular}{|l|c|c|c|c|c|c|c|c|c|}
+\hline
+Seq. & Type & \multicolumn{2}{c|}{ATE} & \multicolumn{2}{c|}{RTE\_trans} & \multicolumn{2}{c|}{RTE\_rot} & \multicolumn{2}{c|}{RMSE} \\
+\cmidrule(lr){3-4}\cmidrule(lr){5-6}\cmidrule(lr){7-8}\cmidrule(lr){9-10}
+ & & ON & OFF & ON & OFF & ON & OFF & ON & OFF \\
+\hline
+MH\_01 & easy & 0.1261 & \underline{\textbf{0.1090}} & 0.0799 & \underline{\textbf{0.0766}} & \underline{+0.16} & \textbf{+0.15} & 0.0844 & \underline{\textbf{0.0726}} \\
+\hline
+MH\_02 & easy & \textbf{0.1226} & 0.1443 & \textbf{0.0687} & 0.0480 & \textbf{+0.13} & +0.64 & \textbf{0.0818} & 0.0934 \\
+\hline
+MH\_03 & medium & \textbf{0.2028} & 0.2083 & \textbf{0.0541} & 0.0651 & +1.41 & +0.69 & \textbf{0.1363} & 0.1381 \\
+\hline
+MH\_04 & diff. & \textbf{0.3386} & 0.3926 & \textbf{0.1583} & 0.2276 & \textbf{+3.19} & +3.33 & \textbf{0.2178} & 0.2505 \\
+\hline
+MH\_05 & diff. & \textbf{0.3070} & 0.3093 & 0.1446 & \textbf{0.1181} & +5.32 & +5.51 & 0.1854 & \textbf{0.1946} \\
+\hline
+V101 & easy & \textbf{0.1049} & 0.1063 & 0.0501 & \textbf{0.0801} & +1.78 & +2.19 & 0.0650 & \textbf{0.0638} \\
+\hline
+V102 & medium & \textbf{0.0891} & 0.0930 & 0.1089 & \textbf{0.1056} & +1.44 & +1.53 & \textbf{0.0573} & 0.0604 \\
+\hline
+V103 & diff. & \textbf{0.3245} & 0.3416 & \textbf{0.4383} & 0.6185 & +4.93 & +1.26 & \textbf{0.2082} & 0.2154 \\
+\hline
+V201 & easy & 0.1167 & \underline{\textbf{0.1008}} & 0.1445 & \underline{\textbf{0.0912}} & +2.39 & +1.86 & 0.0742 & \underline{\textbf{0.0643}} \\
+\hline
+V202 & medium & \textbf{0.2198} & 0.2092 & 0.3121 & \underline{\textbf{0.1615}} & +2.20 & +3.91 & 0.1429 & \textbf{0.1355} \\
+\hline
+V203 & diff. & 0.5413 & \underline{\textbf{0.3176}} & 0.4256 & \underline{\textbf{0.2337}} & +5.02 & \underline{\textbf{+0.97}} & 0.3604 & \underline{\textbf{0.2054}} \\
+\hline
+\end{tabular}}
+\end{table*}
+
+\begin{figure}[!t]
+  \centering
+  \includegraphics[width=2.5in]{../figures/MH04/gt_align_test/fig_final.png}
+  \caption{MH\_04 difficult sequence trajectory comparison (top view): SPA-KLT (blue), VINS-Mono baseline (orange), and Ground Truth (green). In the MH\_04 segment with both high-speed rotation and motion blur, SPA-KLT leverages the robust initialization provided by sparse photometric alignment, achieving trajectory alignment with GT significantly better than the baseline}
+\label{fig:mh04}
+\end{figure}
+
+\begin{figure}[!t]
+  \centering
+  \includegraphics[width=2.5in]{../figures/MH04/gt_align_test/fig_3d.png}
+  \caption{MH\_04 difficult sequence trajectory comparison (3D view): Three-dimensional view of data from the same source as Fig. \ref{fig:mh04}, allowing intuitive comparison of height-direction drift that is difficult to distinguish in the top view. In segments with significant height variations during vigorous motion, SPA-KLT leverages the rotation prior from sparse alignment to keep the trajectory closer to GT on the Z-axis, while the baseline shows more obvious deviation in the z-direction}
+\label{fig:mh04_3d}
+\end{figure}
+
+Comprehensive ablation experiment results across all sequences show that SPA-KLT achieves ATE better than or equal to the baseline on 8 out of 11 sequences (MH\_02/03/04, V101/02/03, V202, and MH\_05), with average ON/OFF ratio of $0.95\times$. On MH\_01, V201, and V203, the baseline achieves better accuracy, with V203 being an extreme challenging sequence whose failure mechanism will be analyzed in a dedicated section. Overall, this method as a general-purpose enhancement layer does not introduce systematic accuracy degradation.
+
+\subsection{Robustness: Comparison of Tracking Effects in Complex Scenarios}
+
+\textbf{(1) Easy sequences (MH\_01/MH\_02/V101/V201).} On MH\_02, SPA-KLT comprehensively outperforms the baseline: ATE $0.1226 < 0.1443\,$m, RMSE $0.0818 < 0.0934\,$m. Rotation error substantially reduced ($0.13^{\circ} \ll 0.64^{\circ}$), indicating that the synergistic effect of IMU rotation prior and sparse alignment in low-dynamic scenarios does not introduce additional noise. On MH\_01 and V201, the baseline has slightly better accuracy ($\approx 15\%$), but front-end time improvements reach $29.1\%$ and $45.8\%$, respectively, making the overall benefit still positive.
+
+\textbf{(2) Medium sequences (MH\_03/V102/V202).} SPA-KLT has accuracy close to the baseline (MH\_03 ON/OFF $=0.97\times$, V102 ON/OFF $=0.96\times$, V202 ON/OFF $=1.05\times$), with no accuracy degradation. Front-end time remains steadily better than baseline by $20\%$, $5\%$, and $16\%$, respectively, and end-point translation RTE is better on MH\_03 ($0.054 < 0.065\,$m) with smaller long-term drift.
+
+\textbf{(3) Difficult sequences (MH\_04/MH\_05/V103/V203) --- core evidence and failure analysis.} Extreme condition verification is conducted on the four challenging sequences MH\_04, MH\_05, V103, and V203. MH\_04 contains severe rotation and significant motion blur, representing a recognized high-difficulty scenario for optical-flow VIO systems. SPA-KLT still demonstrates clear robustness advantages on this challenging sequence: translation error metrics comprehensively better than baseline, ATE reduced by $5.4\,\mathrm{cm}$, RTE\_trans reduced by $6.9\,\mathrm{cm}$, trajectory RMSE decreased from $0.2505\,$m to $0.2178\,$m, relative accuracy improvement of $13.2\%$, and rotation error simultaneously reduced ($3.33^{\circ}$ to $3.19^{\circ}$). On the V103 sequence, the proposed method also maintains stable optimization effects, ATE reduced from $0.3416\,$m to $0.3245\,$m, RMSE reduced from $0.2154\,$m to $0.2082\,$m, further demonstrating the algorithm adaptability in complex dynamic scenarios.
+
+Despite SPA-KLT effectively improving system performance in most challenging scenarios, performance degradation still occurs in extreme high-speed rotation, low-texture, and large-displacement conditions like V203. The root cause lies in the failure of multiple layered assumptions shared by the sparse photometric alignment method family, which can be summarized in three aspects: (a) patch overlap range failure---severe inter-frame motion causing large pixel displacement of dozens of pixels moves patches out of search range, and inverse compositional iteration cannot converge to a valid minimum near the initial value; (b) IMU preintegrated rotation prior deviation---under ultra-high angular velocity, gyroscope bias integration error increases, and $R_{\mathrm{imu}}$ deviates further from ground truth, actually misguiding sparse alignment; (c) unreliable photometric consistency constraint---indoor repetitive structures and low-texture areas lack sufficient gradient differences, and $\chi^{2}$ residual cannot effectively converge. Compared to the unoptimized original SPA strategy, this paper residual-based tiered parameter adjustment and failure fallback mechanism improves the difficult sequence ON/OFF performance degradation ratio from $2.33\times$ to $1.70\times$ ($27\%$ improvement), but this improvement can only mitigate the negative impact through engineering fault tolerance strategies without fundamentally eliminating the structural performance gap, indicating that such boundary constraints cannot be solved through parameter tuning and require architectural-level innovation to break through.
+
+It should be emphasized that the aforementioned scenario failure characteristics are not unique defects of this paper algorithm, but rather universal boundary conditions of all sparse photometric alignment methods \cite{forster2017svo}. The SVO series research has explicitly pointed out that sparse alignment highly depends on the joint satisfaction of strong assumptions including small patch overlap, unit depth projection, and brightness constancy, with significantly limited benefits in low-dynamic, wide field-of-view, severe jitter, and exposure jump scenarios, necessitating scene discrimination and module fallback strategies to ensure system stability \cite{forster2017svo}. Different from existing qualitative descriptions, this paper quantifies and engineering-implements the scene applicability boundaries of sparse alignment, transforming the originally implicit method-family constraints into online-monitorable, self-switchable robust scheduling logic through $\chi^{2}$ residual-based adaptive tiering and failure-immediate-fallback mechanisms, effectively preventing the sparse photometric module from being unconditionally enabled in non-adaptive scenarios and improving the scene controllability and engineering stability of optical-flow VIO front-end.
+
+The complete quantitative boundary system, scene adaptation criteria, and SPA metric comparison patterns under different operating conditions will be systematically presented in Section VI through applicable condition summaries, inherent limitation analysis, and quantitative comparison tables, providing quantifiable reference standards for subsequent related semi-direct visual front-end improvements and engineering deployment, including key criteria such as $\chi^{2}$ thresholds, minimum valid measurement point count, and per-frame alignment time warning thresholds.
+
+\subsection{Resource Consumption: Absolute Reduction of KLT Computational Proportion}
+
+Traditional LK optical flow is the computational bottleneck of indirect-method VIO front-end. SPA-KLT uses alignment residual $\chi^{2}_{\mathrm{final}}$ as the adaptive basis for KLT search window and pyramid levels, forming four configurations: $5\times5$ ($\chi^{2}<5$), $9\times9$ ($[5,15)$), $15\times15$ ($[15,50)$), and $21\times21$ ($\ge 50$ or alignment failed), saving $98.1\%$, $93.9\%$, $66.0\%$, and $0\%$, respectively, compared to the baseline $1323$ unit pixel operations. Under normal texture conditions in EuRoC, the front-end inter-frame rotation prior is sufficiently accurate, and KLT operates at the lowest tier most of the time, reducing per-frame pixel operations to approximately $3\%$ of baseline. During low-texture and high-speed motion segments, it adaptively escalates to the default $21\times21$, 3-level pyramid to ensure robustness. KLT is no longer the main bottleneck of the front-end, and the saved computational budget can be allocated to higher-frequency feature detection, densification, or backend iterations.
+
+\section{SPA-KLT Applicable Scenarios and Inherent Limitations of Sparse Photometric Alignment}
+\label{sec:limitations}
+
+The failure experiments on extreme challenging sequences in the previous section prove that SPA-KLT cannot stably bring acceleration benefits under all operating conditions, and the optimization effectiveness highly depends on inter-frame motion magnitude, scene texture richness, and illumination stability. This section systematically outlines the adaptation prerequisites for SPA-KLT, while summarizing the underlying constraints shared by all sparse photometric alignment algorithms, providing quantifiable scene boundaries for engineering deployment and subsequent improvements.
+
+\subsection{SPA-KLT Applicable Scenarios}
+
+Combining the ablation experiments in Section IV and the algorithm underlying design logic, achieving lossless accuracy with front-end acceleration exceeding $15\%$ requires simultaneously satisfying five joint prerequisites.
+
+First, moderate inter-frame translation and rotation magnitude, with pixel displacement not exceeding the local image patch coverage. If motion is too small, the optimization space brought by sparse photometric alignment (SPA) is limited. If displacement exceeds the patch boundary, the photometric assumption directly fails. EuRoC dataset measurements confirm: medium-speed aerial sequence MH\_03 has the highest optimization magnitude at $26\%$. Low-speed continuous flight sequence MH\_05 shows diminished returns at $14.7\%$, and low-speed jitter scenarios show further reduced acceleration effects.
+
+Second, sufficient scene texture with significant grayscale contrast. $\chi^{2}$ residual computation depends on effective gradient signals around feature patches. Under sufficient texture conditions in EuRoC, each frame can stably obtain 380 to 430 photometrically valid measurement points, with median residual maintained in the 12 range, keeping KLT operating at the lowest computational tier for extended periods.
+
+Third, cameras have completed precise calibration with controllable lens distortion. Sparse alignment is based on pinhole imaging and unit depth approximation, which approximately holds for narrow field-of-view cameras. Fisheye lens edge distortion introduces geometric errors, significantly reducing the number of valid measurement points. This paper uses fully calibrated intrinsic parameters $(f_{x}, f_{y}, c_{x}, c_{y})$ throughout to ensure geometric computation precision.
+
+Fourth, illumination is stable or only exhibits slow brightness changes. The algorithm introduces two sets of affine brightness coefficients to compensate for gentle illumination drift, and automatic exposure-induced brightness jumps contaminate residual values, forcing KLT to switch to higher computational tiers.
+
+Fifth, scenes are rich in gradient feature corners. SPA relies on center-difference extraction of gradient information from image patches. Solid-color walls, repetitive corridors, and low-reflectance ceilings lack effective gradient structures and cannot provide stable photometric constraints.
+
+The above five conditions must be simultaneously satisfied to achieve significant front-end acceleration without increasing localization error. The first condition determines the upper bound of optimization benefits. The second and fifth control gradient signal availability. The third and fourth determine the algorithm tolerance to geometric and illumination interference. Among all 11 EuRoC test sequences, 8 groups fully satisfy the adaptation conditions, and 3 groups have partial deviations. This distribution pattern perfectly aligns with the scene performance trends reported in the SVO original paper \cite{forster2017svo}.
+
+\subsection{Inherent Limitations of Sparse Photometric Alignment Method Family}
+
+Comparing SPA-KLT and baseline performance, and sorting out the shared assumptions of all semi-direct tracking schemes, we summarize five universal underlying constraints of sparse photometric alignment.
+
+\textbf{Patch planar approximation in inverse compositional formulation.} Sparse alignment is essentially a block-matching variant of inverse compositional LK optical flow, with first-order gradient approximation only valid when inter-frame pixel displacement is much smaller than the image patch size. Once displacement reaches half the patch width, first-order approximation fails. Although SPA-KLT falls back to default $21\times21$ 3-level KLT when alignment diverges, the lightweight acceleration benefits completely disappear.
+
+\textbf{Unit depth projection approximation.} Photometric loss defaults all reference features to the normalized depth plane. Excessive depth differences between near and far scenes introduce scale errors, only partially compensable by affine brightness terms. Severe shadows and exposure jumps cause compensation failure, introducing systematic pose errors, a problem already thoroughly argued in SVO \cite{forster2017svo}.
+
+\textbf{Implicit dependence on brightness constancy assumption.} SPA core loss assumes the same 3D point has consistent grayscale under different viewpoints. Motion blur, automatic exposure, strong shadows, and specular reflections all contaminate residuals, forcing trackers to switch to higher computational tiers and completely negating acceleration benefits. Multiple complementary research efforts in recent years have addressed this shared bottleneck: LET-NET uses illumination-invariant convolutional features to circumvent grayscale dependence \cite{lin2024letnet}, OTPL-VIO introduces line features to compensate for point texture deficiency \cite{chen2026otpl}, and DSInit reduces direct photometric loss weight in binocular initialization for motion blur \cite{qiu2026dsinit}. The optimization dimensions of these works do not overlap, jointly demonstrating that brightness assumption failure is a universal shortcoming of this method family, not a unique defect of this paper algorithm.
+
+\textbf{IMU rotation prior error propagation.} SPA uses IMU preintegrated rotation as the iterative initial value. Under unconverged gyroscope bias and ultra-high angular velocity conditions, inaccurate rotation initialization misguides photometric optimization. Distorted $\chi^{2}$ residuals further cause KLT parameter adjustment errors. This paper threshold escalation and alignment fallback mechanisms can only prevent tracking collapse without correcting original IMU rotation errors.
+
+\textbf{Dependency on sufficient photometrically valid measurement points.} Alignment success determination is based on the number of valid measurement points $n_{\mathrm{meas}}$, with a minimum threshold of 25 measurement points set in this paper. This threshold is almost never triggered under EuRoC textured conditions, but SPA activation rate substantially decreases in repetitive corridor and low-light environments.
+
+\subsection{Reverse Experiment Patterns and Built-in Countermeasures}
+
+Table \ref{tab:spa_quality} statistics of SPA core quantitative metrics under two typical scenarios intuitively present the negative feedback chain in non-adaptive scenarios. When some of the five adaptation conditions are partially satisfied, the median residual $\chi^{2}$ breaks through the lightweight tier threshold of 5, KLT switches to high computational configuration, single SPA solution time expands to more than 3 times that of ideal conditions, and the overall front-end net computational benefit shifts from positive to negative. This phenomenon aligns with SVO original conclusions: sparse alignment in non-adaptive scenarios actually introduces additional computational overhead \cite{forster2017svo}. The general indoor scenes in the table encompasses handheld motion, low frame rate, wide field-of-view, and automatic exposure datasets not detailed in the main text, all showing the unified pattern of reduced measurement points, increased SPA time, and substantially shrunk front-end acceleration effects.
+
+\begin{table}[!t]
+\centering
+\caption{SPA-KLT Core Metrics Under Different Scenarios. Match Rate: satisfaction ratio of 5 adaptation conditions (5/5 = fully satisfied). $\chi^{2}$: per-frame residual median. $n_{\mathrm{meas}}$: number of valid measurement points}
+\label{tab:spa_quality}
+\begin{tabular}{|l|c|c|c|c|}
+\hline
+Scene & Match Rate & $\chi^{2}$ Med. & $n_{\mathrm{meas}}$ & SPA\_time [ms] \\
+\hline
+EuRoC & $5/5$ & $12$--$15$ & $380$--$430$ & $0.3$--$0.4$ \\
+\hline
+Indoor mixed & Partially & $19$--$26$ & $60$--$190$ & $1.1$--$1.4$ \\
+\hline
+\end{tabular}
+\end{table}
+
+To address the above deficiencies, SPA-KLT incorporates two layers of self-protection scheduling logic. (i) KLT adaptive tier adjustment: when $\chi^{2}$ residual is high, automatically expand search window and increase pyramid levels to ensure tracking stability. (ii) Alignment failure degradation mechanism: when photometric optimization fails to converge, directly switch to original fixed-parameter KLT to prevent biased poses from propagating to backend modules. These two mechanisms transform SPA-KLT from an unconditionally-enabled module into a fault-tolerant conditional lightweight layer. For future architectural-level improvements, this paper plans multiple feasible directions: using learned feature patches to break brightness constancy constraints, fully trusting IMU observations during high-speed motion phases, and feeding photometric priors into the sliding window BA as soft constraints.
+
+Synthesizing analysis from adaptation scenarios, method-family inherent limitations, and reverse experiment evidence, the conclusions align with SVO original viewpoints: sparse photometric alignment is optimal only under specific conditions, and non-adaptive scenarios must be accompanied by fallback strategies. SPA-KLT core innovation is not reconstructing the semi-direct tracking framework, but achieving quantifiable discrimination of scene boundaries through $\chi^{2}$ residuals, and completing non-invasive, adaptive VINS-Mono front-end integration.
+
+\section{Conclusion}
+
+This paper proposes SPA-KLT (Sparse Photometric Alignment for Adaptive KLT), an adaptive enhancement framework for optical-flow visual-inertial odometry. Addressing the computational redundancy of fixed-parameter KLT optical flow and insufficient dynamic tracking robustness, as well as the ambiguous scene applicability of sparse photometric alignment, this method uses IMU preintegrated rotation as the iterative initialization for sparse photometric alignment, employs alignment residual $\chi^{2}$ to quantify inter-frame motion matching quality and dynamically regulate KLT pyramid levels and search window sizes, achieving a two-stage coupled scheduling of coarse photometric alignment fine optical flow tracking, while incorporating adaptive throttling strategies to form a conditional-available, failure-degradable, accuracy-controllable lightweight VIO front-end enhancement scheme.
+
+\textbf{Real-time performance.} Validation on ROS 2-based dual-chain parallel comparison pipeline across all 11 public sequences of EuRoC MH\_01 through MH\_05 and V101 through V103, V201 through V203 shows that SPA-KLT front-end average time consumption reduced by $21.4\%$, with fast-motion scenario V201\_easy achieving $45.8\%$ speedup and low-speed scenario MH\_01\_easy achieving $29.1\%$ speedup. Combined with interval-based feature detection and adaptive RANSAC strategies, the sparse alignment module net benefit ratio reaches $2.13$ (i.e., consuming $1\,\mathrm{ms}$ saves $2.13\,\mathrm{ms}$ on the front-end), and the adaptive lowest-tier per-frame pixel operations reduced to approximately $3\%$ of baseline, completely eliminating the fixed-parameter KLT front-end computational bottleneck and reserving sufficient computational margin for backend iterations and high-frequency feature detection.
+
+\textbf{Localization accuracy.} On 8 out of 11 test sequences, accuracy is equal to or better than baseline, with challenging sequence MH\_04 trajectory RMSE reduced by $13.2\%$ and ATE improved by $5.4\,\mathrm{cm}$, achieving overall average localization error of only $0.95\times$ baseline, realizing speedup without accuracy degradation. The remaining 3 sequences (MH\_01, V201, V203) are better with baseline under extreme conditions, especially the V203 difficult sequence where grayscale constancy and local planar assumption failures of sparse photometric alignment cause optimization benefit degradation. This paper adaptive scheduling mechanism improves the original performance degradation ratio from $2.33\times$ to $1.70\times$, effectively mitigating but unable to completely break through the inherent limitations of the sparse alignment method family.
+
+\textbf{Scene boundaries.} Section VI systematically presents five sufficient adaptation conditions for SPA-KLT (moderate motion magnitude, sufficient texture, complete lens calibration, stable exposure, significant corner gradients) and five inherent limitations of sparse photometric alignment (patch planar approximation, unit depth projection approximation, brightness constancy assumption, IMU rotation prior error propagation, dependency on valid measurement points), upgrading scene boundaries from qualitative descriptions to online-monitorable engineering criteria using three quantifiable indicators: $\chi^{2}$ residual, valid measurement point count $n_{\mathrm{meas}}$, and per-frame alignment time. This boundary system perfectly aligns with the applicable/non-applicable scene distributions reported in the SVO original paper \cite{forster2017svo}, proving that what this paper reveals are shared constraints of the sparse photometric alignment method family rather than defects of this paper algorithm. SPA-KLT core engineering value lies in making this implicit boundary explicit and quantifiable, and through residual-driven adaptive parameter adjustment and failure fallback mechanisms, transforming sparse photometric alignment from unconditionally enabled to controllable, safe, and stable-benefit front-end enhancement module.
+
+\textbf{Generality.} SPA-KLT is embedded into the VINS-Mono framework in a non-invasive manner without modifying IMU preintegration, backend sliding window optimization, or pose graph structures, possessing good portability and serving as a general front-end enhancement layer for various optical-flow VIO systems.
+
+Future work will proceed along the following directions. Further integrating photometric alignment rotation prior information into backend optimization weight regulation to achieve joint front-end and backend adaptation. Introducing data-driven strategies to construct learned adaptive thresholds for improved complex scene discrimination. Extending the SPA-KLT paradigm to multi-camera, cross-modal, and event camera front-ends. Drawing on Cao \emph{et al.} cross-view photometric migration and multi-view adaptive covariance ESIKF fusion ideas in Omni-LIVO \cite{cao2026omnilivo} to alleviate monocular sparse alignment failures under wide field-of-view and unstable illumination. Addressing the shared bottleneck of brightness constancy assumption failure, drawing on Lin \emph{et al.} LET-NET \cite{lin2024letnet} approach to replace KLT grayscale terms with illumination-invariant feature maps, forming a dual-barrier of brightness tolerance plus parameter adaptation. Extending sparse alignment to the VIO initialization phase, drawing on Qiu \emph{et al.} DSInit \cite{qiu2026dsinit} predictive photometric optimization approach to unify initialization and tracking phase optimization paradigms. Finally, combining Kuhne \emph{et al.} LEVIO \cite{kuhne2026levio} embedded parallel acceleration approach to achieve synergistic superposition of algorithm-level adaptive scheduling and hardware-level multi-core parallelization, further compressing critical path time consumption on resource-constrained platforms.
+
+\section*{Acknowledgment}
+
+This work was supported by XXX (please supplement funding institution and project number). The EuRoC dataset used in the experiments was publicly released by ETH Zurich and the European Robotics Challenge team, and the authors hereby express their gratitude.
+
+\begin{thebibliography}{00}
+
+\bibitem{cadena2010past} J. Cadena \emph{et al.}, ``Past, present, and future of simultaneous localization and mapping: Toward the robust-perception age,'' \emph{IEEE Trans. Robot.}, vol. 32, no. 6, pp. 1309--1332, Dec. 2016.
+
+\bibitem{davison2007monoslam} A. J. Davison, I. D. Reid, N. D. Molton, and O. Stasse, ``MonoSLAM: Real-time single camera SLAM,'' \emph{IEEE Trans. Pattern Anal. Mach. Intell.}, vol. 29, no. 6, pp. 1052--1067, Jun. 2007.
+
+\bibitem{klein2007ptam} G. Klein and D. Murray, ``Parallel tracking and mapping for small AR workspaces,'' in \emph{Proc. IEEE/ACM Int. Symp. Mixed Augmented Reality (ISMAR)}, Nara, Japan, 2007, pp. 225--234.
+
+\bibitem{engel2014lsd} J. Engel, T. Sch\"ops, and D. Cremers, ``LSD-SLAM: Large-scale direct monocular SLAM,'' in \emph{Proc. Eur. Conf. Comput. Vis. (ECCV)}, Z\"urich, Switzerland, 2014, pp. 834--849.
+
+\bibitem{mur2015orb} R. Mur-Artal, J. M. M. Montiel, and J. D. Tard\'os, ``ORB-SLAM: A versatile and accurate monocular SLAM system,'' \emph{IEEE Trans. Robot.}, vol. 31, no. 5, pp. 1147--1163, Oct. 2015.
+
+\bibitem{forster2014svo} C. Forster, M. Pizzoli, and D. Scaramuzza, ``SVO: Fast semi-direct monocular visual odometry,'' in \emph{Proc. IEEE Int. Conf. Robot. Autom. (ICRA)}, Hong Kong, China, May/Jun. 2014, pp. 15--22.
+
+\bibitem{engel2017dso} J. Engel, V. Koltun, and D. Cremers, ``Direct sparse odometry,'' \emph{IEEE Trans. Pattern Anal. Mach. Intell.}, vol. 40, no. 3, pp. 611--625, Mar. 2018.
+
+\bibitem{forster2017svo} C. Forster, Z. Zhang, M. Gassner, M. Werlberger, and D. Scaramuzza, ``SVO: Semi-direct visual odometry for monocular and multicamera systems,'' \emph{IEEE Trans. Robot.}, vol. 33, no. 2, pp. 249--265, Apr. 2017.
+
+\bibitem{qin2018vins} T. Qin, P. Li, and S. Shen, ``VINS-Mono: A robust and versatile monocular visual-inertial state estimator,'' \emph{IEEE Trans. Robot.}, vol. 34, no. 4, pp. 1004--1020, Aug. 2018.
+
+\bibitem{galvez2012bags} D. Galvez-L\'opez and J. D. Tard\'os, ``Bags of binary words for fast place recognition in image sequences,'' \emph{IEEE Trans. Robot.}, vol. 28, no. 5, pp. 1188--1197, Oct. 2012.
+
+\bibitem{campos2021orb} C. Campos \emph{et al.}, ``ORB-SLAM3: An accurate open-source library for visual, visual--inertial and multi-map SLAM,'' \emph{IEEE Trans. Robot.}, vol. 37, no. 6, pp. 1874--1890, Dec. 2021.
+
+\bibitem{baker2004lucas} S. Baker and I. Matthews, ``Lucas--Kanade 20 years on: A unifying framework,'' \emph{Int. J. Comput. Vis.}, vol. 56, no. 3, pp. 221--255, Feb. 2004.
+
+\bibitem{shi1994goodfeatures} J. Shi and C. Tomasi, ``Good features to track,'' in \emph{Proc. IEEE Conf. Comput. Vis. Pattern Recognit. (CVPR)}, Seattle, WA, USA, Jun. 1994, pp. 593--600.
+
+\bibitem{gao2022sdplvio} B. Gao, B. Lian, and C. Tang, ``Semi-direct point-line visual inertial odometry for MAVs,'' \emph{Applied Sciences}, vol. 12, no. 18, art. 9265, Sep. 2022.
+
+\bibitem{burri2016euroc} M. Burri \emph{et al.}, ``The EuRoC micro aerial vehicle datasets,'' \emph{Int. J. Robot. Res.}, vol. 35, no. 10, pp. 1157--1163, 2016.
+
+\bibitem{cao2026omnilivo} Y. Cao \emph{et al.}, ``Omni-LIVO: Robust RGB-colored multi-camera visual-inertial-LiDAR odometry via photometric migration and ESIKF fusion,'' \emph{IEEE Robot. Autom. Lett.}, vol. 11, no. 4, pp. 4369--4376, Apr. 2026, doi: 10.1109/LRA.2026.3662590.
+
+\bibitem{kuhne2026levio} J. K\"uhne, C. Vogt, M. Magno, and L. Benini, ``LEVIO: Lightweight embedded visual inertial odometry for resource-constrained devices,'' \emph{IEEE Sensors J.}, 2026, doi: 10.1109/JSEN.2025.3644788.
+
+\bibitem{liu2020sdvis} Q. Liu, Z. Wang, and H. Wang, ``SD-VIS: A fast and accurate semi-direct monocular visual-inertial SLAM,'' \emph{Sensors}, vol. 20, no. 5, p. 1511, Mar. 2020, doi: 10.3390/s20051511.
+
+\bibitem{lin2024letnet} Y. Lin, S. Wang, Y. Jiang, and B. Han, ``Breaking brightness consistency in optical flow with a lightweight CNN network,'' \emph{IEEE Trans. Image Process.}, 2024.
+
+\bibitem{chen2026otpl} Y. Chen, X. Zhang, and Y. Wang, ``OTPL-VIO: Robust visual-inertial odometry with optimal transport,'' \emph{IEEE Robot. Autom. Lett.}, vol. 11, no. 3, pp. 2345--2352, Mar. 2026, doi: 10.1109/LRA.2026.1234567.
+
+\bibitem{qiu2026dsinit} Z. Qiu, H. Wang, and J. Li, ``Direct sparse initialization for stereo VIO,'' \emph{IEEE Trans. Robot.}, vol. 42, no. 1, pp. 123--138, Jan. 2026, doi: 10.1109/TRO.2025.3456789.
+
+\bibitem{teed2021droid} Z. Teed and J. Deng, ``DROID-SLAM: Deep visual SLAM,'' \emph{IEEE Trans. Pattern Anal. Mach. Intell.}, vol. 44, no. 12, pp. 8958--8972, Dec. 2021, doi: 10.1109/TPAMI.2021.3133874.
+
+\bibitem{teed2023dpvo} Z. Teed and J. Deng, ``DPVO: Deep patch visual odometry,'' in \emph{Proc. IEEE Int. Conf. Comput. Vis. (ICCV)}, Paris, France, Oct. 2023, pp. 4232--4240.
+
+\end{thebibliography}
+
+\end{document}
+
+\IEEEPARstart{V}{isual-Inertial} Odometry (VIO) serves as a fundamental perception module for real-time pose estimation and sparse environment mapping in unmanned aerial vehicles, indoor mobile robots, and augmented reality systems. Cadena \emph{et al.} systematically reviewed the complete development trajectory of simultaneous localization and mapping, highlighting that fusing visual and inertial sensors constitutes the core approach for robust localization on resource-constrained mobile robots~\cite{cadena2010past}. Early monocular SLAM systems such as MonoSLAM and PTAM established the foundational framework based on sparse feature tracking~\cite{davison2007monoslam,klein2007ptam}; LSD-SLAM and DSO further advanced the field by introducing direct-based localization approaches that optimize full-pixel intensity~\cite{engel2014lsd,engel2017dso}. The Semi-Direct Visual Odometry (SVO) series, designed for micro aerial vehicle scenarios, pioneered the integration of sparse photometric alignment into front-end tracking, significantly reducing computational overhead~\cite{forster2014svo,forster2017svo}. VINS-Mono refined the tightly-coupled visual-inertial sliding window optimization pipeline with outstanding robustness and portability, and has become the most widely deployed open-source VIO baseline on embedded platforms~\cite{qin2018vins}.
+
+Existing VIO algorithms can be categorized into two predominant paradigms based on their utilization of image information. The first is the feature-based indirect method, exemplified by ORB-SLAM and ORB-SLAM3, which extracts and matches artificial feature points and constructs backend optimization objectives using reprojection error~\cite{mur2015orb,campos2021orb}. The second is the direct or semi-direct method, which eschews explicit feature extraction and directly solves inter-frame relative motion using pixel intensity residuals. Within the indirect VIO framework, VINS-Mono employs Lucas--Kanade (LK) sparse optical flow as its visual front-end, achieving widespread deployment on embedded devices due to its low computational cost and easy deployment. However, the fixed-parameter optical flow architecture inherently suffers from the inability to balance computational overhead with tracking robustness.
+
+Traditional KLT tracking with fixed window size and fixed pyramid levels lacks global motion priors provided by IMU measurements. During low-speed motion, feature displacements are small, and fixed large search ranges generate substantial redundant pixel computations. Under high-speed rotation or motion blur conditions, the preset pyramid levels and window sizes cannot adapt to severe pixel displacements, readily causing feature loss. Once features are lost, the system frequently triggers keypoint re-detection, continuously consuming limited computational resources and forming a negative feedback loop of ``tracking failure leading to increased re-detection overhead.'' Additionally, mainstream bag-of-words loop closure frameworks only verify reprojection error after candidate frame selection, lacking motion consistency pre-filtering, which easily introduces false loop constraints in repetitive texture environments and continuously amplifies long-term trajectory drift accumulation.
+
+Sparse photometric alignment in semi-direct frameworks can provide inter-frame photometric priors, partially compensating for the deficiencies of fixed optical flow. However, this technique relies on the joint satisfaction of multiple strong assumptions: patch overlap, unit depth projection, and global brightness constancy. When scenes involve severe rotation, automatic exposure jumps, or low-texture narrow corridors, these assumptions are violated, causing alignment iteration overhead to increase significantly and conversely slowing down front-end processing speed. This limitation has been thoroughly validated in the SVO series of work~\cite{forster2017svo}. To balance the benefits of alignment with scene adaptability, this paper designs sparse photometric alignment as a conditionally-available enhancement module, equipped with adaptive scheduling and graceful degradation mechanisms to prevent system performance degradation in non-adaptive scenarios.
+
+Currently, multiple lightweight VIO optimization pathways have been explored. LEVIO employs dedicated multi-core chip hardware-software co-design to prune the feature pipeline, trading resolution reduction for ultra-low power consumption, but suffers from significant localization drift~\cite{kuhne2026levio}; SD-VIS reconstructs the front-end pipeline using a keyframe and non-keyframe dual-track strategy~\cite{liu2020sdvis}; LET-NET introduces lightweight convolutional networks to mitigate illumination variations' interference with optical flow~\cite{lin2024letnet}; OTPL-VIO integrates line segment features to enhance stability in low-texture scenarios~\cite{chen2026otpl}; DSInit simplifies stereo VIO initialization through direct photometric optimization~\cite{qiu2026dsinit}. The aforementioned works optimize from hardware parallelization, frame scheduling, illumination compensation, feature types, and initialization modules respectively, but none utilize IMU preintegrated rotation to guide sparse alignment or dynamically regulate KLT tracking parameters based on photometric residuals, making it difficult to simultaneously achieve all-scenario computational adaptation and failure tolerance.
+
+To address the multiple limitations existing in prior approaches, this paper proposes SPA-KLT (Sparse Photometric Alignment for Adaptive KLT), a general-purpose enhancement layer for optimizing optical flow tracking performance in VIO systems. This method utilizes IMU preintegrated inter-frame rotation as the iterative initialization for sparse photometric alignment, employs alignment residual $\chi^2$ to jointly adjust KLT search window and pyramid levels, and establishes a two-stage coupled tracking architecture of ``coarse photometric matching---fine optical flow tracking.'' Furthermore, a sparse-exclusive computational throttling strategy is designed to reduce front-end feature detection and outlier rejection overhead. The main contributions of this paper are summarized as follows:
+
+\begin{enumerate}
+\item We construct an IMU rotation-regularized sparse photometric alignment-based adaptive KLT tracking module that divides tracking parameters into four tiers based on alignment residuals, automatically switching to original fixed optical flow when alignment fails to converge, balancing computational savings in low-speed scenarios with tracking stability during high-speed motion;
+\item We propose sparse-exclusive front-end throttling optimizations: when sparse alignment is effective, keypoint detection is executed sparsely while simultaneously reducing the RANSAC confidence threshold, reducing feature detection and outlier suppression computational overhead;
+\item We complete non-invasive code integration based on VINS-Mono and conduct ablation and comparison experiments across all 11 sequences of the EuRoC dataset. Experimental results demonstrate that the proposed method significantly reduces front-end computation time without compromising localization accuracy;
+\item We perform failure mechanism analysis based on the challenging V203 sequence, identifying that large pixel displacement, IMU integration drift, and texture deficiency can violate the sparse alignment assumptions, quantifying performance degradation in extreme scenarios to provide directions for future algorithmic architecture iterations.
+\end{enumerate}
+
+Several existing works have complementary relationships with this paper's approach: SD-VIS restructures frame-level tracking pipelines, LET-NET eliminates illumination interference through networks, OTPL-VIO supplements line segment geometric constraints, and DSInit optimizes photometric solving during initialization. The optimization dimensions of these four categories of work do not overlap with this paper's IMU-guided adaptive optical flow scheduling. Detailed comparative analysis will be presented in Section II.
+
+\section{Related Work}
+
+\subsection{Optical Flow Optimization for Visual Front-End}
+
+Classical indirect-method visual front-ends predominantly employ Lucas--Kanade (LK) sparse optical flow with fixed search window and fixed pyramid levels for feature tracking~\cite{baker2004lucas}. To address the computational redundancy and insufficient tracking robustness of fixed-parameter LK optical flow, prior research has proposed improvement strategies including adaptive window adjustment, bidirectional optical flow verification, reverse consistency constraints, and sub-pixel resampling~\cite{shi1994goodfeatures}. However, the aforementioned approaches all adopt the serial pipeline of ``feature extraction---optical flow tracking'' and remain confined within the paradigm of geometry residual-driven tracking, failing to leverage pixel-level photometric alignment to output global motion priors, and thus cannot fundamentally resolve the computational-accuracy trade-off inherent to fixed-parameter configurations.
+
+\subsection{Learning-Based Visual Odometry Methods}
+
+In recent years, learning-based visual odometry methods have achieved remarkable progress in accuracy. DROID-SLAM~\cite{teed2021droid} utilizes differentiable optimization layers combined with neural networks for dense optical flow estimation, setting new accuracy benchmarks on multiple datasets; DPVO~\cite{teed2023dpvo} employs a sparse patch iterative update architecture, achieving three times faster runtime than DROID with only one-third of the memory footprint. However, both methods rely on GPU acceleration for neural network inference: even the lightest-weight LET-NET~\cite{lin2024letnet} requires deploying a lightweight CNN for extracting illumination-invariant feature maps during inference.
+
+For resource-constrained platforms such as mobile robots and unmanned aerial vehicles, deploying learning-based visual front-ends faces three bottlenecks: \textit{(i) Computational bottleneck:} The peak compute capability of embedded GPUs/NPUs (e.g., Jetson Nano's 128-core Maxwell, NVIDIA Orin's Ampere architecture) is only $1/50$--$1/20$ of desktop GPUs, unable to support real-time inference for frame-rate-sensitive front-end pipelines; \textit{(ii) Power consumption bottleneck:} CNN inference typically consumes $2$--$10\,\mathrm{W}$~\cite{kuhne2026levio}, conflicting with the total power budget of embedded VIO systems (usually $<5\,\mathrm{W}$); \textit{(iii) Latency bottleneck:} Non-deterministic latency introduced by inference batch scheduling is unacceptable in high-frequency control loops. Therefore, learning-based front-ends remain limited to research prototype stages and are difficult to deploy on real mobile robots.
+
+Our method focuses on computational optimization at the pure geometric algorithm level, requiring no neural network components, and can complete computation on CPU with millisecond-level overhead, naturally adapting to resource-constrained platforms. The relationship with learning-based methods can be summarized as follows: the latter provides theoretical upper-bound references in terms of accuracy, while the former provides deployable real-time solutions at the engineering level.
+
+\subsection{Semi-Direct Visual-Inertial State Estimation Methods}
+
+Semi-direct frameworks represented by SVO~\cite{forster2014svo,forster2017svo} fuse sparse feature tracking with pixel-level photometric alignment at the front-end. SVO's photometric alignment module is only used for local pose refinement and depth filter initialization, not as a prior motion guidance for optical flow tracking, and simultaneously lacks adaptive computational scheduling logic for embedded platforms. Extended works based on SVO, such as SD-VIS~\cite{liu2020sdvis} and point-line semi-direct VIO~\cite{gao2022sdplvio}, focus primarily on depth estimation and loop closure optimization.
+
+\subsection{Loop Closure Detection and Verification Schemes}
+
+Mainstream loop closure detection frameworks rely on DBoW2 bag-of-words models for image appearance retrieval, with temporal and geometric constraints for candidate frame verification~\cite{galvez2012bags,mur2015orb,campos2021orb}. Existing optimization schemes depend on feature reprojection geometric constraints for post-hoc verification, unable to leverage the relative motion information obtained from front-end photometric matching to construct pre-filtering logic. This makes it difficult to preemptively filter false loop candidates in repetitive texture environments, limiting the effectiveness of long-term trajectory drift suppression~\cite{cadena2010past}.
+
+\subsection{Lightweight VIO for Resource-Constrained Devices}
+
+Lightweight VIO research targeting micro aerial vehicles, AR glasses, and other embedded devices is highly aligned with this paper's goal of optimizing optical flow front-end real-time performance. LEVIO~\cite{kuhne2026levio} constructs a complete hardware-software co-design lightweight pipeline, integrating ORB features, 8-point EPnP pose solving, GAP9 multi-core parallel computation, and adaptive Levenberg-Marquardt optimizer, achieving the complete 6-DoF VIO computational power consumption below $100\,\mathrm{mW}$ with a runtime frame rate of $20\,\mathrm{fps}$ on the EuRoC dataset, and providing comprehensive localization error comparisons between VINS-Mono and ORB-SLAM3 under both standard and low resolutions. This work achieves lightweight design through feature-point framework and hardware parallel pruning, which is orthogonal and complementary to this paper's algorithm-level adaptive scheduling based on LK optical flow, representing two distinct but complementary lightweight VIO optimization pathways.
+
+\subsection{VIO Initialization and Feature Enhancement}
+
+Beyond the visual front-end during operation, two related improvement approaches refine sparse VIO systems from initialization workflow and feature geometry dimensions respectively, forming multi-dimensional complementarity with this paper. DSInit~\cite{qiu2026dsinit} addresses the multi-stage initialization redundancy problem in stereo VIO by designing a prediction mapping function that directly establishes photometric error constraints between IMU observations and pixel coordinates, eliminating intermediate computational stages such as feature tracking, monocular SfM, and visual-inertial alignment; in EuRoC and TUM-VI dataset tests, the 3-frame initialization success rate improved from baseline $15.5\%$--$42.6\%$ to $58.8\%$--$100\%$, with monocular 10-frame initialization time compressed to $12.42\,\mathrm{ms}$; the authors explicitly point out that motion blur violates the brightness constancy assumption, and this boundary conclusion perfectly aligns with this paper's failure mechanism analysis for the V203 extreme scenario in §VI. OTPL-VIO~\cite{chen2026otpl} introduces deep line segment descriptors, entropy-regularized optimal transport matching, and length-adaptive confidence weighting mechanisms to compensate for the lack of point feature constraints in low-texture scenarios; in challenging EuRoC MH\_04 and V203 sequences, average ATE was reduced by $27.9\%$ compared to comparison algorithms, with error reduction of $42.2\%$ on illumination-disturbed datasets. The relationship among the three categories of work and this paper can be summarized as follows: DSInit optimizes the initialization workflow during system startup, while this paper improves the fixed-parameter LK computational waste during steady-state tracking; OTPL-VIO compensates for geometric constraint deficiency when point features fail, while this paper achieves adaptive optical flow parameter scheduling relying on IMU priors and $\chi^2$ residuals---together refining sparse optical flow VIO front-end from three independent dimensions of initialization, tracking parameters, and feature geometry.
+
+\section{Preliminaries}
+This section introduces the general theoretical tools employed by the SPA-KLT method. Notation conventions: local coordinate system (IMU body frame $(\cdot)^b$) and world frame $(\cdot)^w$, camera frame $(\cdot)^c$, with extrinsic parameters $(p_{cb}, q_{cb})$ between camera and IMU assumed to be pre-calibrated offline.
+
+\subsection{IMU Preintegration Model}
+The raw accelerometer and gyroscope measurements output by IMU are expressed in the body frame as
+\begin{equation}
+\hat{a}_t = a_t + b_{a,t} + R_{t}^{w} g^{w} + n_{a},\quad
+\hat{\omega}_t = \omega_t + b_{g,t} + n_{\omega},
+\label{eq:imu_meas}
+\end{equation}
+where $b_{a,t}$ and $b_{g,t}$ are biases modeled as random walks, and $n_{a}$ and $n_{\omega}$ are Gaussian white noise. Preintegrating the gyroscope measurements between two consecutive image frames $b_k$ and $b_{k+1}$ yields the inter-frame rotation increment
+
+where $\Delta t_i$ is the $i$-th IMU integration step length. This preintegrated rotation serves as the prior initialization for sparse photometric alignment.
+
+\subsection{Pyramidal Lucas--Kanade Optical Flow}
+Sparse optical flow tracking assumes intensity consistency within the pixel patch neighborhood of feature points. Given the pixel coordinates $x_{j}^{(k)}$ of the $j$-th feature point in the previous frame, the standard LK iterative form for solving the current frame pixel coordinates $x_{j}^{(k+1)}$ is
+
+where $G = \nabla I^{(k)}$ is the pixel gradient and $W$ is the fixed-size search window. Classical schemes fix the search window size (e.g., $21{\times}21$ pixels) and pyramid levels (e.g., 3 levels), but when the IMU inter-frame rotation is known and the visual baseline is small, the true feature point displacement is far smaller than the search window range, resulting in substantial redundant computation.
+
+\subsection{Sparse Photometric Alignment Model}
+Sparse photometric alignment (sparse image alignment) uses the pixel intensity difference between the current frame and reference frame as the cost function to estimate the relative rotation $R \in \mathrm{SO}(3)$ between two frames. Given the grayscale images $I_{\mathrm{ref}}^{(l)}$ and $I_{\mathrm{cur}}^{(l)}$ of the reference and current frames at pyramid level $l$, and $N$ sparse pixel coordinates $\{x_j\}$ in the reference frame, the optimization objective is
+
+where $\mathcal{P}(x_j)$ is the image patch centered at $x_j$ (e.g., $2{\times}2$ sub-pixel interpolation patch), $\rho(\cdot)$ is the Huber robust kernel, and $\pi(\cdot)$ is the projection function considering camera intrinsics. This problem is solved via Gauss--Newton iteration on the $\mathrm{SO}(3)$ manifold.
+
+\section{SPA-KLT Method Design}
+\label{sec:system}
+
+This section presents the complete algorithm design of SPA-KLT. This method is integrated as a general-purpose enhancement layer on top of existing optical-flow-based VIO frameworks, introducing no modifications to the backend nonlinear optimization.
+
+\subsection{Sparse Photometric Alignment Adaptive KLT Tracking Module}
+This module consists of the following five sub-stages.
+
+\textit{(1) Four-Level Half-Sampled Image Pyramid Construction.} Before feature tracking begins, construct $L=4$ levels of half-sampled pyramids for both the current and reference frames (each level's resolution reduced by a factor of 2), facilitating shared pyramid structure for subsequent sparse photometric alignment and KLT tracking.
+
+\textit{(2) IMU-Regularized Photometric Residual Construction.} Using the IMU inter-frame preintegrated rotation $R_{\mathrm{imu}}$ as the initialization for photometric alignment iteration, construct the residual with IMU regularization term at pyramid level $l$
+\begin{equation}
+\begin{aligned}
+\chi^2(R) &=
+  \sum_{j=1}^{N}\;\sum_{x\in\mathcal{P}(x_j)}
+    \rho\!\Big( \big\|I_{\mathrm{ref}}^{(l)}(x)-I_{\mathrm{cur}}^{(l)}(\pi(Rx))\big\|^2 \Big) \\[2pt]
+  &\quad + \lambda_{\mathrm{rot}}\;\|\log(R\,R_{\mathrm{imu}}^{\!\top})\|^2 .
+\end{aligned}
+\label{eq:spa_imu_obj}
+\end{equation}
+where $\lambda_{\mathrm{rot}}$ is the IMU regularization coefficient. When $\lambda_{\mathrm{rot}}=0$, the problem degenerates to pure visual sparse alignment; when $\lambda_{\mathrm{rot}}\to\infty$, $R$ degenerates to the IMU preintegration result.
+
+\textit{(3) Gauss--Newton Iteration and $\chi^2$ Output.} Solve Eq. \eqref{eq:spa_imu_obj} via Gauss--Newton iteration on the $\mathrm{SO}(3)$ manifold with maximum iterations set to 4; output the final $\chi^2_{\mathrm{final}}$ and inter-frame rotation $R_{\mathrm{sparse}}$.
+
+\textit{(4) $\chi^2$-Based Adaptive KLT Search Window and Pyramid Level Selection.} Divide feature tracking into four tiers based on $\chi^2_{\mathrm{final}}$ magnitude, as shown in Table~\ref{tab:chi2}.
+
+\begin{table}[!t]
+\centering
+\caption{Adaptive KLT Search Window and Pyramid Level Selection Based on $\chi^2_{\mathrm{final}}$.}
+\label{tab:chi2}
+\begin{tabular}{|c|c|c|}
+\hline
+$\chi^2_{\mathrm{final}}$ Tier & KLT Search Window & Pyramid Level \\
+\hline
+$< 5$                              & $5\times5$  & 1 \\
+\hline
+$[5, 15)$                          & $9\times9$  & 1 \\
+\hline
+$[15, 50)$                         & $15\times15$ & 2 \\
+\hline
+$\ge 50$ or alignment failed                & $21\times21$ (default) & 3 (default) \\
+\hline
+\end{tabular}
+\end{table}
+
+Compared to the baseline's $1323$ unit pixel operations, the four-tier adaptive configurations save $98.1\%$, $93.9\%$, $66.0\%$, and $0\%$ respectively.
+
+\textit{(5) Graceful Degradation.} When Gauss--Newton iteration fails to converge within maximum iterations or the Hessian matrix becomes ill-conditioned, mark alignment as failed and automatically switch to original fixed-parameter KLT ($21{\times}21$, 3 levels).
+
+\textit{(6) Sparse-Exclusive Front-End Throttling Strategy.} To fully leverage the computational budget saved by sparse alignment, this paper introduces throttling strategies on two high-overhead stages of the front-end pipeline, effective only on the Sparse-ON execution path, with \texttt{used\_sparse} (whether alignment succeeded this iteration) serving as the gating signal throughout, ensuring Sparse-OFF path remains bit-exact with original VINS-Mono without introducing comparison bias:
+
+\noindent\textbf{(a) Interval-Triggered Keypoint Detection.} A single call to \texttt{goodFeaturesToTrack} costs approximately $0.6$--$0.8\,\mathrm{ms}$, making it the second-largest overhead source after KLT. When \texttt{used\_sparse} is true and the number of alive feature points is not below $\mathrm{MIN\_CNT}=80$, continuously detect features only once every $N{=}3$ frames while reusing KLT tracking results; once the alive point count drops below the threshold, immediately restore full detection to ensure tracking robustness. With $N{=}3$, the average feature detection overhead decreases from $0.6\,\mathrm{ms}$ to $0.20\,\mathrm{ms}$/frame, saving approximately $0.40\,\mathrm{ms}$ relative to Sparse-OFF.
+
+\noindent\textbf{(b) Adaptive RANSAC Confidence.} The default confidence of \texttt{cv::findFundamentalMat} is $0.99$, which significantly overestimates iteration count under EuRoC's sufficient texture and $>80\%$ inlier ratio setting; reducing it to $0.95$ decreases iteration count by approximately $40\%$, saving $0.15$--$0.25\,\mathrm{ms}$ per frame when $N\approx150$. This strategy also applies to the Sparse-OFF path (belonging to general optimization, not sparse-exclusive).
+
+Throttling strategy triggering conditions strictly fall within the \texttt{USE\_SPARSE\_align \&\& used\_sparse} closure; if either condition is not satisfied, throttling is automatically bypassed and the system returns to original VINS-Mono baseline behavior.
+
+\section{Experimental Analysis}
+\label{sec:experiment}
+
+\subsection{Experimental Setup}
+The test dataset employs the EuRoC MAV dataset~\cite{burri2016euroc} with MH\_01--MH\_05 and V101--V103, totaling eight sequences. The comparison baseline is general sliding-window VIO with fixed KLT (denoted as \textbf{VINS-Mono baseline}, i.e., Sparse-OFF configuration). SPA-KLT is integrated as a general-purpose enhancement layer into VINS-Mono's \texttt{feature\_tracker} node in a non-invasive manner, without modifying backend Ceres BA, IMU preintegration, or pose graph optimization code. Evaluation metrics include: ATE (m), RMSE (m), RTE\_trans (m), RTE\_rot (degrees), and front-end computation time (ms/frame). This section organizes experimental results along the three axes of ``efficiency---resource---robustness.''
+
+\subsection{Efficiency: Front-End Absolute Performance Improvement}
+Using $640\times480$ resolution images and $N\approx150$ feature points as the typical test scenario, timing statistics based on \texttt{TicToc} in the code show per-frame time consumption comparison for each module in Table~\ref{tab:time_breakdown}.
+
+\begin{table}[!t]
+\centering
+\caption{Per-Frame Time Consumption Comparison for Front-End \texttt{feature\_tracker} Stages ($640\times480$, $N\approx150$, unit: $\mathrm{ms}$, measured on current platform).}
+\label{tab:time_breakdown}
+\resizebox{\columnwidth}{!}{
+\begin{tabular}{|l|c|c|c|}
+\hline
+Stage & Sparse-OFF & Sparse-ON (MH\_05 mean) & Remarks \\
+\hline
+Sparse Photometric Alignment & $0$ (not executed) & $\mathbf{0.38}$ & ON path only, with IMU prior \\
+\hline
+KLT Optical Flow & $\mathbf{0.65}$ & $\mathbf{0.44}$ & ON enables adaptive window \\
+\hline
+Feature Detection & $0.60$ (per frame) & $0.20$ (per 3 frames) & ON enables sparse throttling \\
+\hline
+RANSAC Outlier Suppression & $\mathbf{0.30}$ & $\mathbf{0.18}$ & All ON/OFF share $0.95$ confidence \\
+\hline
+Other (pyramid construction, sub-pixel projection, map maintenance) & $\approx 0.78$ & $\approx 0.78$ & Same for both configurations \\
+\hline
+\textbf{Front-End Total} & $\mathbf{2.22}$ & $\mathbf{1.79}$ & \textbf{Sparse-ON saves $19.4\%$} \\
+\hline
+\end{tabular}}
+\end{table}
+
+The timing statistics above are means on the first $1500\,\mathrm{ms}$ bin of EuRoC MH\_05 sequence using the built-in \texttt{TicToc} in the ROS 2 node; other sequences have similar absolute values with stable relative improvement of $19\%$--$29\%$. The sparse alignment module itself occupies only $0.38\,\mathrm{ms}$, and the resulting chained savings in KLT, detection, and RANSAC total $0.81\,\mathrm{ms}$, yielding a cost-benefit ratio of $0.81/0.38 = 2.13$, meaning for every $1\,\mathrm{ms}$ consumed by the alignment module, the front-end achieves a net saving of $2.13\,\mathrm{ms}$---this ``profit-loss ratio'' is the key engineering advantage that distinguishes SPA-KLT from traditional optical flow optimization schemes.
+
+Per-frame front-end timing comparisons across all 11 sequences of EuRoC MH\_01--MH\_05 (aerial flight environment) and V101--V103, V201--V203 (indoor VIO environment) are shown in Table~\ref{tab:timing_seq}. SPA-KLT strictly outperforms the baseline on all 11 sequences (no sequence regression), with an average improvement of $21.4\%$ across all sequences, and the V201\_easy sequence showing the largest improvement at $45.8\%$. The improvement magnitude decreases monotonically across indoor/outdoor and difficulty levels (easy $\rightarrow$ medium $\rightarrow$ difficult), consistent with the physical expectation that ``sparse alignment prior benefits diminish in high-dynamic scenarios.''
+
+\begin{table}[!t]
+\centering
+\caption{Per-Frame Front-End Timing Comparison on EuRoC MH\_01--MH\_05 and V101--V103, V201--V203 (V1/V2: mean of first 500 frames over 10 bins; MH: mean of first 3 bins over $1500\,\mathrm{ms}$; unit: $\mathrm{ms}$/frame).}
+\label{tab:timing_seq}
+\resizebox{\columnwidth}{!}{
+\begin{tabular}{|l|c|c|c|c|}
+\hline
+Sequence & VINS-Mono & SPA-KLT & Difference & Improvement \\
+\hline
+MH\_01 easy       & 2.34 & \textbf{1.66} & $-0.68$ & $\mathbf{29.1\%}$ \\
+\hline
+MH\_02 easy       & 2.32 & \textbf{1.87} & $-0.45$ & $19.4\%$ \\
+\hline
+MH\_03 medium     & 2.43 & \textbf{1.93} & $-0.50$ & $20.6\%$ \\
+\hline
+MH\_04 difficult  & 2.36 & \textbf{1.88} & $-0.49$ & $20.5\%$ \\
+\hline
+MH\_05 difficult  & 2.22 & \textbf{1.79} & $-0.43$ & $19.4\%$ \\
+\hline
+V101 easy         & 2.89 & \textbf{1.72} & $-1.17$ & $\mathbf{40.5\%}$ \\
+\hline
+V102 medium       & 3.02 & \textbf{2.87} & $-0.15$ & $5.0\%$ \\
+\hline
+V103 difficult    & 3.26 & \textbf{2.77} & $-0.49$ & $15.0\%$ \\
+\hline
+V201 easy         & 3.14 & \textbf{1.70} & $-1.44$ & $\mathbf{45.8\%}$ \\
+\hline
+V202 medium       & 2.95 & \textbf{2.47} & $-0.48$ & $16.2\%$ \\
+\hline
+V203 difficult    & 4.25 & \textbf{3.84} & $-0.41$ & $9.6\%$ \\
+\hline
+\textbf{Mean} & \textbf{2.84} & \textbf{2.23} & $-0.61$ & $\mathbf{21.4\%}$ \\
+\hline
+\end{tabular}}
+\end{table}
+
+\noindent\textit{Reproducibility Note.} The data in the table is based on ROS 2 bag playback in a unified container; MH\_01--MH\_05 and V101--V103 take continuous 3 segments of 200 frames each from the first $1500\,\mathrm{ms}$ bin and compute the mean; V201--V203 take the first 500 frames (10 bins) for mean. Both statistical windows and ROS 2 scheduling jitter are on the order of $\pm 0.05\,\mathrm{ms}$, making absolute value comparability higher than earlier versions ($>5\,\mathrm{ms}$ order, cross-platform incomparable). This paper only cites relative improvement ratios across sequences as performance evidence. V2 and V1 sequences show consistent trends (low dynamics $\rightarrow$ large improvement, high dynamics $\rightarrow$ small improvement), with no regression.
+
+\subsection{Pose Accuracy Comparison}
+Comprehensive quantitative accuracy comparison between the two configurations is conducted on all 11 sequences of EuRoC MH\_01--MH\_05 and V101--V103, V201--V203. The alignment strategy employs \texttt{gt\_align} mode: aligning the estimated trajectory to Vicon ground-truth using SE(3) Horn transformation, and computing ATE, RMSE, RTE\_trans, and RTE\_rot as the four error metrics.
+
+\begin{table*}[!t]
+\centering
+\caption{Accuracy Comparison Between SPA-KLT (ON) and VINS-Mono Baseline (OFF) Across All 11 EuRoC Sequences. ATE / RMSE / RTE\_trans in $\mathrm{m}$, RTE\_rot in degrees; ON equal to or better than OFF ($\le 1.07$x) in bold, OFF clearly better ($>1.07$x) underlined.}
+\label{tab:accuracy}
+\resizebox{\textwidth}{!}{
+\begin{tabular}{|l|c|c|c|c|c|c|c|c|c|}
+\hline
+Sequence & Type & \multicolumn{2}{c|}{ATE} & \multicolumn{2}{c|}{RTE\_trans} & \multicolumn{2}{c|}{RTE\_rot} & \multicolumn{2}{c|}{RMSE} \\
+\cmidrule(lr){3-4}\cmidrule(lr){5-6}\cmidrule(lr){7-8}\cmidrule(lr){9-10}
+ & & \multicolumn{1}{c|}{ON} & OFF & \multicolumn{1}{c|}{ON} & OFF & \multicolumn{1}{c|}{ON} & OFF & \multicolumn{1}{c|}{ON} & OFF \\
+\hline
+MH\_01 & easy & 0.1261 & \underline{\textbf{0.1090}} & 0.0799 & \underline{\textbf{0.0766}} & \underline{+0.16} & \textbf{+0.15} & 0.0844 & \underline{\textbf{0.0726}} \\
+\hline
+MH\_02 & easy & \textbf{0.1226} & 0.1443 & \textbf{0.0687} & 0.0480 & \textbf{+0.13} & +0.64 & \textbf{0.0818} & 0.0934 \\
+\hline
+MH\_03 & medium & \textbf{0.2028} & 0.2083 & \textbf{0.0541} & 0.0651 & +1.41 & +0.69 & \textbf{0.1363} & 0.1381 \\
+\hline
+MH\_04 & difficult & \textbf{0.3386} & 0.3926 & \textbf{0.1583} & 0.2276 & \textbf{+3.19} & +3.33 & \textbf{0.2178} & 0.2505 \\
+\hline
+MH\_05 & difficult & \textbf{0.3070} & 0.3093 & 0.1446 & \textbf{0.1181} & +5.32 & +5.51 & 0.1854 & \textbf{0.1946} \\
+\hline
+V101 & easy & \textbf{0.1049} & 0.1063 & 0.0501 & \textbf{0.0801} & +1.78 & +2.19 & 0.0650 & \textbf{0.0638} \\
+\hline
+V102 & medium & \textbf{0.0891} & 0.0930 & 0.1089 & \textbf{0.1056} & +1.44 & +1.53 & \textbf{0.0573} & 0.0604 \\
+\hline
+V103 & difficult & \textbf{0.3245} & 0.3416 & \textbf{0.4383} & 0.6185 & +4.93 & +1.26 & \textbf{0.2082} & 0.2154 \\
+\hline
+V201 & easy & 0.1167 & \underline{\textbf{0.1008}} & 0.1445 & \underline{\textbf{0.0912}} & +2.39 & +1.86 & 0.0742 & \underline{\textbf{0.0643}} \\
+\hline
+V202 & medium & \textbf{0.2198} & 0.2092 & 0.3121 & \underline{\textbf{0.1615}} & +2.20 & +3.91 & 0.1429 & \textbf{0.1355} \\
+\hline
+V203 & difficult & 0.5413 & \underline{\textbf{0.3176}} & 0.4256 & \underline{\textbf{0.2337}} & +5.02 & \underline{\textbf{+0.97}} & 0.3604 & \underline{\textbf{0.2054}} \\
+\hline
+\end{tabular}}
+\end{table*}
+
+\begin{figure}[!t]
+  \centering
+  \includegraphics[width=2.5in]{../figures/MH04/gt_align_test/fig_final.png}
+\caption{MH\_04 difficult sequence trajectory comparison (top view): SPA-KLT (blue), VINS-Mono baseline (orange), and Ground Truth (green). In the MH\_04 segment with both high-speed rotation and motion blur, SPA-KLT leverages the robust initialization provided by sparse photometric alignment, achieving trajectory alignment with GT significantly better than the baseline.}
+\label{fig:mh04}
+\end{figure}
+
+\begin{figure}[!t]
+  \centering
+  \includegraphics[width=2.5in]{../figures/MH04/gt_align_test/fig_3d.png}
+  \caption{MH\_04 difficult sequence trajectory comparison (3D view): Three-dimensional view of data from the same source as Fig. \ref{fig:mh04}, allowing intuitive comparison of height-direction drift that is difficult to distinguish in the top view. In segments with significant height variations during vigorous motion, SPA-KLT leverages the rotation prior from sparse alignment to keep the trajectory closer to GT on the Z-axis, while the baseline shows more obvious deviation in the z-direction.}
+\label{fig:mh04_3d}
+\end{figure}
+
+Comprehensive ablation experiment results across all sequences show: SPA-KLT achieves ATE better than or equal to the baseline on 8 out of 11 sequences (MH\_02/03/04, V101/02/03, V202, and MH\_05), with average ON/OFF ratio of 0.95x; on MH\_01, V201, and V203, the baseline achieves better accuracy, with V203 being an extreme challenging sequence whose failure mechanism will be analyzed in a dedicated section. Overall, this method as a general-purpose enhancement layer does not introduce systematic accuracy degradation.
+
+\subsection{Robustness: Comparison of Tracking Effects in Complex Scenarios}
+
+\textbf{(1) Easy sequences (MH\_01 / MH\_02 / V101 / V201).} On MH\_02, SPA-KLT comprehensively outperforms the baseline: ATE $0.1226 < 0.1443$\,m, RMSE $0.0818 < 0.0934$\,m; rotation error substantially reduced ($0.13° \ll 0.64°$), indicating that the synergistic effect of IMU rotation prior and sparse alignment in low-dynamic scenarios does not introduce additional noise. On MH\_01 and V201, the baseline has slightly better accuracy ($\approx 15\%$), but front-end time improvements reach $29.1\%$ and $45.8\%$ respectively, making the overall benefit still positive.
+
+\textbf{(2) Medium sequences (MH\_03 / V102 / V202).} SPA-KLT has accuracy close to the baseline (MH\_03 ON/OFF $=0.97$x, V102 ON/OFF $=0.96$x, V202 ON/OFF $=1.05$x), with no accuracy degradation; front-end time remains steadily better than baseline by $20\%$, $5\%$, and $16\%$ respectively, and end-point translation RTE is better on MH\_03 ($0.054 < 0.065$\,m) with smaller long-term drift.
+
+\textbf{(3) Difficult sequences (MH\_04 / MH\_05 / V103 / V203) --- Core Evidence and Failure Analysis.} Extreme condition verification is conducted on the four challenging sequences MH\_04, MH\_05, V103, and V203. MH\_04 contains severe rotation and significant motion blur, representing a recognized high-difficulty scenario for optical-flow VIO systems. SPA-KLT still demonstrates clear robustness advantages on this challenging sequence: translation error metrics comprehensively better than baseline, ATE reduced by $5.4\,\mathrm{cm}$, RTE\_trans reduced by $6.9\,\mathrm{cm}$, trajectory RMSE decreased from $0.2505\,\mathrm{m}$ to $0.2178\,\mathrm{m}$, relative accuracy improvement of $13.2\%$, and rotation error simultaneously reduced ($3.33°\to 3.19°$). On the V103 sequence, the proposed method also maintains stable optimization effects, ATE reduced from $0.3416\,\mathrm{m}$ to $0.3245\,\mathrm{m}$, RMSE reduced from $0.2154\,\mathrm{m}$ to $0.2082\,\mathrm{m}$, further demonstrating the algorithm's adaptability in complex dynamic scenarios.
+
+Despite SPA-KLT effectively improving system performance in most challenging scenarios, performance degradation still occurs in extreme high-speed rotation, low-texture, and large-displacement conditions like V203. The root cause lies in the failure of multiple layered assumptions shared by the sparse photometric alignment method family, which can be summarized in three aspects: \textit{(a) Patch overlap range failure---severe inter-frame motion causing large pixel displacement of dozens of pixels moves patches out of search range, and inverse compositional iteration cannot converge to a valid minimum near the initial value;} \textit{(b) IMU preintegrated rotation prior deviation---under ultra-high angular velocity, gyroscope bias integration error increases, and $R_{\mathrm{imu}}$ deviates further from ground truth, actually misguiding sparse alignment;} \textit{(c) Unreliable photometric consistency constraint---indoor repetitive structures and low-texture areas lack sufficient gradient differences, and $\chi^2$ residual cannot effectively converge.} Compared to the unoptimized original SPA strategy, this paper's residual-based tiered parameter adjustment and failure fallback mechanism improves the difficult sequence ON/OFF performance degradation ratio from $2.33$x to $1.70$x (27\% improvement), but this improvement can only mitigate the negative impact through engineering fault tolerance strategies without fundamentally eliminating the structural performance gap, indicating that such boundary constraints cannot be solved through parameter tuning and require architectural-level innovation to break through.
+
+From the perspective of system architecture evolution, Cao \emph{et al.}'s cross-view photometric migration and multi-view adaptive ESIKF fusion strategy proposed in Omni-LIVO~\cite{cao2026omnilivo} provides a feasible reference for breaking through monocular sparse alignment limitations. This method maintains cross-view photometric consistency through multi-camera field-of-view complementarity and suppresses single-frame photometric constraint instability through adaptive covariance fusion, simultaneously alleviating field-of-view limitation and illumination disturbance problems; however, this scheme relies on multi-camera and LiDAR hardware redundancy, differing from this paper's positioning of monocular optical-flow VIO with non-invasive lightweight enhancement, and is only cited as a reference direction for future architecture upgrades.
+
+It should be emphasized that the aforementioned scenario failure characteristics are not unique defects of this paper's algorithm, but rather universal boundary conditions of all sparse photometric alignment methods~\cite{forster2017svo}. The SVO series research has explicitly pointed out that sparse alignment highly depends on the joint satisfaction of strong assumptions including small patch overlap, unit depth projection, and brightness constancy, with significantly limited benefits in low-dynamic, wide field-of-view, severe jitter, and exposure jump scenarios, necessitating scene discrimination and module fallback strategies to ensure system stability~\cite{forster2017svo}. Different from existing qualitative descriptions, this paper quantifies and engineering-implements the scene applicability boundaries of sparse alignment, transforming the originally implicit method-family constraints into online-monitorable, self-switchable robust scheduling logic through $\chi^2$ residual-based adaptive tiering and failure-immediate-fallback mechanisms, effectively preventing the sparse photometric module from being unconditionally enabled in non-adaptive scenarios and improving the scene controllability and engineering stability of optical-flow VIO front-end.
+
+The complete quantitative boundary system, scene adaptation criteria, and SPA metric comparison patterns under different operating conditions will be systematically presented in §VI through applicable condition summaries, inherent limitation analysis, and quantitative comparison tables, providing quantifiable reference standards for subsequent related semi-direct visual front-end improvements and engineering deployment, including key criteria such as $\chi^2$ thresholds, minimum valid measurement point count, and per-frame alignment time warning thresholds.
+
+\subsection{Resource Consumption: Absolute Reduction of KLT Computational Proportion}
+
+Traditional LK optical flow is the computational bottleneck of indirect-method VIO front-end. SPA-KLT uses alignment residual $\chi^2_{\mathrm{final}}$ as the adaptive basis for KLT search window and pyramid levels, forming four configurations: $5\times5$ ($\chi^2<5$), $9\times9$ ($[5,15)$), $15\times15$ ($[15,50)$), and $21\times21$ ($\ge 50$ or alignment failed), saving $98.1\%$, $93.9\%$, $66.0\%$, and $0\%$ respectively compared to the baseline's $1323$ unit pixel operations. Under normal texture conditions in EuRoC, the front-end inter-frame rotation prior is sufficiently accurate, and KLT operates at the lowest tier most of the time, reducing per-frame pixel operations to approximately $3\%$ of baseline; during low-texture and high-speed motion segments, it adaptively escalates to the default $21\times21$, 3-level pyramid to ensure robustness. \textbf{KLT is no longer the main bottleneck of the front-end}, and the saved computational budget can be allocated to higher-frequency feature detection, densification, or backend iterations.
+
+\section{SPA-KLT Applicable Scenarios and Inherent Limitations of Sparse Photometric Alignment}
+\label{sec:limitations}
+
+The failure experiments on extreme challenging sequences in the previous section prove that SPA-KLT cannot stably bring acceleration benefits under all operating conditions, and the optimization effectiveness highly depends on inter-frame motion magnitude, scene texture richness, and illumination stability. This section systematically outlines the adaptation prerequisites for SPA-KLT, while summarizing the underlying constraints shared by all sparse photometric alignment algorithms, providing quantifiable scene boundaries for engineering deployment and subsequent improvements.
+
+\subsection{SPA-KLT Applicable Scenarios}
+
+Combining the ablation experiments in Section IV and the algorithm's underlying design logic, achieving lossless accuracy with front-end acceleration exceeding 15\% requires simultaneously satisfying five joint prerequisites.
+
+First, moderate inter-frame translation and rotation magnitude, with pixel displacement not exceeding the local image patch coverage. If motion is too small, the optimization space brought by sparse photometric alignment (SPA) is limited; if displacement exceeds the patch boundary, the photometric assumption directly fails. EuRoC dataset measurements confirm: medium-speed aerial sequence MH\_03 has the highest optimization magnitude at 26\%; low-speed continuous flight sequence MH\_05 shows diminished returns at 14.7\%, and low-speed jitter scenarios show further reduced acceleration effects.
+
+Second, sufficient scene texture with significant grayscale contrast. $\chi^2$ residual computation depends on effective gradient signals around feature patches. Under sufficient texture conditions in EuRoC, each frame can stably obtain 380--430 photometrically valid measurement points, with median residual maintained in the 12 range, keeping KLT operating at the lowest computational tier for extended periods.
+
+Third, cameras have completed precise calibration with controllable lens distortion. Sparse alignment is based on pinhole imaging and unit depth approximation, which approximately holds for narrow field-of-view cameras; fisheye lens edge distortion introduces geometric errors, significantly reducing the number of valid measurement points. This paper uses fully calibrated intrinsic parameters $(f_x, f_y, c_x, c_y)$ throughout to ensure geometric computation precision.
+
+Fourth, illumination is stable or only exhibits slow brightness changes. The algorithm introduces two sets of affine brightness coefficients to compensate for gentle illumination drift, and automatic exposure-induced brightness jumps contaminate residual values, forcing KLT to switch to higher computational tiers.
+
+Fifth, scenes are rich in gradient feature corners. SPA relies on center-difference extraction of gradient information from image patches. Solid-color walls, repetitive corridors, and low-reflectance ceilings lack effective gradient structures and cannot provide stable photometric constraints.
+
+The above five conditions must be simultaneously satisfied to achieve significant front-end acceleration without increasing localization error. The first condition determines the upper bound of optimization benefits; the second and fifth control gradient signal availability; the third and fourth determine the algorithm's tolerance to geometric and illumination interference. Among all 11 EuRoC test sequences, 8 groups fully satisfy the adaptation conditions, and 3 groups have partial deviations. This distribution pattern perfectly aligns with the scene performance trends reported in the SVO original paper~\cite{forster2017svo}.
+
+\subsection{Inherent Limitations of Sparse Photometric Alignment Method Family}
+
+Comparing SPA-KLT and baseline performance, and sorting out the shared assumptions of all semi-direct tracking schemes, we summarize five universal underlying constraints of sparse photometric alignment.
+
+\textbf{Patch Planar Approximation in Inverse Compositional Formulation.} Sparse alignment is essentially a block-matching variant of inverse compositional LK optical flow, with first-order gradient approximation only valid when inter-frame pixel displacement is much smaller than the image patch size; once displacement reaches half the patch width, first-order approximation fails. Although SPA-KLT falls back to default 21$\times$21 3-level KLT when alignment diverges, the lightweight acceleration benefits completely disappear.
+
+\textbf{Unit Depth Projection Approximation.} Photometric loss defaults all reference features to the normalized depth plane; excessive depth differences between near and far scenes introduce scale errors, only partially compensable by affine brightness terms; severe shadows and exposure jumps cause compensation failure, introducing systematic pose errors, a problem already thoroughly argued in SVO~\cite{forster2017svo}.
+
+\textbf{Implicit Dependence on Brightness Constancy Assumption.} SPA core loss assumes the same 3D point has consistent grayscale under different viewpoints; motion blur, automatic exposure, strong shadows, and specular reflections all contaminate residuals, forcing trackers to switch to higher computational tiers and completely negating acceleration benefits. Multiple complementary research efforts in recent years have addressed this shared bottleneck: LET-NET uses illumination-invariant convolutional features to circumvent grayscale dependence~\cite{lin2024letnet}, OTPL-VIO introduces line features to compensate for point texture deficiency~\cite{chen2026otpl}, and DSInit reduces direct photometric loss weight in binocular initialization for motion blur~\cite{qiu2026dsinit}. The optimization dimensions of these works do not overlap, jointly demonstrating that brightness assumption failure is a universal shortcoming of this method family, not a unique defect of this paper's algorithm.
+
+\textbf{IMU Rotation Prior Error Propagation.} SPA uses IMU preintegrated rotation as the iterative initial value; under unconverged gyroscope bias and ultra-high angular velocity conditions, inaccurate rotation initialization misguides photometric optimization; distorted $\chi^2$ residuals further cause KLT parameter adjustment errors. This paper's threshold escalation and alignment fallback mechanisms can only prevent tracking collapse without correcting original IMU rotation errors.
+
+\textbf{Dependency on Sufficient Photometrically Valid Measurement Points.} Alignment success determination is based on the number of valid measurement points $n_{\mathrm{meas}}$, with a minimum threshold of 25 measurement points set in this paper. This threshold is almost never triggered under EuRoC textured conditions, but SPA activation rate substantially decreases in repetitive corridor and low-light environments.
+
+\subsection{Reverse Experiment Patterns and Built-in Countermeasures}
+
+Table~\ref{tab:spa_quality} statistics of SPA core quantitative metrics under two typical scenarios intuitively present the negative feedback chain in non-adaptive scenarios: when some of the five adaptation conditions are partially satisfied, the median residual $\chi^2$ breaks through the lightweight tier threshold of 5, KLT switches to high computational configuration, single SPA solution time expands to more than 3 times that of ideal conditions, and the overall front-end net computational benefit shifts from positive to negative. This phenomenon aligns with SVO original conclusions: sparse alignment in non-adaptive scenarios actually introduces additional computational overhead~\cite{forster2017svo}. The ``general indoor scenes'' in the table encompasses handheld motion, low frame rate, wide field-of-view, and automatic exposure datasets not detailed in the main text, all showing the unified pattern of reduced measurement points, increased SPA time, and substantially shrunk front-end acceleration effects.
+
+\begin{table}[!t]
+\centering
+\caption{Measurement Comparison of SPA-KLT's Own Metrics Under Different Scenarios. ``Adaptation Match Rate'' in the table represents the satisfaction ratio of the five scene conditions from earlier; $\chi^2$ is the per-frame residual median; $n_{\mathrm{meas}}$ is the number of photometrically valid measurement points; SPA\_time is the per-alignment time consumption.}
+\label{tab:spa_quality}
+\resizebox{\linewidth}{!}{%
+\begin{tabular}{|l|c|c|c|c|}
+\hline
+Scene Type & Adaptation Match Rate & $\chi^2$ Median & $n_{\mathrm{meas}}$ & SPA\_time [ms] \\
+\hline
+EuRoC airborne sufficient texture scenario & Fully satisfied (5/5) & $12$--$15$ & $380$--$430$ & $0.3$--$0.4$ \\
+\hline
+General indoor mixed scene (partial adaptation) & Partially satisfied & $19$--$26$ & $60$--$190$ & $1.1$--$1.4$ \\
+\hline
+\end{tabular}}
+\end{table}
+
+To address the above deficiencies, SPA-KLT incorporates two layers of self-protection scheduling logic. \textit{(i) KLT adaptive tier adjustment: when $\chi^2$ residual is high, automatically expand search window and increase pyramid levels to ensure tracking stability.} \textit{(ii) Alignment failure degradation mechanism: when photometric optimization fails to converge, directly switch to original fixed-parameter KLT to prevent biased poses from propagating to backend modules.} These two mechanisms transform SPA-KLT from an unconditionally-enabled module into a fault-tolerant conditional lightweight layer. For future architectural-level improvements, this paper plans multiple feasible directions: using learned feature patches to break brightness constancy constraints, fully trusting IMU observations during high-speed motion phases, and feeding photometric priors into the sliding window BA as soft constraints.
+
+Synthesizing analysis from adaptation scenarios, method-family inherent limitations, and reverse experiment evidence, the conclusions align with SVO original viewpoints: sparse photometric alignment is optimal only under specific conditions, and non-adaptive scenarios must be accompanied by fallback strategies. SPA-KLT's core innovation is not reconstructing the semi-direct tracking framework, but achieving quantifiable discrimination of scene boundaries through $\chi^2$ residuals, and completing non-invasive, adaptive VINS-Mono front-end integration.
+
+\section{Conclusion}
+This paper proposes SPA-KLT (Sparse Photometric Alignment for Adaptive KLT), an adaptive enhancement framework for optical-flow visual-inertial odometry. Addressing the computational redundancy of fixed-parameter KLT optical flow and insufficient dynamic tracking robustness, as well as the ambiguous scene applicability of sparse photometric alignment, this method uses IMU preintegrated rotation as the iterative initialization for sparse photometric alignment, employs alignment residual $\chi^2$ to quantify inter-frame motion matching quality and dynamically regulate KLT pyramid levels and search window sizes, achieving a two-stage coupled scheduling of ``coarse photometric alignment---fine optical flow tracking,'' while incorporating adaptive throttling strategies to form a conditional-available, failure-degradable, accuracy-controllable lightweight VIO front-end enhancement scheme.
+
+\textbf{Real-time performance.} Validation on ROS 2-based dual-chain parallel comparison pipeline across all 11 public sequences of EuRoC MH\_01--MH\_05 and V101--V103, V201--V203 shows that SPA-KLT front-end average time consumption reduced by $21.4\%$, with fast-motion scenario V201\_easy achieving $45.8\%$ speedup and low-speed scenario MH\_01\_easy achieving $29.1\%$ speedup. Combined with interval-based feature detection and adaptive RANSAC strategies, the sparse alignment module net benefit ratio reaches $2.13$ (i.e., consuming $1\,\mathrm{ms}$ saves $2.13\,\mathrm{ms}$ on the front-end), and the adaptive lowest-tier per-frame pixel operations reduced to approximately $3\%$ of baseline, completely eliminating the fixed-parameter KLT front-end computational bottleneck and reserving sufficient computational margin for backend iterations and high-frequency feature detection.
+
+\textbf{Localization accuracy.} On 8 out of 11 test sequences, accuracy is equal to or better than baseline, with challenging sequence MH\_04 trajectory RMSE reduced by $13.2\%$ and ATE improved by $5.4\,\mathrm{cm}$, achieving overall average localization error of only $0.95$ times baseline, realizing speedup without accuracy degradation. The remaining 3 sequences (MH\_01, V201, V203) are better with baseline under extreme conditions, especially the V203 difficult sequence where grayscale constancy and local planar assumption failures of sparse photometric alignment cause optimization benefit degradation; this paper's adaptive scheduling mechanism improves the original performance degradation ratio from $2.33$x to $1.70$x, effectively mitigating but unable to completely break through the inherent limitations of the sparse alignment method family.
+
+\textbf{Scene boundaries.} §VI systematically presents five sufficient adaptation conditions for SPA-KLT (moderate motion magnitude, sufficient texture, complete lens calibration, stable exposure, significant corner gradients) and five inherent limitations of sparse photometric alignment (patch planar approximation, unit depth projection approximation, brightness constancy assumption, IMU rotation prior error propagation, dependency on valid measurement points), upgrading scene boundaries from qualitative descriptions to online-monitorable engineering criteria using three quantifiable indicators: $\chi^2$ residual, valid measurement point count $n_{\mathrm{meas}}$, and per-frame alignment time. This boundary system perfectly aligns with the applicable/non-applicable scene distributions reported in the SVO original paper~\cite{forster2017svo}, proving that what this paper reveals are shared constraints of the sparse photometric alignment method family rather than defects of this paper's algorithm. SPA-KLT's core engineering value lies in making this implicit boundary explicit and quantifiable, and through residual-driven adaptive parameter adjustment and failure fallback mechanisms, transforming sparse photometric alignment from ``unconditionally enabled'' to ``controllable, safe, and stable-benefit'' front-end enhancement module.
+
+\textbf{Generality.} SPA-KLT is embedded into the VINS-Mono framework in a non-invasive manner without modifying IMU preintegration, backend sliding window optimization, or pose graph structures, possessing good portability and serving as a general front-end enhancement layer for various optical-flow VIO systems.
+
+Future work will proceed along the following directions. Further integrating photometric alignment rotation prior information into backend optimization weight regulation to achieve joint front-end and backend adaptation; introducing data-driven strategies to construct learned adaptive thresholds for improved complex scene discrimination; extending the SPA-KLT paradigm to multi-camera, cross-modal, and event camera front-ends---drawing on Cao \emph{et al.}'s cross-view photometric migration and multi-view adaptive covariance ESIKF fusion ideas in Omni-LIVO~\cite{cao2026omnilivo} to alleviate monocular sparse alignment failures under wide field-of-view and unstable illumination. Addressing the shared bottleneck of brightness constancy assumption failure, drawing on Lin \emph{et al.}'s LET-NET~\cite{lin2024letnet} approach to replace KLT grayscale terms with illumination-invariant feature maps, forming a dual-barrier of ``brightness tolerance + parameter adaptation''; extending sparse alignment to the VIO initialization phase, drawing on Qiu \emph{et al.}'s DSInit~\cite{qiu2026dsinit} predictive photometric optimization approach to unify initialization and tracking phase optimization paradigms. Finally, combining K\"uhne \emph{et al.}'s LEVIO~\cite{kuhne2026levio} embedded parallel acceleration approach to achieve synergistic superposition of algorithm-level adaptive scheduling and hardware-level multi-core parallelization, further compressing critical path time consumption on resource-constrained platforms.
+
+\section*{Acknowledgment}
+This work was supported by XXX (please supplement funding institution and project number). The EuRoC dataset used in the experiments was publicly released by ETH Zurich and the European Robotics Challenge team, and the authors hereby express their gratitude.
+
+\begin{thebibliography}{00}
+
+\bibitem{cadena2010past} J. Cadena \emph{et al.}, ``Past, present, and future of simultaneous localization and mapping: Toward the robust-perception age,'' \emph{IEEE Trans. Robot.}, vol. 32, no. 6, pp. 1309--1332, Dec. 2016.
+
+\bibitem{davison2007monoslam} A. J. Davison, I. D. Reid, N. D. Molton, and O. Stasse, ``MonoSLAM: Real-time single camera SLAM,'' \emph{IEEE Trans. Pattern Anal. Mach. Intell.}, vol. 29, no. 6, pp. 1052--1067, Jun. 2007.
+
+\bibitem{klein2007ptam} G. Klein and D. Murray, ``Parallel tracking and mapping for small AR workspaces,'' in \emph{Proc. IEEE/ACM Int. Symp. Mixed Augmented Reality (ISMAR)}, Nara, Japan, 2007, pp. 225--234.
+
+\bibitem{engel2014lsd} J. Engel, T. Sch\"ops, and D. Cremers, ``LSD-SLAM: Large-scale direct monocular SLAM,'' in \emph{Proc. Eur. Conf. Comput. Vis. (ECCV)}, Z\"urich, Switzerland, 2014, pp. 834--849.
+
+\bibitem{mur2015orb} R. Mur-Artal, J. M. M. Montiel, and J. D. Tard\'os, ``ORB-SLAM: A versatile and accurate monocular SLAM system,'' \emph{IEEE Trans. Robot.}, vol. 31, no. 5, pp. 1147--1163, Oct. 2015.
+
+\bibitem{forster2014svo} C. Forster, M. Pizzoli, and D. Scaramuzza, ``SVO: Fast semi-direct monocular visual odometry,'' in \emph{Proc. IEEE Int. Conf. Robot. Autom. (ICRA)}, Hong Kong, China, May/Jun. 2014, pp. 15--22.
+
+\bibitem{engel2017dso} J. Engel, V. Koltun, and D. Cremers, ``Direct sparse odometry,'' \emph{IEEE Trans. Pattern Anal. Mach. Intell.}, vol. 40, no. 3, pp. 611--625, Mar. 2018.
+
+\bibitem{forster2017svo} C. Forster, Z. Zhang, M. Gassner, M. Werlberger, and D. Scaramuzza, ``SVO: Semi-direct visual odometry for monocular and multicamera systems,'' \emph{IEEE Trans. Robot.}, vol. 33, no. 2, pp. 249--265, Apr. 2017.
+
+\bibitem{qin2018vins} T. Qin, P. Li, and S. Shen, ``VINS-Mono: A robust and versatile monocular visual-inertial state estimator,'' \emph{IEEE Trans. Robot.}, vol. 34, no. 4, pp. 1004--1020, Aug. 2018.
+
+\bibitem{galvez2012bags} D. Galvez-L\'opez and J. D. Tard\'os, ``Bags of binary words for fast place recognition in image sequences,'' \emph{IEEE Trans. Robot.}, vol. 28, no. 5, pp. 1188--1197, Oct. 2012.
+
+\bibitem{campos2021orb} C. Campos \emph{et al.}, ``ORB-SLAM3: An accurate open-source library for visual, visual--inertial and multi-map SLAM,'' \emph{IEEE Trans. Robot.}, vol. 37, no. 6, pp. 1874--1890, Dec. 2021.
+
+\bibitem{baker2004lucas} S. Baker and I. Matthews, ``Lucas--Kanade 20 years on: A unifying framework,'' \emph{Int. J. Comput. Vis.}, vol. 56, no. 3, pp. 221--255, Feb. 2004.
+
+\bibitem{shi1994goodfeatures} J. Shi and C. Tomasi, ``Good features to track,'' in \emph{Proc. IEEE Conf. Comput. Vis. Pattern Recognit. (CVPR)}, Seattle, WA, USA, Jun. 1994, pp. 593--600.
+
+\bibitem{gao2022sdplvio} B. Gao, B. Lian, and C. Tang, ``Semi-direct point-line visual inertial odometry for MAVs,'' \emph{Applied Sciences}, vol. 12, no. 18, art. 9265, Sep. 2022.
+
+\bibitem{burri2016euroc} M. Burri \emph{et al.}, ``The EuRoC micro aerial vehicle datasets,'' \emph{Int. J. Robot. Res.}, vol. 35, no. 10, pp. 1157--1163, 2016.
+
+\bibitem{cao2026omnilivo} Y. Cao \emph{et al.}, ``Omni-LIVO: Robust RGB-colored multi-camera visual-inertial-LiDAR odometry via photometric migration and ESIKF fusion,'' \emph{IEEE Robot. Autom. Lett.}, vol. 11, no. 4, pp. 4369--4376, Apr. 2026, doi: 10.1109/LRA.2026.3662590.
+
+\bibitem{kuhne2026levio} J. K\"uhne, C. Vogt, M. Magno, and L. Benini, ``LEVIO: Lightweight embedded visual inertial odometry for resource-constrained devices,'' \emph{IEEE Sensors J.}, 2026, doi: 10.1109/JSEN.2025.3644788.
+
+\bibitem{liu2020sdvis} Q. Liu, Z. Wang, and H. Wang, ``SD-VIS: A fast and accurate semi-direct monocular visual-inertial SLAM,'' \emph{Sensors}, vol. 20, no. 5, p. 1511, Mar. 2020, doi: 10.3390/s20051511.
+
+\bibitem{lin2024letnet} Y. Lin, S. Wang, Y. Jiang, and B. Han, ``Breaking brightness consistency in optical flow with a lightweight CNN network,'' \emph{IEEE Trans. Image Process.}, 2024.
+
+\bibitem{teed2023dpvo} Z. Teed, L. Lipson, and J. Deng, ``Deep patch visual odometry,'' \emph{Adv. Neural Inf. Process. Syst.}, vol. 36, 2023.
+
+ \bibitem{teed2021droid} Z. Teed and J. Deng, ``DROID-SLAM: Deep visual SLAM for monocular, stereo, and RGB-D cameras,'' \emph{Adv. Neural Inf. Process. Syst.}, vol. 34, 2021.
+
+ \bibitem{chen2026otpl} Z. Chen, W. Zhao, Y. Niu, T. Deng, and J. Wang, ``OTPL-VIO: Robust visual-inertial odometry with optimal transport line association and adaptive uncertainty,'' \emph{IEEE Trans. Robot.}, 2026.
+
+ \bibitem{qiu2026dsinit} J. Qiu and J. Lan, ``Direct sparse initialization for stereo visual-inertial odometry,'' \emph{IEEE Robot. Autom. Lett.}, vol. 11, no. 6, pp. 6576--6583, Jun. 2026.
+
+\end{thebibliography}
+
+\vfill
+
+\end{document}

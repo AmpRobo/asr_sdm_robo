@@ -1,0 +1,115 @@
+\relax 
+\citation{cadena2010past}
+\citation{davison2007monoslam,klein2007ptam}
+\citation{engel2014lsd,engel2017dso}
+\citation{forster2014svo,forster2017svo}
+\citation{qin2018vins}
+\citation{mur2015orb,campos2021orb}
+\citation{forster2017svo}
+\@writefile{toc}{\contentsline {section}{\numberline {I}Introduction}{2}{}\protected@file@percent }
+\newlabel{sec:introduction}{{I}{2}{}{}{}}
+\citation{kuhne2026levio}
+\citation{liu2020sdvis}
+\citation{lin2024letnet}
+\citation{chen2026otpl}
+\citation{qiu2026dsinit}
+\citation{baker2004lucas}
+\citation{shi1994goodfeatures}
+\citation{teed2021droid}
+\citation{teed2023dpvo}
+\citation{lin2024letnet}
+\@writefile{toc}{\contentsline {section}{\numberline {II}Related Work}{3}{}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {II-A}Optical Flow Optimization for Visual Front-End}{3}{}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {II-B}Learning-Based Visual Odometry Methods}{3}{}\protected@file@percent }
+\citation{kuhne2026levio}
+\citation{forster2014svo,forster2017svo}
+\citation{liu2020sdvis}
+\citation{gao2022sdplvio}
+\citation{galvez2012bags,mur2015orb,campos2021orb}
+\citation{cadena2010past}
+\citation{kuhne2026levio}
+\citation{qiu2026dsinit}
+\citation{chen2026otpl}
+\@writefile{toc}{\contentsline {subsection}{\numberline {II-C}Semi-Direct Visual-Inertial State Estimation Methods}{4}{}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {II-D}Loop Closure Detection and Verification Schemes}{4}{}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {II-E}Lightweight VIO for Resource-Constrained Devices}{4}{}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {II-F}VIO Initialization and Feature Enhancement}{4}{}\protected@file@percent }
+\@writefile{toc}{\contentsline {section}{\numberline {III}Preliminaries}{5}{}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {III-A}IMU Preintegration Model}{5}{}\protected@file@percent }
+\newlabel{eq:imu_meas}{{1}{5}{}{}{}}
+\newlabel{eq:imu_preint}{{2}{5}{}{}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {III-B}Pyramidal Lucas--Kanade Optical Flow}{5}{}\protected@file@percent }
+\newlabel{eq:lk}{{3}{5}{}{}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {III-C}Sparse Photometric Alignment Model}{5}{}\protected@file@percent }
+\newlabel{eq:spa_obj}{{4}{5}{}{}{}}
+\@writefile{toc}{\contentsline {section}{\numberline {IV}SPA-KLT Method Design}{5}{}\protected@file@percent }
+\newlabel{sec:system}{{IV}{5}{}{}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {IV-A}Sparse Photometric Alignment Adaptive KLT Tracking Module}{5}{}\protected@file@percent }
+\newlabel{eq:spa_imu_obj}{{5}{5}{}{}{}}
+\citation{burri2016euroc}
+\@writefile{lot}{\contentsline {table}{\numberline {I}{\ignorespaces Adaptive KLT Search Window and Pyramid Level Selection Based on $\chi ^{2}_{\mathrm  {final}}$}}{6}{}\protected@file@percent }
+\providecommand*\caption@xref[2]{\@setref\relax\@undefined{#1}}
+\newlabel{tab:chi2}{{I}{6}{}{}{}}
+\@writefile{toc}{\contentsline {section}{\numberline {V}Experimental Analysis}{6}{}\protected@file@percent }
+\newlabel{sec:experiment}{{V}{6}{}{}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {V-A}Experimental Setup}{6}{}\protected@file@percent }
+\@writefile{lot}{\contentsline {table}{\numberline {II}{\ignorespaces Per-Frame Time Consumption Comparison ($640\times 480$, $N\approx 150$, unit: $\mathrm  {ms}$). SPA = Sparse Photometric Alignment; Det. = Detection; conf = confidence}}{6}{}\protected@file@percent }
+\newlabel{tab:time_breakdown}{{II}{6}{}{}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {V-B}Efficiency: Front-End Absolute Performance Improvement}{6}{}\protected@file@percent }
+\@writefile{lot}{\contentsline {table}{\numberline {III}{\ignorespaces Per-Frame Front-End Timing Comparison on EuRoC (unit: $\mathrm  {ms}$/frame). MH: mean of first 3 bins over $1500\,\mathrm  {ms}$; V1/V2: mean of first 500 frames}}{7}{}\protected@file@percent }
+\newlabel{tab:timing_seq}{{III}{7}{}{}{}}
+\@writefile{lof}{\contentsline {figure}{\numberline {1}{\ignorespaces MH\_04 difficult sequence trajectory comparison (top view): SPA-KLT (blue), VINS-Mono baseline (orange), and Ground Truth (green). In the MH\_04 segment with both high-speed rotation and motion blur, SPA-KLT leverages the robust initialization provided by sparse photometric alignment, achieving trajectory alignment with GT significantly better than the baseline}}{7}{}\protected@file@percent }
+\newlabel{fig:mh04}{{1}{7}{}{}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {V-C}Pose Accuracy Comparison}{7}{}\protected@file@percent }
+\@writefile{lof}{\contentsline {figure}{\numberline {2}{\ignorespaces MH\_04 difficult sequence trajectory comparison (3D view): Three-dimensional view of data from the same source as Fig. \ref {fig:mh04}, allowing intuitive comparison of height-direction drift that is difficult to distinguish in the top view. In segments with significant height variations during vigorous motion, SPA-KLT leverages the rotation prior from sparse alignment to keep the trajectory closer to GT on the Z-axis, while the baseline shows more obvious deviation in the z-direction}}{7}{}\protected@file@percent }
+\newlabel{fig:mh04_3d}{{2}{7}{}{}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {V-D}Robustness: Comparison of Tracking Effects in Complex Scenarios}{7}{}\protected@file@percent }
+\citation{forster2017svo}
+\citation{forster2017svo}
+\@writefile{lot}{\contentsline {table}{\numberline {IV}{\ignorespaces Accuracy Comparison Between SPA-KLT (ON) and VINS-Mono Baseline (OFF) Across All 11 EuRoC Sequences. ATE/RMSE/RTE\_trans in $\mathrm  {m}$, RTE\_rot in degrees. ON equal to or better than OFF ($\le 1.07\times $) in bold, OFF clearly better ($>1.07\times $) underlined}}{8}{}\protected@file@percent }
+\newlabel{tab:accuracy}{{IV}{8}{}{}{}}
+\citation{forster2017svo}
+\citation{forster2017svo}
+\@writefile{toc}{\contentsline {subsection}{\numberline {V-E}Resource Consumption: Absolute Reduction of KLT Computational Proportion}{9}{}\protected@file@percent }
+\@writefile{toc}{\contentsline {section}{\numberline {VI}SPA-KLT Applicable Scenarios and Inherent Limitations of Sparse Photometric Alignment}{9}{}\protected@file@percent }
+\newlabel{sec:limitations}{{VI}{9}{}{}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {VI-A}SPA-KLT Applicable Scenarios}{9}{}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {VI-B}Inherent Limitations of Sparse Photometric Alignment Method Family}{9}{}\protected@file@percent }
+\citation{lin2024letnet}
+\citation{chen2026otpl}
+\citation{qiu2026dsinit}
+\citation{forster2017svo}
+\@writefile{toc}{\contentsline {subsection}{\numberline {VI-C}Reverse Experiment Patterns and Built-in Countermeasures}{10}{}\protected@file@percent }
+\@writefile{lot}{\contentsline {table}{\numberline {V}{\ignorespaces SPA-KLT Core Metrics Under Different Scenarios. Match Rate: satisfaction ratio of 5 adaptation conditions (5/5 = fully satisfied). $\chi ^{2}$: per-frame residual median. $n_{\mathrm  {meas}}$: number of valid measurement points}}{10}{}\protected@file@percent }
+\newlabel{tab:spa_quality}{{V}{10}{}{}{}}
+\@writefile{toc}{\contentsline {section}{\numberline {VII}Conclusion}{10}{}\protected@file@percent }
+\citation{forster2017svo}
+\citation{cao2026omnilivo}
+\citation{lin2024letnet}
+\citation{qiu2026dsinit}
+\citation{kuhne2026levio}
+\bibcite{cadena2010past}{1}
+\bibcite{davison2007monoslam}{2}
+\bibcite{klein2007ptam}{3}
+\bibcite{engel2014lsd}{4}
+\bibcite{mur2015orb}{5}
+\bibcite{forster2014svo}{6}
+\bibcite{engel2017dso}{7}
+\bibcite{forster2017svo}{8}
+\bibcite{qin2018vins}{9}
+\@writefile{toc}{\contentsline {section}{References}{11}{}\protected@file@percent }
+\bibcite{galvez2012bags}{10}
+\bibcite{campos2021orb}{11}
+\bibcite{baker2004lucas}{12}
+\bibcite{shi1994goodfeatures}{13}
+\bibcite{gao2022sdplvio}{14}
+\bibcite{burri2016euroc}{15}
+\bibcite{cao2026omnilivo}{16}
+\bibcite{kuhne2026levio}{17}
+\bibcite{liu2020sdvis}{18}
+\bibcite{lin2024letnet}{19}
+\bibcite{chen2026otpl}{20}
+\bibcite{qiu2026dsinit}{21}
+\bibcite{teed2021droid}{22}
+\bibcite{teed2023dpvo}{23}
+\gdef \@abspage@last{12}
