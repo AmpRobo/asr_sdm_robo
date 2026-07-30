@@ -22,23 +22,15 @@ find_package(rclcpp REQUIRED)
 find_package(std_msgs REQUIRED)
 find_package(geometry_msgs REQUIRED)
 find_package(sensor_msgs REQUIRED)
+find_package(nav_msgs REQUIRED)
+find_package(tf2_ros REQUIRED)
 find_package(asr_sdm_control_msgs REQUIRED)
 find_package(asr_sdm_hardware_msgs REQUIRED)
 # find_package(periphery REQUIRED)
 find_package(Python3 REQUIRED COMPONENTS Interpreter Development NumPy)
 find_package(Matplot++ QUIET)
 if(NOT TARGET Matplot++::matplot)
-  set(MATPLOTPP_SOURCE_DIR "" CACHE PATH "Path to the Matplot++ source tree")
-  if(NOT MATPLOTPP_SOURCE_DIR)
-    message(FATAL_ERROR "Matplot++ was not found. Install Matplot++ so find_package(Matplot++) works, or configure with -DMATPLOTPP_SOURCE_DIR=/path/to/matplotplusplus.")
-  endif()
-  if(NOT EXISTS "${MATPLOTPP_SOURCE_DIR}/CMakeLists.txt")
-    message(FATAL_ERROR "MATPLOTPP_SOURCE_DIR must point to a Matplot++ source tree containing CMakeLists.txt: ${MATPLOTPP_SOURCE_DIR}")
-  endif()
-  set(MATPLOTPP_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
-  set(MATPLOTPP_BUILD_TESTS OFF CACHE BOOL "" FORCE)
-  set(MATPLOTPP_BUILD_INSTALLER OFF CACHE BOOL "" FORCE)
-  add_subdirectory("${MATPLOTPP_SOURCE_DIR}" ${CMAKE_CURRENT_BINARY_DIR}/matplotplusplus EXCLUDE_FROM_ALL)
+  message(WARNING "Matplot++ was not found; skipping 3D plotting/test executables.")
 endif()
 # Find libgpiod
 # find_package(PkgConfig REQUIRED)
@@ -88,13 +80,15 @@ target_include_directories(front_unit_following_controller_3d_core PUBLIC
   ${CMAKE_CURRENT_SOURCE_DIR}/include
 )
 
-add_executable(front_unit_following_controller_test_3d
-  test/front_unit_following_controller_test_3d.cpp
-)
-target_link_libraries(front_unit_following_controller_test_3d PUBLIC
-  front_unit_following_controller_3d_core
-  Matplot++::matplot
-)
+if(TARGET Matplot++::matplot)
+  add_executable(front_unit_following_controller_test_3d
+    test/front_unit_following_controller_test_3d.cpp
+  )
+  target_link_libraries(front_unit_following_controller_test_3d PUBLIC
+    front_unit_following_controller_3d_core
+    Matplot++::matplot
+  )
+endif()
 
 add_executable(realtime_front_unit_controller_2d
   src/realtime_front_unit_controller_2d_node.cpp
@@ -114,7 +108,10 @@ target_link_libraries(realtime_front_unit_controller_3d PUBLIC
   front_unit_following_controller_3d_core
   ${asr_sdm_control_msgs_TARGETS}
   ${geometry_msgs_TARGETS}
+  ${nav_msgs_TARGETS}
+  ${sensor_msgs_TARGETS}
   ${std_msgs_TARGETS}
+  tf2_ros::tf2_ros
   rclcpp::rclcpp
 )
 
@@ -130,26 +127,34 @@ target_include_directories(realtime_controller_visualizer_2d PRIVATE
 )
 target_compile_options(realtime_controller_visualizer_2d PRIVATE -Wno-deprecated-declarations)
 
-add_executable(realtime_controller_visualizer_3d
-  src/realtime_controller_visualizer_3d_node.cpp
-)
-target_link_libraries(realtime_controller_visualizer_3d PUBLIC
-  front_unit_following_controller_3d_core
-  ${std_msgs_TARGETS}
-  rclcpp::rclcpp
-  Matplot++::matplot
-)
+if(TARGET Matplot++::matplot)
+  add_executable(realtime_controller_visualizer_3d
+    src/realtime_controller_visualizer_3d_node.cpp
+  )
+  target_link_libraries(realtime_controller_visualizer_3d PUBLIC
+    front_unit_following_controller_3d_core
+    ${std_msgs_TARGETS}
+    rclcpp::rclcpp
+    Matplot++::matplot
+  )
+endif()
 
 install(TARGETS
   asr_sdm_controller
   front_unit_following_controller_test_2d
-  front_unit_following_controller_test_3d
   realtime_front_unit_controller_2d
   realtime_front_unit_controller_3d
   realtime_controller_visualizer_2d
-  realtime_controller_visualizer_3d
   DESTINATION lib/${PROJECT_NAME}
 )
+
+if(TARGET Matplot++::matplot)
+  install(TARGETS
+    front_unit_following_controller_test_3d
+    realtime_controller_visualizer_3d
+    DESTINATION lib/${PROJECT_NAME}
+  )
+endif()
 
 if(BUILD_TESTING)
   find_package(ament_lint_auto REQUIRED)

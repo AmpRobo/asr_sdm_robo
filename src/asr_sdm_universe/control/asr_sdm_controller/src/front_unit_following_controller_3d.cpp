@@ -5,20 +5,6 @@
 
 namespace asr
 {
-namespace
-{
-
-size_t pitchIndex(size_t joint)
-{
-  return 2 * joint;
-}
-
-size_t yawIndex(size_t joint)
-{
-  return 2 * joint + 1;
-}
-
-}  // namespace
 
 Vec3 operator+(const Vec3 & a, const Vec3 & b)
 {

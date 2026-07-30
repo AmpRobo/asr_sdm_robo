@@ -1,5 +1,7 @@
-# Launch / simulator configuration for planning_simulator_launch.py
+# Unified configuration for planning_simulator_launch.py.
+# Default launch uses the kinematic profile; use_kinematic:=false starts the legacy quadrotor stack.
 
+# Legacy quadrotor/SO3 stack configuration.
 features:
   # Start asr_sdm_map_generator (random forest map).
   use_asr_sdm_map_generator: true
@@ -11,6 +13,9 @@ features:
   use_rviz: true
   # Start so3_control_node.
   use_so3_control: false
+  # Start the legacy disturbance and odometry visualization nodes.
+  use_disturbance: true
+  use_odom_visualization: true
 
 rate:
   odom: 100.0
@@ -61,3 +66,75 @@ robot_model:
   use_sim_time: false
   model_xacro: urdf/asr_sdm_wrapper.urdf.xacro
   description_launch: launch/description.launch.py
+
+# Controller-driven ASR-SDM kinematic stack configuration.
+kinematic:
+  features:
+    use_map: true
+    enable_click_map: true
+    use_rviz: true
+    use_joy: true
+    use_teleop: true
+
+  initial_pose:
+    x: -5.0
+    y: 0.0
+    z: 0.0
+    yaw: 0.0
+
+  topics:
+    cmd_vel: /asr_sdm/cmd_vel
+    controller_state: /asr_sdm/controller_state_3d
+    joint_states: /joint_states
+    odom: /asr_sdm/odom
+    initialpose: /initialpose
+    add_static_obstacle: /simulator/planning_simulator/add_static_obstacle
+
+  frames:
+    world: world
+    controller_base: asr_sdm_controller_base
+    root: screwdrive_segment_0
+
+  controller:
+    control_period_ms: 20
+    cmd_timeout_sec: 0.3
+    max_linear_velocity: 0.12
+    max_pitch_rate: 0.35
+    max_yaw_rate: 0.35
+    link_length: 0.25
+    joint_rate_limit: 2.0
+    joint_limit: 1.5707963267948966
+    max_curvature: 1.2
+    curvature_velocity_epsilon: 0.001
+    damping: 0.02
+    publish_control_cmd: false
+    # Align the +Z-oriented CAD/URDF longitudinal axis with the controller motion plane.
+    model_yaw_offset_rad: 3.141592653589793
+    model_pitch_offset_rad: 1.5707963267948966
+
+  # Controller and URDF both use the physical yaw/pitch serial order.
+  # Retune signs/offsets after one-joint-at-a-time RViz calibration if required.
+  joint_mapping:
+    source_indices: [0, 1, 2, 3, 4, 5]
+    signs: [1.0, 1.0, 1.0, 1.0, 1.0, 1.0]
+    offsets_rad: [0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+    clip_positions: true
+    position_limit_rad: 1.5707963267948966
+
+  teleop:
+    linear_axis: 1
+    angular_axis: 0
+    pitch_axis: 4
+    linear_scale: 0.12
+    angular_scale: 0.5
+    pitch_scale: 0.5
+    use_trigger_linear: true
+    axis_l2: 2
+    axis_r2: 5
+    l2_released_value: 1.0
+    r2_released_value: 1.0
+    trigger_pressed_value: -1.0
+    deadzone: 0.08
+    invert_linear: false
+    invert_pitch: true
+    invert_yaw: false
