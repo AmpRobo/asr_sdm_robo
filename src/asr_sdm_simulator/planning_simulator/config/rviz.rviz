@@ -170,6 +170,30 @@ Visualization Manager:
         Reliability Policy: Reliable
         Value: /odom_visualization_ukf/velocity
       Value: true
+    - Class: rviz_default_plugins/Marker
+      Enabled: true
+      Name: Planning Trajectory
+      Namespaces:
+        {}
+      Topic:
+        Depth: 100
+        Durability Policy: Volatile
+        History Policy: Keep Last
+        Reliability Policy: Reliable
+        Value: /planning_vis/trajectory
+      Value: true
+    - Class: rviz_default_plugins/Marker
+      Enabled: true
+      Name: Topological Path
+      Namespaces:
+        {}
+      Topic:
+        Depth: 100
+        Durability Policy: Volatile
+        History Policy: Keep Last
+        Reliability Policy: Reliable
+        Value: /planning_vis/topo_path
+      Value: true
     - Class: rviz_default_plugins/Axes
       Enabled: true
       Length: 1

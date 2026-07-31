@@ -53,6 +53,10 @@ planning_manager_node:
       show_esdf_time: false
       pose_type: 1
       frame_id: "world"
+      simulation_cloud_topic: "/asr_sdm_map_generator/global_cloud"
+      simulation_odom_topic: "/visual_slam/odom"
+      # Enable both simulation point-cloud and odometry subscriptions.
+      enable_simulation_cloud_odom: true
 
     manager:
       max_vel: 3.0

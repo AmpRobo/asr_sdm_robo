@@ -56,7 +56,7 @@ void TopoReplanFSM::init(const std::shared_ptr<rclcpp::Node> & nh)
     "/goal_pose", 1,
     std::bind(&TopoReplanFSM::goalposeCallback, this, std::placeholders::_1));
   odom_sub_ = node_->create_subscription<nav_msgs::msg::Odometry>(
-    "/odom_world", 1, std::bind(&TopoReplanFSM::odometryCallback, this, std::placeholders::_1));
+    "odom", 1, std::bind(&TopoReplanFSM::odometryCallback, this, std::placeholders::_1));
 
   replan_pub_ = node_->create_publisher<std_msgs::msg::Empty>("/planning/replan", 20);
   new_pub_ = node_->create_publisher<std_msgs::msg::Empty>("/planning/new", 20);
@@ -444,6 +444,16 @@ bool TopoReplanFSM::callTopologicalTraj(int step)
       locdat->position_traj_, 0.08, Eigen::Vector4d(1.0, 0.0, 0.0, 1), false, 0.15,
       Eigen::Vector4d(1.0, 1.0, 1.0, 1), 99, 99);
     visualization_->drawBsplinesPhase2(plan_data->topo_traj_pos2_, 0.075);
+
+    if (step == 2 && collide_) {
+      visualization_->drawTopoPathsPhase1(plan_data->topo_filtered_paths_, 0.05);
+      visualization_->drawTopoPathsPhase2(plan_data->topo_select_paths_, 0.075);
+    } else {
+      vector<vector<Eigen::Vector3d>> empty_paths;
+      visualization_->drawTopoPathsPhase1(empty_paths, 0.05);
+      visualization_->drawTopoPathsPhase2(empty_paths, 0.075);
+    }
+
     visualization_->drawYawTraj(locdat->position_traj_, locdat->yaw_traj_, plan_data->dt_yaw_);
 
     return true;

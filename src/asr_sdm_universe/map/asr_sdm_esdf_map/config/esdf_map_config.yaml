@@ -57,12 +57,16 @@ esdf_map:
       depth_topic: "/sensing/camera/realsense/depth"
       odom_topic: "/localization/vins/odometry"
       cloud_topic: "/localization/vins/point_cloud"
+      simulation_cloud_topic: "/asr_sdm_map_generator/global_cloud"
+      simulation_odom_topic: "/visual_slam/odom"
 
       # ---- Global feature switches ----
       # This YAML file is the only configuration source used by the launch
       # file. Change switches here; launch does not override them.
       enable_depth_odom: false
       enable_pointcloud_odom: true
+      # Enable both simulation point-cloud and odometry subscriptions.
+      enable_simulation_cloud_odom: true
 
       # ---- Preloaded binary map ----
       # A relative directory is resolved against

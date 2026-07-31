@@ -44,7 +44,8 @@ struct MappingParameters {
 
   /* input topics and input mode */
   string depth_topic_, odom_topic_, cloud_topic_;
-  bool enable_depth_odom_, enable_pointcloud_odom_;
+  string simulation_cloud_topic_, simulation_odom_topic_;
+  bool enable_depth_odom_, enable_pointcloud_odom_, enable_simulation_cloud_odom_;
 
   /* preloaded binary map files */
   string preload_map_directory_;
@@ -97,6 +98,7 @@ struct MappingData {
   // camera position and pose data
 
   Eigen::Vector3d camera_pos_, last_camera_pos_;
+  Eigen::Vector3d simulation_camera_pos_;
   Eigen::Quaterniond camera_q_, last_camera_q_;
 
   // depth image data
@@ -108,6 +110,7 @@ struct MappingData {
   bool occ_need_update_, local_updated_, esdf_need_update_;
   bool has_first_depth_;
   bool has_odom_;
+  bool has_simulation_odom_;
 
   // depth image projected point cloud
 
@@ -209,8 +212,12 @@ private:
     nav_msgs::msg::Odometry::ConstSharedPtr odom);
   void pointCloudCallback(sensor_msgs::msg::PointCloud::ConstSharedPtr msg);
   void cloudCallback(sensor_msgs::msg::PointCloud2::ConstSharedPtr msg);
-  void insertPointCloud(const pcl::PointCloud<pcl::PointXYZ> & latest_cloud);
+  void simulationCloudCallback(sensor_msgs::msg::PointCloud2::ConstSharedPtr msg);
+  void insertPointCloud(
+    const pcl::PointCloud<pcl::PointXYZ> & latest_cloud,
+    const Eigen::Vector3d & camera_pos);
   void odomCallback(nav_msgs::msg::Odometry::ConstSharedPtr odom);
+  void simulationOdomCallback(nav_msgs::msg::Odometry::ConstSharedPtr odom);
 
   // update occupancy by raycasting, and update ESDF
   void updateOccupancyCallback();
@@ -245,6 +252,8 @@ private:
 
   rclcpp::Subscription<sensor_msgs::msg::PointCloud>::SharedPtr indep_cloud_sub_;
   rclcpp::Subscription<nav_msgs::msg::Odometry>::SharedPtr indep_odom_sub_;
+  rclcpp::Subscription<sensor_msgs::msg::PointCloud2>::SharedPtr simulation_cloud_sub_;
+  rclcpp::Subscription<nav_msgs::msg::Odometry>::SharedPtr simulation_odom_sub_;
 
   rclcpp::TimerBase::SharedPtr occ_timer_;
   rclcpp::TimerBase::SharedPtr esdf_timer_;
