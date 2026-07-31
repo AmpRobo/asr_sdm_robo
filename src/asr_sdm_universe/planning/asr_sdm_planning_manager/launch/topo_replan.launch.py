@@ -23,7 +23,7 @@ def generate_launch_description():
         "config", "topo_replan.yaml")
 
     odom_topic_arg = DeclareLaunchArgument(
-        "odom_topic", default_value="/state_ukf/odom",
+        "odom_topic", default_value="/visual_slam/odom",
         description="Topic of your odometry such as VIO or LIO")
     odom_topic = LaunchConfiguration("odom_topic")
 
@@ -34,7 +34,7 @@ def generate_launch_description():
         output="screen",
         parameters=[config],
         remappings=[
-            ("/odom_world", odom_topic),
+            ("odom", odom_topic),
             ("/esdf_map/odom", odom_topic),
             ("/esdf_map/cloud", "/pcl_render_node/cloud"),
             ("/esdf_map/pose", "/pcl_render_node/camera_pose"),
@@ -50,7 +50,7 @@ def generate_launch_description():
         parameters=[config],
         remappings=[
             ("/position_cmd", "planning/pos_cmd"),
-            ("/odom_world", odom_topic),
+            ("odom", odom_topic),
         ],
     )
 

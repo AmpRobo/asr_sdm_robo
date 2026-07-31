@@ -290,7 +290,7 @@ int main(int argc, char ** argv)
     node->create_subscription<std_msgs::msg::Empty>("planning/replan", 10, replanCallback);
   auto new_sub = node->create_subscription<std_msgs::msg::Empty>("planning/new", 10, newCallback);
   auto odom_sub =
-    node->create_subscription<nav_msgs::msg::Odometry>("/odom_world", 50, odomCallbck);
+    node->create_subscription<nav_msgs::msg::Odometry>("odom", 50, odomCallbck);
 
   cmd_vis_pub =
     node->create_publisher<visualization_msgs::msg::Marker>("planning/position_cmd_vis", 10);

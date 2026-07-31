@@ -114,8 +114,13 @@ void ESDFMap::initMap(const std::shared_ptr<rclcpp::Node> & nh)
     "esdf_map.odom_topic", string("/localization/vins/odometry"));
   node_->declare_parameter(
     "esdf_map.cloud_topic", string("/localization/vins/point_cloud"));
+  node_->declare_parameter(
+    "esdf_map.simulation_cloud_topic", string("/asr_sdm_map_generator/global_cloud"));
+  node_->declare_parameter(
+    "esdf_map.simulation_odom_topic", string("/visual_slam/odom"));
   node_->declare_parameter("esdf_map.enable_depth_odom", true);
   node_->declare_parameter("esdf_map.enable_pointcloud_odom", true);
+  node_->declare_parameter("esdf_map.enable_simulation_cloud_odom", true);
   node_->declare_parameter("esdf_map.preload_map_directory", string("maps"));
   node_->declare_parameter("esdf_map.preload_occupancy_filename", string("occupancy.bin"));
   node_->declare_parameter("esdf_map.preload_esdf_filename", string("esdf.bin"));
@@ -156,9 +161,15 @@ void ESDFMap::initMap(const std::shared_ptr<rclcpp::Node> & nh)
   mp_.depth_topic_ = node_->get_parameter("esdf_map.depth_topic").as_string();
   mp_.odom_topic_ = node_->get_parameter("esdf_map.odom_topic").as_string();
   mp_.cloud_topic_ = node_->get_parameter("esdf_map.cloud_topic").as_string();
+  mp_.simulation_cloud_topic_ =
+    node_->get_parameter("esdf_map.simulation_cloud_topic").as_string();
+  mp_.simulation_odom_topic_ =
+    node_->get_parameter("esdf_map.simulation_odom_topic").as_string();
   mp_.enable_depth_odom_ = node_->get_parameter("esdf_map.enable_depth_odom").as_bool();
   mp_.enable_pointcloud_odom_ =
     node_->get_parameter("esdf_map.enable_pointcloud_odom").as_bool();
+  mp_.enable_simulation_cloud_odom_ =
+    node_->get_parameter("esdf_map.enable_simulation_cloud_odom").as_bool();
   mp_.preload_map_directory_ = node_->get_parameter("esdf_map.preload_map_directory").as_string();
   mp_.preload_occupancy_filename_ =
     node_->get_parameter("esdf_map.preload_occupancy_filename").as_string();
@@ -251,7 +262,21 @@ void ESDFMap::initMap(const std::shared_ptr<rclcpp::Node> & nh)
       std::bind(&ESDFMap::odomCallback, this, std::placeholders::_1));
   }
 
-  if (mp_.enable_depth_odom_ || mp_.enable_pointcloud_odom_) {
+  if (mp_.enable_simulation_cloud_odom_) {
+    auto simulation_qos = rclcpp::SensorDataQoS();
+    simulation_qos.keep_last(10);
+    simulation_cloud_sub_ = node_->create_subscription<sensor_msgs::msg::PointCloud2>(
+      mp_.simulation_cloud_topic_, simulation_qos,
+      std::bind(&ESDFMap::simulationCloudCallback, this, std::placeholders::_1));
+    simulation_odom_sub_ = node_->create_subscription<nav_msgs::msg::Odometry>(
+      mp_.simulation_odom_topic_, simulation_qos,
+      std::bind(&ESDFMap::simulationOdomCallback, this, std::placeholders::_1));
+  }
+
+  if (
+    mp_.enable_depth_odom_ || mp_.enable_pointcloud_odom_ ||
+    mp_.enable_simulation_cloud_odom_)
+  {
     esdf_timer_ = node_->create_wall_timer(
       update_period, std::bind(&ESDFMap::updateESDFCallback, this));
   } else {
@@ -265,6 +290,7 @@ void ESDFMap::initMap(const std::shared_ptr<rclcpp::Node> & nh)
   md_.esdf_need_update_ = false;
   md_.has_first_depth_ = false;
   md_.has_odom_ = false;
+  md_.has_simulation_odom_ = false;
   md_.esdf_time_ = 0.0;
   md_.fuse_time_ = 0.0;
   md_.update_num_ = 0;
@@ -1219,20 +1245,43 @@ void ESDFMap::pointCloudCallback(sensor_msgs::msg::PointCloud::ConstSharedPtr ms
 
 void ESDFMap::cloudCallback(sensor_msgs::msg::PointCloud2::ConstSharedPtr msg)
 {
+  if (!md_.has_odom_) return;
+
   pcl::PointCloud<pcl::PointXYZ> latest_cloud;
   pcl::fromROSMsg(*msg, latest_cloud);
-  insertPointCloud(latest_cloud);
+  const Eigen::Vector3d camera_pos = md_.camera_pos_;
+  insertPointCloud(latest_cloud, camera_pos);
 }
 
-void ESDFMap::insertPointCloud(const pcl::PointCloud<pcl::PointXYZ> & latest_cloud)
+void ESDFMap::simulationCloudCallback(sensor_msgs::msg::PointCloud2::ConstSharedPtr msg)
 {
-  if (!md_.has_odom_) return;
+  if (!md_.has_simulation_odom_) return;
+
+  pcl::PointCloud<pcl::PointXYZ> latest_cloud;
+  pcl::fromROSMsg(*msg, latest_cloud);
+  const Eigen::Vector3d camera_pos = md_.simulation_camera_pos_;
+  insertPointCloud(latest_cloud, camera_pos);
+}
+
+void ESDFMap::simulationOdomCallback(nav_msgs::msg::Odometry::ConstSharedPtr odom)
+{
+  md_.simulation_camera_pos_(0) = odom->pose.pose.position.x;
+  md_.simulation_camera_pos_(1) = odom->pose.pose.position.y;
+  md_.simulation_camera_pos_(2) = odom->pose.pose.position.z;
+
+  md_.has_simulation_odom_ = true;
+}
+
+void ESDFMap::insertPointCloud(
+  const pcl::PointCloud<pcl::PointXYZ> & latest_cloud,
+  const Eigen::Vector3d & camera_pos)
+{
   if (latest_cloud.empty()) return;
-  if (isnan(md_.camera_pos_(0)) || isnan(md_.camera_pos_(1)) || isnan(md_.camera_pos_(2))) return;
+  if (!camera_pos.allFinite()) return;
 
   resetBuffer(
-    md_.camera_pos_ - mp_.local_update_range_,
-    md_.camera_pos_ + mp_.local_update_range_);
+    camera_pos - mp_.local_update_range_,
+    camera_pos + mp_.local_update_range_);
 
   Eigen::Vector3d p3d, p3d_inf;
   int inf_step = ceil(mp_.obstacles_inflation_ / mp_.resolution_);
@@ -1254,7 +1303,7 @@ void ESDFMap::insertPointCloud(const pcl::PointCloud<pcl::PointXYZ> & latest_clo
     if (!p3d.allFinite()) continue;
 
     /* point inside update range */
-    Eigen::Vector3d devi = p3d - md_.camera_pos_;
+    Eigen::Vector3d devi = p3d - camera_pos;
     Eigen::Vector3i inf_pt;
 
     if (fabs(devi(0)) < mp_.local_update_range_(0) &&
@@ -1284,12 +1333,12 @@ void ESDFMap::insertPointCloud(const pcl::PointCloud<pcl::PointXYZ> & latest_clo
     }
   }
 
-  min_x = min(min_x, md_.camera_pos_(0));
-  min_y = min(min_y, md_.camera_pos_(1));
-  min_z = min(min_z, md_.camera_pos_(2));
-  max_x = max(max_x, md_.camera_pos_(0));
-  max_y = max(max_y, md_.camera_pos_(1));
-  max_z = max(max_z, md_.camera_pos_(2));
+  min_x = min(min_x, camera_pos(0));
+  min_y = min(min_y, camera_pos(1));
+  min_z = min(min_z, camera_pos(2));
+  max_x = max(max_x, camera_pos(0));
+  max_y = max(max_y, camera_pos(1));
+  max_z = max(max_z, camera_pos(2));
   max_z = max(max_z, mp_.ground_height_);
 
   posToIndex(Eigen::Vector3d(max_x, max_y, max_z), md_.local_bound_max_);
@@ -1332,7 +1381,7 @@ void ESDFMap::checkDist()
 
 bool ESDFMap::odomValid()
 {
-  return md_.has_odom_;
+  return md_.has_odom_ || md_.has_simulation_odom_;
 }
 
 bool ESDFMap::hasDepthObservation()
