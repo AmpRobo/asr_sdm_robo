@@ -41,34 +41,34 @@ int declareGetInt(
 
 void BsplineOptimizer::setParam(const std::shared_ptr<rclcpp::Node> & nh)
 {
-  lambda1_ = declareGetDouble(nh, "optimization/lambda1", -1.0);
-  lambda2_ = declareGetDouble(nh, "optimization/lambda2", -1.0);
-  lambda3_ = declareGetDouble(nh, "optimization/lambda3", -1.0);
-  lambda4_ = declareGetDouble(nh, "optimization/lambda4", -1.0);
-  lambda5_ = declareGetDouble(nh, "optimization/lambda5", -1.0);
-  lambda6_ = declareGetDouble(nh, "optimization/lambda6", -1.0);
-  lambda7_ = declareGetDouble(nh, "optimization/lambda7", -1.0);
-  lambda8_ = declareGetDouble(nh, "optimization/lambda8", -1.0);
+  lambda1_ = declareGetDouble(nh, "optimization.lambda1", -1.0);
+  lambda2_ = declareGetDouble(nh, "optimization.lambda2", -1.0);
+  lambda3_ = declareGetDouble(nh, "optimization.lambda3", -1.0);
+  lambda4_ = declareGetDouble(nh, "optimization.lambda4", -1.0);
+  lambda5_ = declareGetDouble(nh, "optimization.lambda5", -1.0);
+  lambda6_ = declareGetDouble(nh, "optimization.lambda6", -1.0);
+  lambda7_ = declareGetDouble(nh, "optimization.lambda7", -1.0);
+  lambda8_ = declareGetDouble(nh, "optimization.lambda8", -1.0);
 
-  dist0_ = declareGetDouble(nh, "optimization/dist0", -1.0);
-  max_vel_ = declareGetDouble(nh, "optimization/max_vel", -1.0);
-  max_acc_ = declareGetDouble(nh, "optimization/max_acc", -1.0);
-  visib_min_ = declareGetDouble(nh, "optimization/visib_min", -1.0);
-  dlmin_ = declareGetDouble(nh, "optimization/dlmin", -1.0);
-  wnl_ = declareGetDouble(nh, "optimization/wnl", -1.0);
+  dist0_ = declareGetDouble(nh, "optimization.dist0", -1.0);
+  max_vel_ = declareGetDouble(nh, "optimization.max_vel", -1.0);
+  max_acc_ = declareGetDouble(nh, "optimization.max_acc", -1.0);
+  visib_min_ = declareGetDouble(nh, "optimization.visib_min", -1.0);
+  dlmin_ = declareGetDouble(nh, "optimization.dlmin", -1.0);
+  wnl_ = declareGetDouble(nh, "optimization.wnl", -1.0);
 
-  max_iteration_num_[0] = declareGetInt(nh, "optimization/max_iteration_num1", -1);
-  max_iteration_num_[1] = declareGetInt(nh, "optimization/max_iteration_num2", -1);
-  max_iteration_num_[2] = declareGetInt(nh, "optimization/max_iteration_num3", -1);
-  max_iteration_num_[3] = declareGetInt(nh, "optimization/max_iteration_num4", -1);
-  max_iteration_time_[0] = declareGetDouble(nh, "optimization/max_iteration_time1", -1.0);
-  max_iteration_time_[1] = declareGetDouble(nh, "optimization/max_iteration_time2", -1.0);
-  max_iteration_time_[2] = declareGetDouble(nh, "optimization/max_iteration_time3", -1.0);
-  max_iteration_time_[3] = declareGetDouble(nh, "optimization/max_iteration_time4", -1.0);
+  max_iteration_num_[0] = declareGetInt(nh, "optimization.max_iteration_num1", -1);
+  max_iteration_num_[1] = declareGetInt(nh, "optimization.max_iteration_num2", -1);
+  max_iteration_num_[2] = declareGetInt(nh, "optimization.max_iteration_num3", -1);
+  max_iteration_num_[3] = declareGetInt(nh, "optimization.max_iteration_num4", -1);
+  max_iteration_time_[0] = declareGetDouble(nh, "optimization.max_iteration_time1", -1.0);
+  max_iteration_time_[1] = declareGetDouble(nh, "optimization.max_iteration_time2", -1.0);
+  max_iteration_time_[2] = declareGetDouble(nh, "optimization.max_iteration_time3", -1.0);
+  max_iteration_time_[3] = declareGetDouble(nh, "optimization.max_iteration_time4", -1.0);
 
-  algorithm1_ = declareGetInt(nh, "optimization/algorithm1", -1);
-  algorithm2_ = declareGetInt(nh, "optimization/algorithm2", -1);
-  order_ = declareGetInt(nh, "optimization/order", -1);
+  algorithm1_ = declareGetInt(nh, "optimization.algorithm1", -1);
+  algorithm2_ = declareGetInt(nh, "optimization.algorithm2", -1);
+  order_ = declareGetInt(nh, "optimization.order", -1);
 }
 
 void BsplineOptimizer::setEnvironment(const EDTEnvironment::Ptr & env)
@@ -172,12 +172,13 @@ void BsplineOptimizer::optimize()
   }
 
   /* do optimization using NLopt solver */
-  nlopt_opt opt = nlopt_create(
-    static_cast<nlopt_algorithm>(isQuadratic() ? algorithm1_ : algorithm2_), variable_num_);
+  const int algorithm = isQuadratic() ? algorithm1_ : algorithm2_;
+  nlopt_opt opt = nlopt_create(static_cast<nlopt_algorithm>(algorithm), variable_num_);
   if (!opt) {
     RCLCPP_ERROR(
       rclcpp::get_logger("asr_sdm_trajectory_optimizerimizer"),
-      "[Optimization]: failed to create NLopt solver");
+      "[Optimization]: failed to create NLopt solver: algorithm=%d, variables=%d", algorithm,
+      variable_num_);
     return;
   }
   nlopt_set_min_objective(opt, BsplineOptimizer::costFunction, this);
