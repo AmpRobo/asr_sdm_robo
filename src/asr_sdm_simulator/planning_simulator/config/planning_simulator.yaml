@@ -21,6 +21,7 @@ simulator:
   init_state_z: 3.0
 
 topics:
+  odom: /asr_sdm/odom
   visual_slam_odom: /visual_slam/odom
   state_ukf_odom: /state_ukf/odom
   visual_slam_correction: /visual_slam/correction
@@ -61,3 +62,21 @@ robot_model:
   use_sim_time: false
   model_xacro: urdf/asr_sdm_wrapper.urdf.xacro
   description_launch: launch/description.launch.py
+# Controller parameters for the handle
+teleop:
+  linear_axis: 1
+  angular_axis: 0
+  pitch_axis: 4
+  linear_scale: 0.12
+  angular_scale: 0.5
+  pitch_scale: 0.5
+  use_trigger_linear: true
+  axis_l2: 2
+  axis_r2: 5
+  l2_released_value: 1.0
+  r2_released_value: 1.0
+  trigger_pressed_value: -1.0
+  deadzone: 0.08
+  invert_linear: false
+  invert_pitch: true
+  invert_yaw: false

@@ -22,6 +22,7 @@ find_package(rclcpp REQUIRED)
 find_package(std_msgs REQUIRED)
 find_package(geometry_msgs REQUIRED)
 find_package(sensor_msgs REQUIRED)
+find_package(nav_msgs REQUIRED)
 find_package(asr_sdm_control_msgs REQUIRED)
 find_package(asr_sdm_hardware_msgs REQUIRED)
 # find_package(periphery REQUIRED)
@@ -114,6 +115,8 @@ target_link_libraries(realtime_front_unit_controller_3d PUBLIC
   front_unit_following_controller_3d_core
   ${asr_sdm_control_msgs_TARGETS}
   ${geometry_msgs_TARGETS}
+  ${nav_msgs_TARGETS}
+  ${sensor_msgs_TARGETS}
   ${std_msgs_TARGETS}
   rclcpp::rclcpp
 )

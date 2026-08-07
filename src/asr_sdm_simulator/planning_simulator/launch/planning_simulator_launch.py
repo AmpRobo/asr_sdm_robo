@@ -157,7 +157,7 @@ def _make_odom_visualization_node(cfg: dict[str, Any]) -> Node:
             'tf45': bool(features.get('use_asr_sdm_model', True)),
         }],
         remappings=[
-            ('odom', topics.get('visual_slam_odom', '/visual_slam/odom')),
+            ('odom', topics.get('odom', '/asr_sdm/odom')),
         ],
     )
 
@@ -182,9 +182,9 @@ def _make_robot_model_actions(cfg: dict[str, Any], asr_sdm_share: str) -> list[A
             }.items(),
         ),
         Node(
-            package='joint_state_publisher',
-            executable='joint_state_publisher',
-            name='joint_state_publisher',
+            package='asr_sdm_controller',
+            executable='realtime_front_unit_controller_3d',
+            name='asr_sdm_kinematic_controller',
             output='screen',
             condition=enabled,
         ),
@@ -199,6 +199,28 @@ def _make_robot_model_actions(cfg: dict[str, Any], asr_sdm_share: str) -> list[A
                 '--yaw', str(float(model_cfg.get('yaw_rad', math.pi))),
                 '--pitch', str(float(model_cfg.get('pitch_rad', math.pi / 2.0))),
             ],
+        ),
+    ]
+
+
+def _make_kinematic_teleop_actions(cfg: dict[str, Any]) -> list[Node]:
+    features = cfg.get('features', {})
+    teleop = cfg.get('teleop', {})
+    return [
+        Node(
+            package='joy',
+            executable='joy_node',
+            name='joy_node',
+            output='screen',
+            condition=_if_bool(bool(features.get('use_joy', True))),
+        ),
+        Node(
+            package='asr_sdm_teleop',
+            executable='asr_sdm_teleop_node',
+            name='asr_sdm_teleop',
+            output='screen',
+            condition=_if_bool(bool(features.get('use_teleop', True))),
+            parameters=[teleop],
         ),
     ]
 
@@ -232,6 +254,7 @@ def generate_launch_description() -> LaunchDescription:
         _make_disturbance_node(cfg),
         _make_odom_visualization_node(cfg),
         *_make_robot_model_actions(cfg, asr_sdm_share),
+        *_make_kinematic_teleop_actions(cfg.get('teleop', {})),
         _make_rviz_node(cfg, rviz_config),
     ]
     return LaunchDescription(actions)
