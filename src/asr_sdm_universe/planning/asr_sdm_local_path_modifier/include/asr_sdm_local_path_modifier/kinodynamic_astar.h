@@ -28,7 +28,7 @@ namespace amprobo
 #define IN_CLOSE_SET 'a'
 #define IN_OPEN_SET 'b'
 #define NOT_EXPAND 'c'
-#define inf 1 >> 30
+#define ASTAR_INF 1 >> 30
 
 class PathNode
 {

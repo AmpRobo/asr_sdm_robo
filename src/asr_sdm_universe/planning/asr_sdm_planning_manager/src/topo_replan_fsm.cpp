@@ -2,6 +2,7 @@
 // Topological replanning FSM implementation.
 
 #include <asr_sdm_planning_manager/topo_replan_fsm.h>
+#include <spdlog/spdlog.h>
 
 #include <chrono>
 #include <functional>
@@ -53,8 +54,7 @@ void TopoReplanFSM::init(const std::shared_ptr<rclcpp::Node> & nh)
     "/waypoint_generator/waypoints", 1,
     std::bind(&TopoReplanFSM::waypointCallback, this, std::placeholders::_1));
   goalpose_sub_ = node_->create_subscription<geometry_msgs::msg::PoseStamped>(
-    "/goal_pose", 1,
-    std::bind(&TopoReplanFSM::goalposeCallback, this, std::placeholders::_1));
+    "/goal_pose", 1, std::bind(&TopoReplanFSM::goalposeCallback, this, std::placeholders::_1));
   odom_sub_ = node_->create_subscription<nav_msgs::msg::Odometry>(
     "odom", 1, std::bind(&TopoReplanFSM::odometryCallback, this, std::placeholders::_1));
 
@@ -237,7 +237,6 @@ void TopoReplanFSM::execFSMCallback()
         if (t_cur > replan_time_threshold_) {
           if (!global_data->localTrajReachTarget()) {
             changeFSMExecState(REPLAN_TRAJ, "FSM");
-
           } else {
             Eigen::Vector3d cur_pos = info->position_traj_.evaluateDeBoorT(t_cur);
             Eigen::Vector3d end_pos = info->position_traj_.evaluateDeBoorT(info->duration_);
