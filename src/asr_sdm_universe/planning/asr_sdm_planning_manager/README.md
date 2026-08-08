@@ -130,7 +130,7 @@ please explore the simulation.launch file.
 Important parameters that may be changed in your usage are contained and documented.
 
 Note that in our configuration, the size of depth image is 640x480. 
-For higher map fusion efficiency we do downsampling (in topo_replan_launch.py, esdf_map.skip_pixel = 3).
+For higher map fusion efficiency we do downsampling (in asr_sdm_planning_manager.launch.py, esdf_map.skip_pixel = 3).
 If you use depth images with lower resolution (like 256x144), you might disable the downsampling by setting skip_pixel = 1. Also, the _depth_scaling_factor_ is set to 1000, which may need to be changed according to your device.
 
 Finally, please kindly give a STAR to this repo if it helps your research or work, thanks! :)

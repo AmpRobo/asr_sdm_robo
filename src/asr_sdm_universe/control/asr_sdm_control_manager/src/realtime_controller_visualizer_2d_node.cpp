@@ -65,7 +65,7 @@ public:
   RealtimeControllerVisualizerNode()
   : Node("realtime_controller_visualizer")
   {
-    state_topic_ = this->declare_parameter<std::string>("state_topic", "/asr_sdm/controller_state");
+    state_topic_ = this->declare_parameter<std::string>("state_topic", "/control/asr_sdm/controller_state");
     link_length_ = this->declare_parameter<double>("link_length", 0.25);
     draw_period_ms_ = this->declare_parameter<int>("draw_period_ms", 100);
     max_history_size_ = this->declare_parameter<int>("max_history_size", 3000);

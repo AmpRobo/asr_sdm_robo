@@ -325,7 +325,7 @@ main(int argc, char** argv)
 
       RCLCPP_INFO(
         n->get_logger(),
-        "Reset pose from /initialpose: x=%.2f y=%.2f z=%.2f yaw=%.2f",
+        "Reset pose from /control/initial_pose: x=%.2f y=%.2f z=%.2f yaw=%.2f",
         reset_state.x(0), reset_state.x(1), reset_state.x(2), pose_reset.yaw);
     }
 

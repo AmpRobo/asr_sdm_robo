@@ -2,20 +2,36 @@
 """Launch the planning simulator stack.
 
 Node parameters and topic names live in config/planning_simulator.yaml.
+
+The robot model and its controller come from the package named by the robot_model
+argument, which defaults to asr_sdm:
+
+    ros2 launch planning_simulator planning_simulator_launch.py robot_model:=asr_sdm
+
+That package must ship launch/<robot_model>_model.launch.py, which is included here
+and reads the same config file.
+
+Optional stacks, each included from <package>/launch/<package>.launch.py:
+
+    control:=enable    asr_sdm_control_manager, the kinematic controller (default on)
+    teleop:=enable     asr_sdm_teleop, the gamepad chain (default off)
+    planning:=enable   asr_sdm_planning_manager, topological replanning (default off)
+
+    ros2 launch planning_simulator planning_simulator_launch.py teleop:=enable
 """
 
 from __future__ import annotations
 
-import math
 import os
 from typing import Any
 
 import yaml
-from ament_index_python.packages import get_package_share_directory
+from ament_index_python.packages import PackageNotFoundError, get_package_share_directory
 from launch import LaunchDescription
-from launch.actions import IncludeLaunchDescription
+from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription, OpaqueFunction
 from launch.conditions import IfCondition
 from launch.launch_description_sources import PythonLaunchDescriptionSource
+from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
 
 
@@ -86,7 +102,7 @@ def _make_planning_simulator_node(cfg: dict[str, Any]) -> Node:
             ('imu', topics.get('imu', 'sim/imu')),
             ('force_disturbance', topics.get('force_disturbance', 'force_disturbance')),
             ('moment_disturbance', topics.get('moment_disturbance', 'moment_disturbance')),
-            ('initialpose', topics.get('initialpose', '/initialpose')),
+            ('initialpose', topics.get('initialpose', '/control/initial_pose')),
         ],
     )
 
@@ -157,72 +173,56 @@ def _make_odom_visualization_node(cfg: dict[str, Any]) -> Node:
             'tf45': bool(features.get('use_asr_sdm_model', True)),
         }],
         remappings=[
-            ('odom', topics.get('odom', '/asr_sdm/odom')),
+            ('odom', topics.get('odom', '/control/asr_sdm/odom')),
         ],
     )
 
 
-def _make_robot_model_actions(cfg: dict[str, Any], asr_sdm_share: str) -> list[Any]:
-    features = cfg.get('features', {})
-    model_cfg = cfg.get('robot_model', {})
-    enabled = _if_bool(bool(features.get('use_asr_sdm_model', True)))
+def _make_robot_model_action(robot_model: str, config_path: str) -> IncludeLaunchDescription:
+    """Bring up the robot model and its controller from the selected robot package.
 
-    model_xacro = os.path.join(
-        asr_sdm_share, model_cfg.get('model_xacro', 'urdf/asr_sdm_wrapper.urdf.xacro'))
-    description_launch = os.path.join(
-        asr_sdm_share, model_cfg.get('description_launch', 'launch/description.launch.py'))
+    robot_model names a package that ships launch/<robot_model>_model.launch.py.
+    The included launch reads the same config file, so the robot_model,
+    kinematic_controller and topics sections below stay authoritative here.
+    """
+    try:
+        robot_model_share = get_package_share_directory(robot_model)
+    except PackageNotFoundError as error:
+        raise RuntimeError(
+            f"robot_model:={robot_model} is not an installed package") from error
 
-    return [
-        IncludeLaunchDescription(
-            PythonLaunchDescriptionSource(description_launch),
-            condition=enabled,
-            launch_arguments={
-                'model': model_xacro,
-                'use_sim_time': str(bool(model_cfg.get('use_sim_time', False))).lower(),
-            }.items(),
-        ),
-        Node(
-            package='asr_sdm_controller',
-            executable='realtime_front_unit_controller_3d',
-            name='asr_sdm_kinematic_controller',
-            output='screen',
-            condition=enabled,
-        ),
-        Node(
-            package='tf2_ros',
-            executable='static_transform_publisher',
-            name='base_to_asr_sdm',
-            condition=enabled,
-            arguments=[
-                '--frame-id', model_cfg.get('parent_frame', 'base'),
-                '--child-frame-id', model_cfg.get('child_frame', 'screwdrive_segment_0'),
-                '--yaw', str(float(model_cfg.get('yaw_rad', math.pi))),
-                '--pitch', str(float(model_cfg.get('pitch_rad', math.pi / 2.0))),
-            ],
-        ),
-    ]
+    model_launch = os.path.join(
+        robot_model_share, 'launch', f'{robot_model}_model.launch.py')
+    if not os.path.isfile(model_launch):
+        raise RuntimeError(
+            f"robot_model:={robot_model} does not provide {model_launch}")
+
+    return IncludeLaunchDescription(
+        PythonLaunchDescriptionSource(model_launch),
+        launch_arguments={'config_file': config_path}.items(),
+    )
 
 
-def _make_kinematic_teleop_actions(cfg: dict[str, Any]) -> list[Node]:
-    features = cfg.get('features', {})
-    teleop = cfg.get('teleop', {})
-    return [
-        Node(
-            package='joy',
-            executable='joy_node',
-            name='joy_node',
-            output='screen',
-            condition=_if_bool(bool(features.get('use_joy', True))),
-        ),
-        Node(
-            package='asr_sdm_teleop',
-            executable='asr_sdm_teleop_node',
-            name='asr_sdm_teleop',
-            output='screen',
-            condition=_if_bool(bool(features.get('use_teleop', True))),
-            parameters=[teleop],
-        ),
-    ]
+def _make_optional_include(
+    argument: str,
+    value: str,
+    package: str,
+    launch_arguments: dict[str, str] | None = None,
+) -> list[IncludeLaunchDescription]:
+    """Include <package>/launch/<package>.launch.py when the argument is 'enable'."""
+    if value != 'enable':
+        return []
+
+    try:
+        package_share = get_package_share_directory(package)
+    except PackageNotFoundError as error:
+        raise RuntimeError(f'{argument}:=enable needs the {package} package') from error
+
+    return [IncludeLaunchDescription(
+        PythonLaunchDescriptionSource(
+            os.path.join(package_share, 'launch', f'{package}.launch.py')),
+        launch_arguments=(launch_arguments or {}).items(),
+    )]
 
 
 def _make_rviz_node(cfg: dict[str, Any], rviz_config: str) -> Node:
@@ -236,25 +236,63 @@ def _make_rviz_node(cfg: dict[str, Any], rviz_config: str) -> Node:
     )
 
 
-def generate_launch_description() -> LaunchDescription:
+def launch_setup(context) -> list[Any]:
+    robot_model = LaunchConfiguration('robot_model').perform(context)
+    control = LaunchConfiguration('control').perform(context)
+    teleop = LaunchConfiguration('teleop').perform(context)
+    planning = LaunchConfiguration('planning').perform(context)
+
     pkg_share = get_package_share_directory('planning_simulator')
     config_path = os.path.join(pkg_share, 'config', 'planning_simulator.yaml')
     rviz_config = os.path.join(pkg_share, 'config', 'rviz.rviz')
     map_generator_config = os.path.join(
         get_package_share_directory('asr_sdm_map_generator'),
         'config', 'asr_sdm_map_generator.yaml')
-    asr_sdm_share = get_package_share_directory('asr_sdm')
 
     cfg = _load_yaml(config_path)
 
-    actions: list[Any] = [
+    return [
         _make_map_generator_node(cfg, map_generator_config),
         _make_planning_simulator_node(cfg),
         _make_so3_control_node(cfg),
         _make_disturbance_node(cfg),
         _make_odom_visualization_node(cfg),
-        *_make_robot_model_actions(cfg, asr_sdm_share),
-        *_make_kinematic_teleop_actions(cfg.get('teleop', {})),
+        _make_robot_model_action(robot_model, config_path),
+        *_make_optional_include(
+            'control', control, 'asr_sdm_control_manager', {'config_file': config_path}),
+        *_make_optional_include('teleop', teleop, 'asr_sdm_teleop'),
+        *_make_optional_include(
+            'planning', planning, 'asr_sdm_planning_manager',
+            {'odom_topic': cfg.get('topics', {}).get('visual_slam_odom', '/visual_slam/odom')},
+        ),
         _make_rviz_node(cfg, rviz_config),
     ]
-    return LaunchDescription(actions)
+
+
+def generate_launch_description() -> LaunchDescription:
+    return LaunchDescription([
+        DeclareLaunchArgument(
+            'robot_model',
+            default_value='asr_sdm',
+            description='提供机器人模型的包名，需包含 launch/<包名>_model.launch.py',
+        ),
+        DeclareLaunchArgument(
+            'control',
+            default_value='enable',
+            choices=['enable', 'disable'],
+            description='是否启动 asr_sdm_control_manager 的运动学控制器（关掉后模型不会动）',
+        ),
+        DeclareLaunchArgument(
+            'teleop',
+            default_value='disable',
+            choices=['enable', 'disable'],
+            description='是否启动 asr_sdm_teleop 的手柄遥控链',
+        ),
+        DeclareLaunchArgument(
+            'planning',
+            default_value='disable',
+            choices=['enable', 'disable'],
+            description='是否启动 asr_sdm_planning_manager 的规划链',
+        ),
+        OpaqueFunction(function=launch_setup),
+    ])

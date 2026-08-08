@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.8)
-project(asr_sdm_controller)
+project(asr_sdm_control_manager)
 
-# Default to RelWithDebInfo so plain `colcon build --packages-select asr_sdm_controller`
+# Default to RelWithDebInfo so plain `colcon build --packages-select asr_sdm_control_manager`
 # still gets -O2 -g instead of an unoptimized, stripped binary.
 if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
   set(CMAKE_BUILD_TYPE RelWithDebInfo)
@@ -57,16 +57,16 @@ include_directories(
 # target_link_libraries(mcp_can ${MRAA_LIB})
 # ament_target_dependencies(mcp_can rclcpp)
 
-add_executable(asr_sdm_controller src/asr_sdm_controller_node.cpp)
-# target_link_libraries(asr_sdm_controller periphery)
-target_link_libraries(asr_sdm_controller PUBLIC
+add_executable(asr_sdm_control_manager src/asr_sdm_control_manager_node.cpp)
+# target_link_libraries(asr_sdm_control_manager periphery)
+target_link_libraries(asr_sdm_control_manager PUBLIC
   ${asr_sdm_control_msgs_TARGETS}
   ${asr_sdm_hardware_msgs_TARGETS}
   ${std_msgs_TARGETS}
   rclcpp::rclcpp
   # periphery
 )
-# ament_target_dependencies(asr_sdm_controller rclcpp std_msgs asr_sdm_control_msgs asr_sdm_hardware_msgs)
+# ament_target_dependencies(asr_sdm_control_manager rclcpp std_msgs asr_sdm_control_msgs asr_sdm_hardware_msgs)
 
 add_executable(front_unit_following_controller_test_2d
   test/front_unit_following_controller_test_2d.cpp
@@ -144,7 +144,7 @@ target_link_libraries(realtime_controller_visualizer_3d PUBLIC
 )
 
 install(TARGETS
-  asr_sdm_controller
+  asr_sdm_control_manager
   front_unit_following_controller_test_2d
   front_unit_following_controller_test_3d
   realtime_front_unit_controller_2d
@@ -152,6 +152,10 @@ install(TARGETS
   realtime_controller_visualizer_2d
   realtime_controller_visualizer_3d
   DESTINATION lib/${PROJECT_NAME}
+)
+
+install(DIRECTORY launch config
+  DESTINATION share/${PROJECT_NAME}
 )
 
 if(BUILD_TESTING)

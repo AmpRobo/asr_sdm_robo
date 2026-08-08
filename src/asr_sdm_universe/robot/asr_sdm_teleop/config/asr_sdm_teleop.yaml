@@ -1,0 +1,32 @@
+# Node parameters for asr_sdm_teleop.launch.py.
+# Keys under each node section match that node's declared parameter names.
+
+features:
+  # Start the joy driver (needs a joystick on the configured device).
+  use_joy: true
+  # Start asr_sdm_teleop_node, which maps /joy to the cmd_vel topic below.
+  use_teleop: true
+
+joy:
+  device_id: 0
+  deadzone: 0.05
+  autorepeat_rate: 20.0
+
+teleop:
+  cmd_vel_topic: /control/asr_sdm/cmd_vel
+  linear_axis: 1
+  angular_axis: 0
+  pitch_axis: 4
+  linear_scale: 0.12
+  angular_scale: 0.5
+  pitch_scale: 0.5
+  use_trigger_linear: true
+  axis_l2: 2
+  axis_r2: 5
+  l2_released_value: 1.0
+  r2_released_value: 1.0
+  trigger_pressed_value: -1.0
+  deadzone: 0.08
+  invert_linear: false
+  invert_pitch: true
+  invert_yaw: false

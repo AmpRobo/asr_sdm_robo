@@ -1,7 +1,7 @@
 #ifndef ROBOT_MODEL_HPP_
 #define ROBOT_MODEL_HPP_
 
-#include "asr_sdm_controller/types.hpp"
+#include "asr_sdm_control_manager/types.hpp"
 
 namespace asr
 {

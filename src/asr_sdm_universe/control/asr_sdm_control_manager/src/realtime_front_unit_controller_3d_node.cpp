@@ -1,4 +1,4 @@
-#include "asr_sdm_controller/front_unit_following_controller_3d.hpp"
+#include "asr_sdm_control_manager/front_unit_following_controller_3d.hpp"
 
 #include "asr_sdm_control_msgs/msg/control_cmd.hpp"
 #include "asr_sdm_control_msgs/msg/unit_cmd.hpp"
@@ -108,19 +108,19 @@ public:
   : Node("realtime_front_unit_controller_3d_" + std::to_string(getpid())),
     controller_(makeControllerParameters())
   {
-    cmd_vel_topic_ = this->declare_parameter<std::string>("cmd_vel_topic", "/asr_sdm/cmd_vel");
+    cmd_vel_topic_ = this->declare_parameter<std::string>("cmd_vel_topic", "/control/asr_sdm/cmd_vel");
     controller_state_topic_ = this->declare_parameter<std::string>(
-      "controller_state_topic", "/asr_sdm/controller_state_3d");
+      "controller_state_topic", "/control/asr_sdm/controller_state_3d");
     control_cmd_topic_ = this->declare_parameter<std::string>(
-      "control_cmd_topic", "/asr_sdm/control_cmd_3d");
+      "control_cmd_topic", "/control/asr_sdm/control_cmd_3d");
     initialpose_topic_ = this->declare_parameter<std::string>(
-      "initialpose_topic", "/initialpose");
+      "initialpose_topic", "/control/initial_pose");
     initial_x_ = this->declare_parameter<double>("initial_x", -5.0);
     initial_y_ = this->declare_parameter<double>("initial_y", 0.0);
     initial_z_ = this->declare_parameter<double>("initial_z", 0.0);
     initial_yaw_ = this->declare_parameter<double>("initial_yaw", 0.0);
-    odom_topic_ = this->declare_parameter<std::string>("odom_topic", "/asr_sdm/odom");
-    joint_state_topic_ = this->declare_parameter<std::string>("joint_state_topic", "/joint_states");
+    odom_topic_ = this->declare_parameter<std::string>("odom_topic", "/control/asr_sdm/odom");
+    joint_state_topic_ = this->declare_parameter<std::string>("joint_state_topic", "/control/joint_states");
     world_frame_ = this->declare_parameter<std::string>("world_frame", "world");
     controller_base_frame_ = this->declare_parameter<std::string>(
       "controller_base_frame", "base");

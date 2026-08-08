@@ -1,4 +1,4 @@
-#include "asr_sdm_controller/front_unit_following_controller_3d.hpp"
+#include "asr_sdm_control_manager/front_unit_following_controller_3d.hpp"
 
 #include <matplot/matplot.h>
 #include <rclcpp/rclcpp.hpp>
@@ -127,7 +127,7 @@ public:
   : Node("realtime_controller_visualizer_3d_" + std::to_string(getpid()))
   {
     state_topic_ = this->declare_parameter<std::string>(
-      "state_topic", "/asr_sdm/controller_state_3d");
+      "state_topic", "/control/asr_sdm/controller_state_3d");
     draw_period_ms_ = this->declare_parameter<int>("draw_period_ms", 250);
     max_history_size_ = this->declare_parameter<int>("max_history_size", 3000);
     trail_samples_ = this->declare_parameter<int>("trail_samples", 360);

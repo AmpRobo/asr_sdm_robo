@@ -1,4 +1,6 @@
-# Launch / simulator configuration for planning_simulator_launch.py
+# Launch / simulator configuration for planning_simulator_launch.py.
+# The robot_model, kinematic_controller and matching topics entries are read by
+# asr_sdm/launch/asr_sdm_model.launch.py, which this launch includes.
 
 features:
   # Start asr_sdm_map_generator (random forest map).
@@ -7,6 +9,9 @@ features:
   enable_click_map: true
   # Load and display the asr_sdm robot model in RViz.
   use_asr_sdm_model: true
+  # Start the kinematic controller that drives the robot model. Without it nothing
+  # publishes joint states or odometry, so the model stays invisible in RViz.
+  use_kinematic_controller: true
   # Start RViz with the package rviz config.
   use_rviz: true
   # Start so3_control_node.
@@ -21,7 +26,7 @@ simulator:
   init_state_z: 3.0
 
 topics:
-  odom: /asr_sdm/odom
+  odom: /control/asr_sdm/odom
   visual_slam_odom: /visual_slam/odom
   state_ukf_odom: /state_ukf/odom
   visual_slam_correction: /visual_slam/correction
@@ -29,7 +34,11 @@ topics:
   imu: sim/imu
   force_disturbance: force_disturbance
   moment_disturbance: moment_disturbance
-  initialpose: /initialpose
+  initialpose: /control/initial_pose
+  joint_states: /control/joint_states
+  cmd_vel: /control/asr_sdm/cmd_vel
+  controller_state: /control/asr_sdm/controller_state_3d
+  control_cmd: /control/asr_sdm/control_cmd_3d
   position_cmd: position_cmd
   motors: motors
   corrections: corrections
@@ -62,21 +71,42 @@ robot_model:
   use_sim_time: false
   model_xacro: urdf/asr_sdm_wrapper.urdf.xacro
   description_launch: launch/description.launch.py
-# Controller parameters for the handle
-teleop:
-  linear_axis: 1
-  angular_axis: 0
-  pitch_axis: 4
-  linear_scale: 0.12
-  angular_scale: 0.5
-  pitch_scale: 0.5
-  use_trigger_linear: true
-  axis_l2: 2
-  axis_r2: 5
-  l2_released_value: 1.0
-  r2_released_value: 1.0
-  trigger_pressed_value: -1.0
-  deadzone: 0.08
-  invert_linear: false
-  invert_pitch: true
-  invert_yaw: false
+
+# Drives the robot model: publishes joint states plus the odometry that
+# odom_visualization turns into the world->base transform.
+# Topic names come from the topics section above.
+kinematic_controller:
+  world_frame: world
+  controller_base_frame: base
+
+  initial_x: -5.0
+  initial_y: 0.0
+  initial_z: 0.0
+  initial_yaw: 0.0
+
+  # Kinematic model of the front-unit following controller.
+  link_length: 0.25
+  joint_rate_limit: 2.0
+  joint_limit: 1.5707963267948966
+  max_curvature: 1.2
+  curvature_velocity_epsilon: 0.001
+  damping: 0.02
+
+  # URDF joint mapping: index i is the URDF joint, the value is the controller DOF it reads.
+  joint_source_indices: [0, 1, 2, 3, 4, 5]
+  joint_signs: [1.0, 1.0, 1.0, 1.0, 1.0, 1.0]
+  joint_offsets_rad: [0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+  clip_joint_positions: true
+  joint_position_limit_rad: 1.5707963267948966
+
+  control_period_ms: 20
+  # Zero the command when no cmd_vel arrives within this window.
+  cmd_timeout_sec: 0.3
+  max_linear_velocity: 0.12
+  max_pitch_rate: 0.35
+  max_yaw_rate: 0.35
+
+  # Publish ControlCmd for the hardware units (off while running in simulation).
+  publish_control_cmd: false
+  joint_angle_scale: 1.0
+  joint_angle_limit: 2147483647

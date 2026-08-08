@@ -26,7 +26,7 @@ if(BUILD_TESTING)
   ament_lint_auto_find_test_dependencies()
 endif()
 
-install(DIRECTORY launch meshes rviz urdf worlds
+install(DIRECTORY config launch meshes rviz urdf worlds
   DESTINATION share/${PROJECT_NAME}
 )
 install(FILES "${GENERATED_URDF}"

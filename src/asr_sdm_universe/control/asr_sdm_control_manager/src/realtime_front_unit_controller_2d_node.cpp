@@ -1,5 +1,5 @@
-#include "asr_sdm_controller/front_unit_following_controller_2d.hpp"
-#include "asr_sdm_controller/robot_model.hpp"
+#include "asr_sdm_control_manager/front_unit_following_controller_2d.hpp"
+#include "asr_sdm_control_manager/robot_model.hpp"
 
 #include "asr_sdm_control_msgs/msg/control_cmd.hpp"
 #include "asr_sdm_control_msgs/msg/unit_cmd.hpp"
@@ -54,11 +54,11 @@ public:
     controller_(params_),
     robot_model_(params_)
   {
-    cmd_vel_topic_ = this->declare_parameter<std::string>("cmd_vel_topic", "/asr_sdm/cmd_vel");
+    cmd_vel_topic_ = this->declare_parameter<std::string>("cmd_vel_topic", "/control/asr_sdm/cmd_vel");
     control_cmd_topic_ =
-      this->declare_parameter<std::string>("control_cmd_topic", "/asr_sdm/control_cmd");
+      this->declare_parameter<std::string>("control_cmd_topic", "/control/asr_sdm/control_cmd");
     controller_state_topic_ = this->declare_parameter<std::string>(
-      "controller_state_topic", "/asr_sdm/controller_state");
+      "controller_state_topic", "/control/asr_sdm/controller_state");
     control_period_ms_ = this->declare_parameter<int>("control_period_ms", 20);
     phi_dot_limit_ = this->declare_parameter<double>("phi_dot_limit", 2.0);
     phi_limit_ = this->declare_parameter<double>("phi_limit", 0.85 * pi_value);

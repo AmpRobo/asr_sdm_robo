@@ -27,6 +27,9 @@ def launch_setup(context):
             'robot_description': robot_description,
             'use_sim_time': LaunchConfiguration('use_sim_time'),
         }],
+        remappings=[
+            ('joint_states', LaunchConfiguration('joint_states_topic')),
+        ],
         output='screen',
     )]
 
@@ -49,6 +52,11 @@ def generate_launch_description():
             'use_sim_time',
             default_value='false',
             description='是否使用仿真时钟',
+        ),
+        DeclareLaunchArgument(
+            'joint_states_topic',
+            default_value='/control/joint_states',
+            description='robot_state_publisher 订阅的关节状态 topic',
         ),
         OpaqueFunction(function=launch_setup),
     ])

@@ -6,14 +6,14 @@
 
 ```bash
 cd ~/asr_sdm_robo
-colcon build --packages-up-to asr_sdm_controller
+colcon build --packages-up-to asr_sdm_control_manager
 source install/setup.bash
 ```
 
 ## 启动 2D 离线仿真
 
 ```bash
-ros2 run asr_sdm_controller front_unit_following_controller_test_2d
+ros2 run asr_sdm_control_manager front_unit_following_controller_test_2d
 ```
 
 关闭弹出的绘图窗口或按 `Ctrl+C` 退出。
@@ -21,7 +21,7 @@ ros2 run asr_sdm_controller front_unit_following_controller_test_2d
 ## 启动 3D 离线仿真
 
 ```bash
-ros2 run asr_sdm_controller front_unit_following_controller_test_3d
+ros2 run asr_sdm_control_manager front_unit_following_controller_test_3d
 ```
 
 关闭弹出的绘图窗口或按 `Ctrl+C` 退出。

@@ -17,10 +17,10 @@
 
 using namespace std::chrono_literals;
 
-class AsrSdmControllerNode : public rclcpp::Node
+class AsrSdmControlManagerNode : public rclcpp::Node
 {
 public:
-  AsrSdmControllerNode() : Node("asr_sdm_controller"), count_(0)
+  AsrSdmControlManagerNode() : Node("asr_sdm_control_manager"), count_(0)
   {
     RCLCPP_INFO(this->get_logger(), "Start");
     pub_heartbeat_ =
@@ -28,9 +28,9 @@ public:
     pub_control_cmd_ =
       this->create_publisher<asr_sdm_control_msgs::msg::ControlCmd>("~/output/control_cmd", 1);
     timer_heartbeat_ =
-      this->create_wall_timer(1500ms, std::bind(&AsrSdmControllerNode::timer_heartbeat, this));
+      this->create_wall_timer(1500ms, std::bind(&AsrSdmControlManagerNode::timer_heartbeat, this));
     timer_robot_control_ =
-      this->create_wall_timer(100ms, std::bind(&AsrSdmControllerNode::timer_controller, this));
+      this->create_wall_timer(100ms, std::bind(&AsrSdmControlManagerNode::timer_controller, this));
   }
 
 private:
@@ -56,7 +56,7 @@ private:
 int main(int argc, char * argv[])
 {
   rclcpp::init(argc, argv);
-  rclcpp::spin(std::make_shared<AsrSdmControllerNode>());
+  rclcpp::spin(std::make_shared<AsrSdmControlManagerNode>());
   rclcpp::shutdown();
   return 0;
 }

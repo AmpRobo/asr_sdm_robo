@@ -28,13 +28,17 @@ public:
     this->declare_parameter<bool>("invert_linear", false);
     this->declare_parameter<bool>("invert_pitch", true);
     this->declare_parameter<bool>("invert_yaw", false);
+    this->declare_parameter<std::string>("cmd_vel_topic", "/control/asr_sdm/cmd_vel");
+
+    const auto cmd_vel_topic = this->get_parameter("cmd_vel_topic").as_string();
 
     joy_sub_ = this->create_subscription<sensor_msgs::msg::Joy>(
       "joy", 10, std::bind(&JoystickTeleop::joy_callback, this, std::placeholders::_1));
 
-    pub_control_cmd_ = this->create_publisher<geometry_msgs::msg::Twist>("/asr_sdm/cmd_vel", 10);
+    pub_control_cmd_ = this->create_publisher<geometry_msgs::msg::Twist>(cmd_vel_topic, 10);
 
-    RCLCPP_INFO(this->get_logger(), "Joystick Teleop Node started.");
+    RCLCPP_INFO(
+      this->get_logger(), "Joystick Teleop Node started. cmd_vel=%s", cmd_vel_topic.c_str());
   }
 
 private:

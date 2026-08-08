@@ -1,0 +1,54 @@
+# Default configuration for asr_sdm_control_manager.launch.py.
+# Callers can pass their own file with the same schema via config_file:=<path>,
+# which is what planning_simulator does with its own config.
+
+features:
+  # Start realtime_front_unit_controller_3d.
+  use_kinematic_controller: true
+
+topics:
+  odom: /control/asr_sdm/odom
+  joint_states: /control/joint_states
+  initialpose: /control/initial_pose
+  cmd_vel: /control/asr_sdm/cmd_vel
+  controller_state: /control/asr_sdm/controller_state_3d
+  control_cmd: /control/asr_sdm/control_cmd_3d
+
+# Drives the robot model: publishes joint states plus the odometry that a
+# visualizer can turn into the world->base transform.
+# Topic names come from the topics section above.
+kinematic_controller:
+  world_frame: world
+  controller_base_frame: base
+
+  initial_x: -5.0
+  initial_y: 0.0
+  initial_z: 0.0
+  initial_yaw: 0.0
+
+  # Kinematic model of the front-unit following controller.
+  link_length: 0.25
+  joint_rate_limit: 2.0
+  joint_limit: 1.5707963267948966
+  max_curvature: 1.2
+  curvature_velocity_epsilon: 0.001
+  damping: 0.02
+
+  # URDF joint mapping: index i is the URDF joint, the value is the controller DOF it reads.
+  joint_source_indices: [0, 1, 2, 3, 4, 5]
+  joint_signs: [1.0, 1.0, 1.0, 1.0, 1.0, 1.0]
+  joint_offsets_rad: [0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+  clip_joint_positions: true
+  joint_position_limit_rad: 1.5707963267948966
+
+  control_period_ms: 20
+  # Zero the command when no cmd_vel arrives within this window.
+  cmd_timeout_sec: 0.3
+  max_linear_velocity: 0.12
+  max_pitch_rate: 0.35
+  max_yaw_rate: 0.35
+
+  # Publish ControlCmd for the hardware units (off while running in simulation).
+  publish_control_cmd: false
+  joint_angle_scale: 1.0
+  joint_angle_limit: 2147483647
