@@ -1,4 +1,4 @@
-# Default configuration for asr_sdm_model.launch.py.
+# Default configuration for asr_sdm_description.launch.py.
 # Callers can pass their own file with the same schema via config_file:=<path>,
 # which is what planning_simulator does with its own config.
 
@@ -20,4 +20,3 @@ robot_model:
   use_sim_time: false
   # Paths are resolved against the asr_sdm share directory.
   model_xacro: urdf/asr_sdm_wrapper.urdf.xacro
-  description_launch: launch/description.launch.py

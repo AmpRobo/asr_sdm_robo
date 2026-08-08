@@ -1,6 +1,6 @@
 # Launch / simulator configuration for planning_simulator_launch.py.
 # The robot_model, kinematic_controller and matching topics entries are read by
-# asr_sdm/launch/asr_sdm_model.launch.py, which this launch includes.
+# asr_sdm/launch/asr_sdm_description.launch.py, which this launch includes.
 
 features:
   # Start asr_sdm_map_generator (random forest map).
@@ -70,7 +70,6 @@ robot_model:
   pitch_rad: 1.5707963267948966
   use_sim_time: false
   model_xacro: urdf/asr_sdm_wrapper.urdf.xacro
-  description_launch: launch/description.launch.py
 
 # Drives the robot model: publishes joint states plus the odometry that
 # odom_visualization turns into the world->base transform.

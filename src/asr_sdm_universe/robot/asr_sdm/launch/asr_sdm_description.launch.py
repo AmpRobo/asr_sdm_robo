@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""Bring up the asr_sdm robot model.
+"""Bring up the asr_sdm robot description.
 
-Starts robot_state_publisher through description.launch.py plus the static
+Loads the URDF/Xacro, starts robot_state_publisher, and publishes the static
 transform that orients the model under its base frame.
 
 Nothing here publishes joint states, so on its own the model holds its zero pose.
@@ -9,25 +9,24 @@ asr_sdm_control_manager/launch/asr_sdm_control_manager.launch.py runs the
 kinematic controller that animates it.
 
 Parameters come from config/robot_model.yaml. Pass config_file:=<path> to use a
-file with the same schema, which is how planning_simulator reuses asr_sdm_model.launch.py.
+file with the same schema, which is how planning_simulator reuses this launch.
 """
 
 from __future__ import annotations
 
 import math
 import os
+from pathlib import Path
 from typing import Any
 
 import yaml
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
-from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription, OpaqueFunction
+from launch.actions import DeclareLaunchArgument, OpaqueFunction
 from launch.conditions import IfCondition
-from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.substitutions import LaunchConfiguration, PathJoinSubstitution
 from launch_ros.actions import Node
 from launch_ros.substitutions import FindPackageShare
-
 
 PACKAGE_NAME = 'asr_sdm'
 
@@ -41,6 +40,14 @@ def _if_bool(flag: bool) -> IfCondition:
     return IfCondition('true' if flag else 'false')
 
 
+def _load_robot_description(model_path: Path) -> str:
+    if model_path.suffix == '.xacro':
+        import xacro
+
+        return xacro.process_file(str(model_path)).toxml()
+    return model_path.read_text(encoding='utf-8')
+
+
 def _make_description_actions(cfg: dict[str, Any], package_share: str) -> list[Any]:
     features = cfg.get('features', {})
     model_cfg = cfg.get('robot_model', {})
@@ -49,18 +56,23 @@ def _make_description_actions(cfg: dict[str, Any], package_share: str) -> list[A
 
     model_xacro = os.path.join(
         package_share, model_cfg.get('model_xacro', 'urdf/asr_sdm_wrapper.urdf.xacro'))
-    description_launch = os.path.join(
-        package_share, model_cfg.get('description_launch', 'launch/description.launch.py'))
+    robot_description = _load_robot_description(Path(model_xacro))
+    use_sim_time = bool(model_cfg.get('use_sim_time', False))
+    joint_states_topic = topics.get('joint_states', '/control/joint_states')
 
     return [
-        IncludeLaunchDescription(
-            PythonLaunchDescriptionSource(description_launch),
+        Node(
+            package='robot_state_publisher',
+            executable='robot_state_publisher',
             condition=enabled,
-            launch_arguments={
-                'model': model_xacro,
-                'use_sim_time': str(bool(model_cfg.get('use_sim_time', False))).lower(),
-                'joint_states_topic': topics.get('joint_states', '/control/joint_states'),
-            }.items(),
+            parameters=[{
+                'robot_description': robot_description,
+                'use_sim_time': use_sim_time,
+            }],
+            remappings=[
+                ('joint_states', joint_states_topic),
+            ],
+            output='screen',
         ),
         Node(
             package='tf2_ros',

@@ -60,4 +60,3 @@ robot_model:
   pitch_rad: 1.5707963267948966
   use_sim_time: false
   model_xacro: urdf/asr_sdm_wrapper.urdf.xacro
-  description_launch: launch/description.launch.py

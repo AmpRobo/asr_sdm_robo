@@ -6,6 +6,7 @@ from launch.actions import (
     AppendEnvironmentVariable,
     DeclareLaunchArgument,
     IncludeLaunchDescription,
+    OpaqueFunction,
 )
 from launch.conditions import IfCondition, UnlessCondition
 from launch.launch_description_sources import PythonLaunchDescriptionSource
@@ -15,6 +16,33 @@ from launch_ros.substitutions import FindPackageShare
 
 
 PACKAGE_NAME = 'asr_sdm'
+
+
+def _load_robot_description(model_path: Path) -> str:
+    if model_path.suffix == '.xacro':
+        import xacro
+
+        return xacro.process_file(str(model_path)).toxml()
+    return model_path.read_text(encoding='utf-8')
+
+
+def description_setup(context):
+    model_path = Path(LaunchConfiguration('model').perform(context))
+    robot_description = _load_robot_description(model_path)
+
+    return [Node(
+        package='robot_state_publisher',
+        executable='robot_state_publisher',
+        condition=UnlessCondition(LaunchConfiguration('use_rviz')),
+        parameters=[{
+            'robot_description': robot_description,
+            'use_sim_time': LaunchConfiguration('use_sim_time'),
+        }],
+        remappings=[
+            ('joint_states', LaunchConfiguration('joint_states_topic')),
+        ],
+        output='screen',
+    )]
 
 
 def generate_launch_description():
@@ -57,21 +85,6 @@ def generate_launch_description():
         condition=UnlessCondition(use_custom_world),
         launch_arguments={
             'gz_args': ['-r ', gazebo_world, ' --verbose'],
-        }.items(),
-    )
-
-    description = IncludeLaunchDescription(
-        PythonLaunchDescriptionSource(
-            PathJoinSubstitution([
-                package_share,
-                'launch',
-                'description.launch.py',
-            ])
-        ),
-        condition=UnlessCondition(use_rviz),
-        launch_arguments={
-            'model': model,
-            'use_sim_time': use_sim_time,
         }.items(),
     )
 
@@ -127,6 +140,11 @@ def generate_launch_description():
             description='是否使用 Gazebo 仿真时钟',
         ),
         DeclareLaunchArgument(
+            'joint_states_topic',
+            default_value='/control/joint_states',
+            description='robot_state_publisher 订阅的关节状态 topic',
+        ),
+        DeclareLaunchArgument(
             'use_rviz',
             default_value='false',
             description='是否同时启动 RViz 模型浏览器',
@@ -148,7 +166,7 @@ def generate_launch_description():
         ),
         AppendEnvironmentVariable('GZ_SIM_RESOURCE_PATH', share_parent),
         AppendEnvironmentVariable('SDF_PATH', share_parent),
-        description,
+        OpaqueFunction(function=description_setup),
         display,
         package_world,
         external_world,

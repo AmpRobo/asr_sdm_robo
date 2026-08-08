@@ -41,17 +41,13 @@ colcon build --symlink-install --packages-select asr_sdm
 source install/setup.bash
 ```
 
-## Start Robot State Publisher
+## Start Robot Description
 
 ```bash
-ros2 launch asr_sdm description.launch.py
+ros2 launch asr_sdm asr_sdm_description.launch.py
 ```
 
-To use simulation time:
-
-```bash
-ros2 launch asr_sdm description.launch.py use_sim_time:=true
-```
+Parameters come from `config/robot_model.yaml`. Pass another file with the same schema via `config_file:=<path>`.
 
 ## Display the Model in RViz
 
@@ -105,10 +101,9 @@ ros2 launch asr_sdm gazebo.launch.py use_rviz:=true
 
 ## Launch Arguments
 
-### `description.launch.py`
+### `asr_sdm_description.launch.py`
 
-- `model`: Path to a URDF or Xacro model file
-- `use_sim_time`: Whether to use simulation time; default: `false`
+- `config_file`: Absolute path to a YAML file with the `robot_model.yaml` schema; default: `config/robot_model.yaml`
 
 ### `display.launch.py`
 

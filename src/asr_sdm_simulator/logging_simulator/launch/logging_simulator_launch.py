@@ -6,7 +6,6 @@ Node parameters and topic names live in config/logging_simulator.yaml.
 
 from __future__ import annotations
 
-import math
 import os
 from typing import Any
 
@@ -162,24 +161,19 @@ def _make_odom_visualization_node(cfg: dict[str, Any]) -> Node:
     )
 
 
-def _make_robot_model_actions(cfg: dict[str, Any], asr_sdm_share: str) -> list[Any]:
+def _make_robot_model_actions(cfg: dict[str, Any], config_path: str) -> list[Any]:
     features = cfg.get('features', {})
-    model_cfg = cfg.get('robot_model', {})
     enabled = _if_bool(bool(features.get('use_asr_sdm_model', True)))
 
-    model_xacro = os.path.join(
-        asr_sdm_share, model_cfg.get('model_xacro', 'urdf/asr_sdm_wrapper.urdf.xacro'))
+    asr_sdm_share = get_package_share_directory('asr_sdm')
     description_launch = os.path.join(
-        asr_sdm_share, model_cfg.get('description_launch', 'launch/description.launch.py'))
+        asr_sdm_share, 'launch', 'asr_sdm_description.launch.py')
 
     return [
         IncludeLaunchDescription(
             PythonLaunchDescriptionSource(description_launch),
             condition=enabled,
-            launch_arguments={
-                'model': model_xacro,
-                'use_sim_time': str(bool(model_cfg.get('use_sim_time', False))).lower(),
-            }.items(),
+            launch_arguments={'config_file': config_path}.items(),
         ),
         Node(
             package='joint_state_publisher',
@@ -187,18 +181,6 @@ def _make_robot_model_actions(cfg: dict[str, Any], asr_sdm_share: str) -> list[A
             name='joint_state_publisher',
             output='screen',
             condition=enabled,
-        ),
-        Node(
-            package='tf2_ros',
-            executable='static_transform_publisher',
-            name='base_to_asr_sdm',
-            condition=enabled,
-            arguments=[
-                '--frame-id', model_cfg.get('parent_frame', 'base'),
-                '--child-frame-id', model_cfg.get('child_frame', 'screwdrive_segment_0'),
-                '--yaw', str(float(model_cfg.get('yaw_rad', math.pi))),
-                '--pitch', str(float(model_cfg.get('pitch_rad', math.pi / 2.0))),
-            ],
         ),
     ]
 
@@ -221,7 +203,6 @@ def generate_launch_description() -> LaunchDescription:
     map_generator_config = os.path.join(
         get_package_share_directory('asr_sdm_map_generator'),
         'config', 'asr_sdm_map_generator.yaml')
-    asr_sdm_share = get_package_share_directory('asr_sdm')
 
     cfg = _load_yaml(config_path)
 
@@ -231,7 +212,7 @@ def generate_launch_description() -> LaunchDescription:
         _make_so3_control_node(cfg),
         _make_disturbance_node(cfg),
         _make_odom_visualization_node(cfg),
-        *_make_robot_model_actions(cfg, asr_sdm_share),
+        *_make_robot_model_actions(cfg, config_path),
         _make_rviz_node(cfg, rviz_config),
     ]
     return LaunchDescription(actions)

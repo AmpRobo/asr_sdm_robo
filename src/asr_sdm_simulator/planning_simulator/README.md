@@ -38,7 +38,7 @@ ros2 launch planning_simulator planning_simulator_launch.py --show-args
 
 | Argument | Values | Default | Role |
 |---|---|---|---|
-| `robot_model` | installed model package name | `asr_sdm` | Selects the robot model package; must provide `launch/<name>_model.launch.py` |
+| `robot_model` | installed model package name | `asr_sdm` | Selects the robot model package; must provide `launch/<name>_description.launch.py` |
 | `control` | `enable` / `disable` | `enable` | Starts `asr_sdm_control_manager` (kinematic controller) |
 | `teleop` | `enable` / `disable` | `disable` | Starts `asr_sdm_teleop` (joy driver + teleop node) |
 | `planning` | `enable` / `disable` | `disable` | Starts `asr_sdm_planning_manager` (topological replanning) |
@@ -107,17 +107,17 @@ Optional stacks are included by name:
 Robot models use:
 
 ```text
-<robot_model>/launch/<robot_model>_model.launch.py
+<robot_model>/launch/<robot_model>_description.launch.py
 ```
 
-Example: default `asr_sdm` → `asr_sdm/launch/asr_sdm_model.launch.py`.
+Example: default `asr_sdm` → `asr_sdm/launch/asr_sdm_description.launch.py`.
 
 Responsibilities:
 
 | Package / launch | Responsibility |
 |---|---|
 | `planning_simulator` | Simulation, map, RViz, top-level assemble |
-| `asr_sdm` / `asr_sdm_model.launch.py` | URDF and static TF |
+| `asr_sdm` / `asr_sdm_description.launch.py` | URDF and static TF |
 | `asr_sdm_control_manager` | Kinematic controller |
 | `asr_sdm_teleop` | `joy` + teleop |
 | `asr_sdm_planning_manager` | Planning and trajectory server |
@@ -125,7 +125,7 @@ Responsibilities:
 ### Standalone launches (debug)
 
 ```bash
-ros2 launch asr_sdm asr_sdm_model.launch.py
+ros2 launch asr_sdm asr_sdm_description.launch.py
 ros2 launch asr_sdm_control_manager asr_sdm_control_manager.launch.py
 ros2 launch asr_sdm_teleop asr_sdm_teleop.launch.py
 ros2 launch asr_sdm_planning_manager asr_sdm_planning_manager.launch.py
@@ -167,7 +167,7 @@ ros2 launch planning_simulator planning_simulator_launch.py --show-args
 
 | 参数 | 可选值 | 默认 | 作用 |
 |---|---|---|---|
-| `robot_model` | 已安装的模型包名 | `asr_sdm` | 选择机器人模型包，需提供 `launch/<包名>_model.launch.py` |
+| `robot_model` | 已安装的模型包名 | `asr_sdm` | 选择机器人模型包，需提供 `launch/<包名>_description.launch.py` |
 | `control` | `enable` / `disable` | `enable` | 启动 `asr_sdm_control_manager`（运动学控制器） |
 | `teleop` | `enable` / `disable` | `disable` | 启动 `asr_sdm_teleop`（手柄驱动 + teleop 节点） |
 | `planning` | `enable` / `disable` | `disable` | 启动 `asr_sdm_planning_manager`（拓扑重规划） |
@@ -236,17 +236,17 @@ ros2 topic pub --rate 20 /control/asr_sdm/cmd_vel geometry_msgs/msg/Twist \
 机器人模型额外约定：
 
 ```text
-<robot_model>/launch/<robot_model>_model.launch.py
+<robot_model>/launch/<robot_model>_description.launch.py
 ```
 
-例如当前默认模型是 `asr_sdm` → `asr_sdm/launch/asr_sdm_model.launch.py`。
+例如当前默认模型是 `asr_sdm` → `asr_sdm/launch/asr_sdm_description.launch.py`。
 
 责任划分：
 
 | 包 / launch | 负责 |
 |---|---|
 | `planning_simulator` | 仿真、地图、RViz、一键拼装 |
-| `asr_sdm` / `asr_sdm_model.launch.py` | URDF 与静态 TF |
+| `asr_sdm` / `asr_sdm_description.launch.py` | URDF 与静态 TF |
 | `asr_sdm_control_manager` | 运动学控制器 |
 | `asr_sdm_teleop` | `joy` + teleop |
 | `asr_sdm_planning_manager` | 规划与轨迹服务 |
@@ -254,7 +254,7 @@ ros2 topic pub --rate 20 /control/asr_sdm/cmd_vel geometry_msgs/msg/Twist \
 ### 独立启动（调试用）
 
 ```bash
-ros2 launch asr_sdm asr_sdm_model.launch.py
+ros2 launch asr_sdm asr_sdm_description.launch.py
 ros2 launch asr_sdm_control_manager asr_sdm_control_manager.launch.py
 ros2 launch asr_sdm_teleop asr_sdm_teleop.launch.py
 ros2 launch asr_sdm_planning_manager asr_sdm_planning_manager.launch.py

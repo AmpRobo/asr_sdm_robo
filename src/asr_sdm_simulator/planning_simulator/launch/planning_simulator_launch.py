@@ -8,7 +8,7 @@ argument, which defaults to asr_sdm:
 
     ros2 launch planning_simulator planning_simulator_launch.py robot_model:=asr_sdm
 
-That package must ship launch/<robot_model>_model.launch.py, which is included here
+That package must ship launch/<robot_model>_description.launch.py, which is included here
 and reads the same config file.
 
 Optional stacks, each included from <package>/launch/<package>.launch.py:
@@ -181,7 +181,7 @@ def _make_odom_visualization_node(cfg: dict[str, Any]) -> Node:
 def _make_robot_model_action(robot_model: str, config_path: str) -> IncludeLaunchDescription:
     """Bring up the robot model and its controller from the selected robot package.
 
-    robot_model names a package that ships launch/<robot_model>_model.launch.py.
+    robot_model names a package that ships launch/<robot_model>_description.launch.py.
     The included launch reads the same config file, so the robot_model,
     kinematic_controller and topics sections below stay authoritative here.
     """
@@ -191,14 +191,14 @@ def _make_robot_model_action(robot_model: str, config_path: str) -> IncludeLaunc
         raise RuntimeError(
             f"robot_model:={robot_model} is not an installed package") from error
 
-    model_launch = os.path.join(
-        robot_model_share, 'launch', f'{robot_model}_model.launch.py')
-    if not os.path.isfile(model_launch):
+    description_launch = os.path.join(
+        robot_model_share, 'launch', f'{robot_model}_description.launch.py')
+    if not os.path.isfile(description_launch):
         raise RuntimeError(
-            f"robot_model:={robot_model} does not provide {model_launch}")
+            f"robot_model:={robot_model} does not provide {description_launch}")
 
     return IncludeLaunchDescription(
-        PythonLaunchDescriptionSource(model_launch),
+        PythonLaunchDescriptionSource(description_launch),
         launch_arguments={'config_file': config_path}.items(),
     )
 
@@ -274,7 +274,7 @@ def generate_launch_description() -> LaunchDescription:
         DeclareLaunchArgument(
             'robot_model',
             default_value='asr_sdm',
-            description='提供机器人模型的包名，需包含 launch/<包名>_model.launch.py',
+            description='提供机器人模型的包名，需包含 launch/<包名>_description.launch.py',
         ),
         DeclareLaunchArgument(
             'control',
