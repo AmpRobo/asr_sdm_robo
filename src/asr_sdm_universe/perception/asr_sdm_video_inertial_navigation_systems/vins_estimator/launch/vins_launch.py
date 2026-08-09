@@ -155,7 +155,7 @@ def _pipeline(config_pkg_path, common_params, vins_config):
     Pipeline: feature_tracker -> vins_estimator -> pose_graph + rviz2
     All nodes run under the namespace configured in config/vins.yaml.
     """
-    ns = vins_config.get('namespace', 'localization/vins')
+    ns = vins_config.get('namespace', 'localization/video_inertial_navigation_systems')
     rviz_cfg = os.path.join(
         config_pkg_path, vins_config.get('rviz_config', 'config/vins_euroc_rviz.rviz'))
     pose_graph_cfg = vins_config.get('pose_graph', {})

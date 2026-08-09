@@ -282,8 +282,8 @@ ros2 launch vins_estimator vins_launch.py enable_sparse:=1
 ros2 bag play /path/to/MH_01_easy_ros2
 ```
 
-注意：所有节点默认落在 `/localization/vins` namespace 下（与默认 rviz 配置匹配），
-公共话题如 `/localization/vins/odometry` / `/localization/vins/path`。
+注意：所有节点默认落在 `/localization/video_inertial_navigation_systems` namespace 下（与默认 rviz 配置匹配），
+公共话题如 `/localization/video_inertial_navigation_systems/odometry` / `/localization/video_inertial_navigation_systems/path`。
 
 由于程序整体架构有变化，原来的命令已经不能使用，请使用最新的命令
 

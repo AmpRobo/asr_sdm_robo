@@ -6,7 +6,7 @@ Panels:
       Expanded:
         - /Status1
         - /original1
-        - /localization/vins1
+        - /localization/video_inertial_navigation_systems1
       Splitter Ratio: 0.5
     Tree Height: 285
   - Class: rviz_common/Selection
@@ -193,7 +193,7 @@ Visualization Manager:
       Name: ORIGINAL (sparse=0)
 
     # =====================================================================
-    # Localization pipeline (namespace = /localization/vins), green trajectory
+    # Localization pipeline (namespace = /localization/video_inertial_navigation_systems), green trajectory
     # =====================================================================
     - Class: rviz_common/Group
       Displays:
@@ -209,7 +209,7 @@ Visualization Manager:
             Durability Policy: Volatile
             History Policy: Keep Last
             Reliability Policy: Reliable
-            Value: /localization/vins/feature_img
+            Value: /localization/video_inertial_navigation_systems/feature_img
           Value: true
         - Class: rviz_default_plugins/Image
           Enabled: true
@@ -223,7 +223,7 @@ Visualization Manager:
             Durability Policy: Volatile
             History Policy: Keep Last
             Reliability Policy: Reliable
-            Value: /localization/vins/match_image
+            Value: /localization/video_inertial_navigation_systems/match_image
           Value: true
         - Class: rviz_default_plugins/MarkerArray
           Enabled: true
@@ -236,7 +236,7 @@ Visualization Manager:
             Durability Policy: Volatile
             History Policy: Keep Last
             Reliability Policy: Reliable
-            Value: /localization/vins/camera_pose_visual
+            Value: /localization/video_inertial_navigation_systems/camera_pose_visual
           Value: true
         - Alpha: 1
           Autocompute Intensity Bounds: true
@@ -267,7 +267,7 @@ Visualization Manager:
             Durability Policy: Volatile
             History Policy: Keep Last
             Reliability Policy: Reliable
-            Value: /localization/vins/keyframe_point
+            Value: /localization/video_inertial_navigation_systems/keyframe_point
           Use Fixed Frame: true
           Use rainbow: true
           Value: true
@@ -296,7 +296,7 @@ Visualization Manager:
             Durability Policy: Volatile
             History Policy: Keep Last
             Reliability Policy: Reliable
-            Value: /localization/vins/path
+            Value: /localization/video_inertial_navigation_systems/path
           Value: true
         - Alpha: 1
           Buffer Length: 1
@@ -323,7 +323,7 @@ Visualization Manager:
             Durability Policy: Volatile
             History Policy: Keep Last
             Reliability Policy: Reliable
-            Value: /localization/vins/pose_graph_path
+            Value: /localization/video_inertial_navigation_systems/pose_graph_path
           Value: true
         - Class: rviz_default_plugins/MarkerArray
           Enabled: true
@@ -335,7 +335,7 @@ Visualization Manager:
             Durability Policy: Volatile
             History Policy: Keep Last
             Reliability Policy: Reliable
-            Value: /localization/vins/pose_graph
+            Value: /localization/video_inertial_navigation_systems/pose_graph
           Value: true
       Enabled: true
       Name: LOCALIZATION (sparse=1)

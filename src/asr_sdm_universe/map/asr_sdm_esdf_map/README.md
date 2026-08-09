@@ -16,8 +16,8 @@ The core target is `asr_sdm_esdf_map`. `src/esdf_map.cpp` keeps the Fast-Planner
 Default inputs:
 
 ```text
-/localization/vins/point_cloud       sensor_msgs/msg/PointCloud
-/localization/vins/odometry          nav_msgs/msg/Odometry
+/localization/video_inertial_navigation_systems/point_cloud       sensor_msgs/msg/PointCloud
+/localization/video_inertial_navigation_systems/odometry          nav_msgs/msg/Odometry
 /sensing/camera/realsense/depth      sensor_msgs/msg/Image
 ```
 
@@ -126,7 +126,7 @@ The supplied RViz configuration uses the ROS 2
 `rviz_default_plugins/PointCloud2` display for `/map/esdf_map/occupancy_inflate`
 and `/map/esdf_map/esdf`, with Reliable + Transient Local QoS matching the test
 publishers. The ESDF display uses the normalized `intensity` field in `[0, 1]`.
-RViz also displays `/localization/vins/odometry` directly with the Odometry plugin.
+RViz also displays `/localization/video_inertial_navigation_systems/odometry` directly with the Odometry plugin.
 
 The only test source is `test/esdf_map_test.cpp`; it links the exported
 `asr_sdm_esdf_map` target in the same way as a downstream package.

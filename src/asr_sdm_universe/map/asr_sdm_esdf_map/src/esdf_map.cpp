@@ -111,9 +111,9 @@ void ESDFMap::initMap(const std::shared_ptr<rclcpp::Node> & nh)
   node_->declare_parameter(
     "esdf_map.depth_topic", string("/sensing/camera/realsense/depth"));
   node_->declare_parameter(
-    "esdf_map.odom_topic", string("/localization/vins/odometry"));
+    "esdf_map.odom_topic", string("/localization/video_inertial_navigation_systems/odometry"));
   node_->declare_parameter(
-    "esdf_map.cloud_topic", string("/localization/vins/point_cloud"));
+    "esdf_map.cloud_topic", string("/localization/video_inertial_navigation_systems/point_cloud"));
   node_->declare_parameter(
     "esdf_map.simulation_cloud_topic", string("/asr_sdm_map_generator/global_cloud"));
   node_->declare_parameter(

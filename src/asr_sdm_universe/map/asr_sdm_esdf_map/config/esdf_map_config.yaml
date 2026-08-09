@@ -55,8 +55,8 @@ esdf_map:
       # approximately synchronized; PointCloud and odometry form the
       # independent Fast-Planner point-cloud chain.
       depth_topic: "/sensing/camera/realsense/depth"
-      odom_topic: "/localization/vins/odometry"
-      cloud_topic: "/localization/vins/point_cloud"
+      odom_topic: "/localization/video_inertial_navigation_systems/odometry"
+      cloud_topic: "/localization/video_inertial_navigation_systems/point_cloud"
       simulation_cloud_topic: "/asr_sdm_map_generator/global_cloud"
       simulation_odom_topic: "/visual_slam/odom"
 
