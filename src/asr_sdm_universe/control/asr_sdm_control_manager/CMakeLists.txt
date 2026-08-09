@@ -27,6 +27,9 @@ find_package(asr_sdm_control_msgs REQUIRED)
 find_package(asr_sdm_hardware_msgs REQUIRED)
 # find_package(periphery REQUIRED)
 find_package(Python3 REQUIRED COMPONENTS Interpreter Development NumPy)
+# Pinocchio ships in /opt/openrobots when installed from robotpkg.
+list(APPEND CMAKE_PREFIX_PATH "/opt/openrobots")
+find_package(pinocchio QUIET)
 find_package(Matplot++ QUIET)
 if(NOT TARGET Matplot++::matplot)
   set(MATPLOTPP_SOURCE_DIR "" CACHE PATH "Path to the Matplot++ source tree")
@@ -88,6 +91,34 @@ add_library(front_unit_following_controller_3d_core STATIC
 target_include_directories(front_unit_following_controller_3d_core PUBLIC
   ${CMAKE_CURRENT_SOURCE_DIR}/include
 )
+
+if(pinocchio_FOUND)
+  # pinocchio_default excludes the URDF/SDF parsers on purpose: the model is
+  # assembled joint by joint instead of being read from a description file.
+  add_library(asr_sdm_kinematic_model STATIC
+    src/asr_sdm_kinematic_model.cpp
+  )
+  target_include_directories(asr_sdm_kinematic_model PUBLIC
+    ${CMAKE_CURRENT_SOURCE_DIR}/include
+  )
+  target_link_libraries(asr_sdm_kinematic_model PUBLIC
+    pinocchio::pinocchio_default
+  )
+
+  add_executable(asr_sdm_kinematic_model_check
+    test/asr_sdm_kinematic_model_check.cpp
+  )
+  target_link_libraries(asr_sdm_kinematic_model_check PUBLIC
+    asr_sdm_kinematic_model
+    front_unit_following_controller_3d_core
+  )
+
+  install(TARGETS asr_sdm_kinematic_model_check
+    DESTINATION lib/${PROJECT_NAME}
+  )
+else()
+  message(STATUS "pinocchio not found: skipping asr_sdm_kinematic_model targets")
+endif()
 
 add_executable(front_unit_following_controller_test_3d
   test/front_unit_following_controller_test_3d.cpp
@@ -168,6 +199,13 @@ if(BUILD_TESTING)
   # a copyright and license is added to all source files
   set(ament_cmake_cpplint_FOUND TRUE)
   ament_lint_auto_find_test_dependencies()
+
+  if(TARGET asr_sdm_kinematic_model_check)
+    add_test(
+      NAME asr_sdm_kinematic_model_check
+      COMMAND asr_sdm_kinematic_model_check
+    )
+  endif()
 endif()
 
 ament_package()

@@ -16,6 +16,8 @@
   <depend>nav_msgs</depend>
   <depend>asr_sdm_hardware_msgs</depend>
   <depend>asr_sdm_control_msgs</depend>
+  <depend>eigen</depend>
+  <depend>pinocchio</depend>
 
   <exec_depend>launch</exec_depend>
   <exec_depend>launch_ros</exec_depend>
