@@ -56,7 +56,7 @@ Visualizer::Visualizer(rclcpp::Node::SharedPtr node)
 
   // Camera pose with 6x6 covariance matrix
   pub_pose_ =
-    node_->create_publisher<geometry_msgs::msg::PoseWithCovarianceStamped>("localization/video_inertial_odom/pose", 10);
+    node_->create_publisher<geometry_msgs::msg::PoseWithCovarianceStamped>("localization/video_inertial_odom/odom", 10);
 
   // Trajectory polyline (nav_msgs/Path) — ORB-SLAM style path in world frame
   pub_trajectory_ = node_->create_publisher<nav_msgs::msg::Path>("localization/video_inertial_odom/trajectory", 10);

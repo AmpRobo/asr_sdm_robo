@@ -210,7 +210,7 @@ rviz2 -d src/asr_sdm_universe/perception/asr_sdm_video_inertial_odometry/asr_sdm
 
 What you should see
 - Nodes: `/asr_sdm_camera_realsense_d405`, `/asr_sdm_imu_hiwonder_10axis`, `/asr_sdm_video_inertial_odometry`, `/rosbag2_player`
-- Topics: `/camera/image_raw`, `/camera/camera_info`, `/imu/data`, `/sensing/camera/realsense/color/image_raw`, `/sensing/camera/realsense/color/camera_info`, `/sensing/imu/imu_raw`, `/sensing/imu/imu_filtered`, `/localization/video_inertial_odom/image`, `/localization/video_inertial_odom/keyframes`, `/localization/video_inertial_odom/points`, `/localization/video_inertial_odom/pose`, `/localization/video_inertial_odom/trajectory`, `/tf`, `/clock`
+- Topics: `/camera/image_raw`, `/camera/camera_info`, `/imu/data`, `/sensing/camera/realsense/color/image_raw`, `/sensing/camera/realsense/color/camera_info`, `/sensing/imu/imu_raw`, `/sensing/imu/imu_filtered`, `/localization/video_inertial_odom/image`, `/localization/video_inertial_odom/keyframes`, `/localization/video_inertial_odom/points`, `/localization/video_inertial_odom/odom`, `/localization/video_inertial_odom/trajectory`, `/tf`, `/clock`
 
 Quick checks
 ```sh
@@ -238,7 +238,7 @@ ros2 node info /asr_sdm_video_inertial_odometry
 
 # check VIO publishing rates
 ros2 topic hz /localization/video_inertial_odom/image
-ros2 topic hz /localization/video_inertial_odom/pose
+ros2 topic hz /localization/video_inertial_odom/odom
 ```
 
 Stop processes

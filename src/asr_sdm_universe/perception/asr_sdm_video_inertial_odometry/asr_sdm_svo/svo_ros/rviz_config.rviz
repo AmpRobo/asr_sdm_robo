@@ -115,7 +115,7 @@ Visualization Manager:
         Durability Policy: Volatile
         History Policy: Keep Last
         Reliability Policy: Reliable
-        Value: /localization/video_inertial_odom/pose
+        Value: /localization/video_inertial_odom/odom
       Value: true
     - Class: rviz_default_plugins/Path
       Enabled: true
