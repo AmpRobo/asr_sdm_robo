@@ -11,6 +11,17 @@ argument, which defaults to asr_sdm:
 That package must ship launch/<robot_model>_description.launch.py, which is included here
 and reads the same config file.
 
+The robot model pose in RViz comes from odom_visualization, which turns one
+odometry topic into the world->base transform. Pick the source with:
+
+    odom_source:=auto      whichever source published most recently (default)
+    odom_source:=control   /control/asr_sdm/odom, the kinematic controller
+    odom_source:=vins      /localization/video_inertial_navigation_systems/odometry
+
+odom_visualization subscribes to the selected topics and only it broadcasts that
+transform, so the sources never fight over TF. With auto, run either stack alone
+and the model follows it; run both and the pose alternates between the estimates.
+
 Optional stacks, each included from <package>/launch/<package>.launch.py:
 
     control:=enable    asr_sdm_control_manager, the kinematic controller (default on)
@@ -33,6 +44,10 @@ from launch.conditions import IfCondition
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
+
+
+DEFAULT_SIM_ODOM = '/control/asr_sdm/odom'
+DEFAULT_VINS_ODOM = '/localization/video_inertial_navigation_systems/odometry'
 
 
 def _load_yaml(path: str) -> dict[str, Any]:
@@ -153,8 +168,19 @@ def _make_disturbance_node(cfg: dict[str, Any]) -> Node:
     )
 
 
-def _make_odom_visualization_node(cfg: dict[str, Any]) -> Node:
+def _odom_source_topics(cfg: dict[str, Any], odom_source: str) -> list[str]:
+    """Odometry inputs that become the world->base transform of the robot model."""
     topics = cfg.get('topics', {})
+    sim_odom = topics.get('sim_odom', DEFAULT_SIM_ODOM)
+    vins_odom = topics.get('vins_odom', DEFAULT_VINS_ODOM)
+    if odom_source == 'control':
+        return [sim_odom]
+    if odom_source == 'vins':
+        return [vins_odom]
+    return [sim_odom, vins_odom]
+
+
+def _make_odom_visualization_node(cfg: dict[str, Any], odom_source: str) -> Node:
     features = cfg.get('features', {})
     viz = cfg.get('odom_visualization', {})
     color = viz.get('color', {})
@@ -169,12 +195,10 @@ def _make_odom_visualization_node(cfg: dict[str, Any]) -> Node:
             'color.g': float(color.get('g', 0.0)),
             'color.b': float(color.get('b', 0.0)),
             'covariance_scale': float(viz.get('covariance_scale', 100.0)),
+            'odom_topics': _odom_source_topics(cfg, odom_source),
             # Publish world->base TF so the asr_sdm model can follow odometry.
             'tf45': bool(features.get('use_asr_sdm_model', True)),
         }],
-        remappings=[
-            ('odom', topics.get('odom', '/control/asr_sdm/odom')),
-        ],
     )
 
 
@@ -238,6 +262,7 @@ def _make_rviz_node(cfg: dict[str, Any], rviz_config: str) -> Node:
 
 def launch_setup(context) -> list[Any]:
     robot_model = LaunchConfiguration('robot_model').perform(context)
+    odom_source = LaunchConfiguration('odom_source').perform(context)
     control = LaunchConfiguration('control').perform(context)
     teleop = LaunchConfiguration('teleop').perform(context)
     planning = LaunchConfiguration('planning').perform(context)
@@ -256,7 +281,7 @@ def launch_setup(context) -> list[Any]:
         _make_planning_simulator_node(cfg),
         _make_so3_control_node(cfg),
         _make_disturbance_node(cfg),
-        _make_odom_visualization_node(cfg),
+        _make_odom_visualization_node(cfg, odom_source),
         _make_robot_model_action(robot_model, config_path),
         *_make_optional_include(
             'control', control, 'asr_sdm_control_manager', {'config_file': config_path}),
@@ -274,25 +299,33 @@ def generate_launch_description() -> LaunchDescription:
         DeclareLaunchArgument(
             'robot_model',
             default_value='asr_sdm',
-            description='提供机器人模型的包名，需包含 launch/<包名>_description.launch.py',
+            description='Robot model package name; must provide launch/<name>_description.launch.py',
+        ),
+        DeclareLaunchArgument(
+            'odom_source',
+            default_value='auto',
+            choices=['auto', 'control', 'vins'],
+            description='Odometry that drives the robot model pose: auto follows whichever '
+                        'source published most recently, control pins controller odom, '
+                        'vins pins VINS localization odometry',
         ),
         DeclareLaunchArgument(
             'control',
             default_value='enable',
             choices=['enable', 'disable'],
-            description='是否启动 asr_sdm_control_manager 的运动学控制器（关掉后模型不会动）',
+            description='Start asr_sdm_control_manager kinematic controller (model will not move if disabled)',
         ),
         DeclareLaunchArgument(
             'teleop',
             default_value='disable',
             choices=['enable', 'disable'],
-            description='是否启动 asr_sdm_teleop 的手柄遥控链',
+            description='Start asr_sdm_teleop gamepad teleop chain',
         ),
         DeclareLaunchArgument(
             'planning',
             default_value='disable',
             choices=['enable', 'disable'],
-            description='是否启动 asr_sdm_planning_manager 的规划链',
+            description='Start asr_sdm_planning_manager planning chain',
         ),
         OpaqueFunction(function=launch_setup),
     ])

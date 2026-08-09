@@ -26,7 +26,10 @@ simulator:
   init_state_z: 3.0
 
 topics:
-  odom: /control/asr_sdm/odom
+  sim_odom: /control/asr_sdm/odom
+  # Alternative pose source for the robot model, selected with odom_source:=vins.
+  # odom_source:=auto follows whichever of the two published last.
+  vins_odom: /localization/video_inertial_navigation_systems/odometry
   visual_slam_odom: /visual_slam/odom
   state_ukf_odom: /state_ukf/odom
   visual_slam_correction: /visual_slam/correction

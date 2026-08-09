@@ -39,6 +39,7 @@ ros2 launch planning_simulator planning_simulator_launch.py --show-args
 | Argument | Values | Default | Role |
 |---|---|---|---|
 | `robot_model` | installed model package name | `asr_sdm` | Selects the robot model package; must provide `launch/<name>_description.launch.py` |
+| `odom_source` | `auto` / `control` / `vins` | `auto` | Odometry that becomes the `world -> base` transform of the robot model. `auto` follows whichever source published most recently |
 | `control` | `enable` / `disable` | `enable` | Starts `asr_sdm_control_manager` (kinematic controller) |
 | `teleop` | `enable` / `disable` | `disable` | Starts `asr_sdm_teleop` (joy driver + teleop node) |
 | `planning` | `enable` / `disable` | `disable` | Starts `asr_sdm_planning_manager` (topological replanning) |
@@ -54,6 +55,10 @@ ros2 launch planning_simulator planning_simulator_launch.py teleop:=enable
 
 # Add planning
 ros2 launch planning_simulator planning_simulator_launch.py planning:=enable
+
+# Pin the model pose to one source instead of following whoever publishes
+ros2 launch planning_simulator planning_simulator_launch.py odom_source:=vins
+ros2 launch planning_simulator planning_simulator_launch.py odom_source:=control
 
 # Everything on
 ros2 launch planning_simulator planning_simulator_launch.py \
@@ -83,7 +88,8 @@ To change initial pose, topic names, or controller gains, edit that YAML and res
 | Topic | Description |
 |---|---|
 | `/control/asr_sdm/cmd_vel` | Input from teleop / planning; drives the kinematic controller |
-| `/control/asr_sdm/odom` | Odometry published by the controller |
+| `/control/asr_sdm/odom` | Odometry published by the controller; model pose source with `odom_source:=control` |
+| `/localization/video_inertial_navigation_systems/odometry` | VINS odometry; model pose source with `odom_source:=vins` |
 | `/control/joint_states` | Joint states for `robot_state_publisher` |
 | `/control/initial_pose` | Reset controller pose (RViz 2D Pose Estimate) |
 | `/visual_slam/odom` | Simulator dynamics odometry |
@@ -168,6 +174,7 @@ ros2 launch planning_simulator planning_simulator_launch.py --show-args
 | 参数 | 可选值 | 默认 | 作用 |
 |---|---|---|---|
 | `robot_model` | 已安装的模型包名 | `asr_sdm` | 选择机器人模型包，需提供 `launch/<包名>_description.launch.py` |
+| `odom_source` | `auto` / `control` / `vins` | `auto` | 选择哪一路里程计作为模型的 `world -> base` 变换来源，`auto` 跟随最近发消息的那一路 |
 | `control` | `enable` / `disable` | `enable` | 启动 `asr_sdm_control_manager`（运动学控制器） |
 | `teleop` | `enable` / `disable` | `disable` | 启动 `asr_sdm_teleop`（手柄驱动 + teleop 节点） |
 | `planning` | `enable` / `disable` | `disable` | 启动 `asr_sdm_planning_manager`（拓扑重规划） |
@@ -183,6 +190,10 @@ ros2 launch planning_simulator planning_simulator_launch.py teleop:=enable
 
 # 加规划
 ros2 launch planning_simulator planning_simulator_launch.py planning:=enable
+
+# 固定用某一路里程计驱动模型，不再自动跟随
+ros2 launch planning_simulator planning_simulator_launch.py odom_source:=vins
+ros2 launch planning_simulator planning_simulator_launch.py odom_source:=control
 
 # 全开
 ros2 launch planning_simulator planning_simulator_launch.py \
@@ -212,7 +223,8 @@ config/planning_simulator.yaml
 | 话题 | 说明 |
 |---|---|
 | `/control/asr_sdm/cmd_vel` | 手柄 / 规划侧输入，驱动运动学控制器 |
-| `/control/asr_sdm/odom` | 控制器发布的里程计 |
+| `/control/asr_sdm/odom` | 控制器发布的里程计；`odom_source:=control` 时作为模型位姿来源 |
+| `/localization/video_inertial_navigation_systems/odometry` | VINS 里程计；`odom_source:=vins` 时作为模型位姿来源 |
 | `/control/joint_states` | 控制器发布的关节状态，供给 `robot_state_publisher` |
 | `/control/initial_pose` | 重置控制器位姿（RViz 2D Pose Estimate） |
 | `/visual_slam/odom` | 仿真器动力学里程计 |

@@ -1,6 +1,7 @@
 #include <iostream>
 #include <string.h>
 #include <memory>
+#include <vector>
 #include "rclcpp/rclcpp.hpp"
 #include "tf2_ros/transform_broadcaster.h"
 #include "geometry_msgs/msg/transform_stamped.hpp"
@@ -52,6 +53,7 @@ visualization_msgs::msg::Marker sensorROS;
 visualization_msgs::msg::Marker meshROS;
 sensor_msgs::msg::Range         heightROS;
 string _frame_id;
+string active_odom_topic;
 
 void odom_callback(const nav_msgs::msg::Odometry::ConstSharedPtr msg)
 {
@@ -491,8 +493,31 @@ int main(int argc, char** argv)
 
   auto latched = rclcpp::QoS(rclcpp::KeepLast(100)).transient_local();
 
-  auto sub_odom = node->create_subscription<nav_msgs::msg::Odometry>(
-      "odom", 100, odom_callback);
+  // Several pose sources may feed the same model, so odom_topics takes a list and
+  // whichever source publishes last wins. Without it the plain "odom" input is used.
+  vector<string> odom_topics;
+  node->get_parameter_or("odom_topics", odom_topics, vector<string>{});
+  if (odom_topics.empty())
+    odom_topics.push_back(string("odom"));
+
+  vector<rclcpp::Subscription<nav_msgs::msg::Odometry>::SharedPtr> sub_odoms;
+  for (const string& topic : odom_topics)
+  {
+    sub_odoms.push_back(node->create_subscription<nav_msgs::msg::Odometry>(
+        topic, 100,
+        [topic](const nav_msgs::msg::Odometry::ConstSharedPtr msg)
+        {
+          if (topic != active_odom_topic)
+          {
+            active_odom_topic = topic;
+            // Sources publishing at the same time alternate here, so keep it quiet.
+            RCLCPP_INFO_THROTTLE(node->get_logger(), *node->get_clock(), 2000,
+                                 "Odometry source is now %s", topic.c_str());
+          }
+          odom_callback(msg);
+        }));
+  }
+
   auto sub_cmd  = node->create_subscription<quadrotor_msgs::msg::PositionCommand>(
       "cmd", 100, cmd_callback);
   posePub   = node->create_publisher<geometry_msgs::msg::PoseStamped>("pose",                latched);

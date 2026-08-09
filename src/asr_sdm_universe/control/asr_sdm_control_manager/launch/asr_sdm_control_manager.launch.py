@@ -46,7 +46,8 @@ def _make_kinematic_controller_node(cfg: dict[str, Any]) -> Node:
             'controller_state', '/control/asr_sdm/controller_state_3d'),
         'control_cmd_topic': topics.get('control_cmd', '/control/asr_sdm/control_cmd_3d'),
         'initialpose_topic': topics.get('initialpose', '/control/initial_pose'),
-        'odom_topic': topics.get('odom', '/control/asr_sdm/odom'),
+        # planning_simulator calls the same topic sim_odom in its own config.
+        'odom_topic': topics.get('sim_odom', topics.get('odom', '/control/asr_sdm/odom')),
         'joint_state_topic': topics.get('joint_states', '/control/joint_states'),
     })
     return Node(
