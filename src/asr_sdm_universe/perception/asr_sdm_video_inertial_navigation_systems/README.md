@@ -1,378 +1,401 @@
-# VINS-MONO-ROS2
-## ROS2 version of VINS-MONO
-**New: Code has been adapted for Ubuntu 24.04. See the ros2_jazzy branch for details.**
-# 1. Introduction
-This repository implements the ROS2 version of VINS-MONO, mainly including the following packages:
-* **camera_model**
-* **feature_tracker**
-* **vins_estimator**
-* **pose_graph**
-* **benchmark_pubilsher**
-* **ar_demo**
-* **config_pkg**
+# asr_sdm_video_inertial_navigation_systems
 
-**NOTE**: Since the **_get_package_share_directory_** command in ROS2 launch files can only locate packages in the _install_ directory instead of the _src_ directory like ROS1, we create a package called **_config_pkg_** to store the _config/_ and _support_files/_ folders from VINS-MONO.
- 
-![mh01](https://github.com/dongbo19/VINS-MONO-ROS2/blob/main/config_pkg/config/gif/vins_ros2_mh01.gif)
-![mh02](https://github.com/dongbo19/VINS-MONO-ROS2/blob/main/config_pkg/config/gif/vins_ros2_mh02.gif)
-# 2. Prerequisites
-* System  
-  * Ubuntu 20.04  
-  * ROS2 foxy
-* Libraries
-  * OpenCV 4.2.0
-  * [Ceres Solver](http://ceres-solver.org/installation.html) 1.14.0
-  * Eigen 3.3.7
-# 3. Build VINS-MONO-ROS2
-Clone the repository and colcon build:  
-```
-cd $(PATH_TO_YOUR_ROS2_WS)/src
-git clone https://github.com/dongbo19/VINS-MONO-ROS2.git
-cd ..
-colcon build
-```
-# 4. VINS-MONO-ROS2 on EuRoC datasets
-## 4.1. ROS1 bag to ROS2 bag
-Download [EuRoC datasets](https://projects.asl.ethz.ch/datasets/doku.php?id=kmavvisualinertialdatasets). However, the datasets are in ROS1 format. To run the code in ROS2, we need to first convert these datasets to ROS2 format. We can use [rosbags](https://pypi.org/project/rosbags/) for this purpose, which can convert ROS built-in messages between ROS1 and ROS2.  
-## 4.2. Visual-inertial odometry and loop closure
-All configuration files are in the package, **_config_pkg_**, so in launch files, the path to the EuRoC configuration files is found using **_get_package_share_directory('config_pkg')_**.  
-Open three terminals, launch the feature_tracker, vins_estimator, rviz2, and ros2 bag. Take the MH01 for example
-```
-ros2 launch feature_tracker vins_feature_tracker.launch.py              # for feature tracking and rviz2
-ros2 launch vins_estimator euroc.launch.py                              # for backend optimization and loop closure
-ros2 bag play $(PATH_TO_YOUR_DATASET)/MH_01_easy                        # for ros2 bag
-```
-![mh05](https://github.com/dongbo19/VINS-MONO-ROS2/blob/main/config_pkg/config/gif/vins_ros2_mh05.gif)
-![v101](https://github.com/dongbo19/VINS-MONO-ROS2/blob/main/config_pkg/config/gif/vins_ros2_v101.gif)
-## 4.3. Visualize ground truch
-First, take the MH01 for example, modifying the **'sequence_name'** in the launch file: 
-**_benchmark_publisher/launch/benchmark_publisher.launch.py_**
-```
-sequence_name_arg = DeclareLaunchArgument(
-    'sequence_name',
-    default_value='MH_01_easy',
-    description='Sequence name for the benchmark'
-)
-sequence_name = LaunchConfiguration('sequence_name')
-```
-**PS: After modifying the launch file, don't forget to run **_colcon build_** for this package again.**  
-Then, open four terminals, launch the feature_tracker, vins_estimator, benchmark_mark, rviz2, and ros2 bag.
-```
-ros2 launch feature_tracker vins_feature_tracker.launch.py            # for feature tracking and rviz2
-ros2 launch vins_estimator euroc.launch.py                            # for backend optimization and loop closure
-ros2 launch benchmark_publisher benchmark_publisher.launch.py         # for benchmark
-ros2 bag play $(PATH_TO_YOUR_DATASET)/MH_01_easy                      # for ros2 bag
-```
-![mh01_benchmark](https://github.com/dongbo19/VINS-MONO-ROS2/blob/main/config_pkg/config/gif/vins_ros2_benchmark_mh01.gif)
-![mh02_benchmark](https://github.com/dongbo19/VINS-MONO-ROS2/blob/main/config_pkg/config/gif/vins_ros2_benchmark_mh02.gif)
-## 4.4. AR Demo
-Download the [bag file](https://www.dropbox.com/scl/fi/q18lot4bfs1fqrctclz7b/ar_box.bag?rlkey=16yrxnwnt2fcutwwzwhlevd1n&e=1&dl=0).  
-Then open two terminals  
-```
-ros2 launch ar_demo 3dm_bag.launch.py               # for featuer tracking, backend optimization, ar demo and rviz2.
-ros2 bag play $(PATH_TO_YOUR_DATASET)/ar_box        # for ros2 bag
-```
-![ar_demo](https://github.com/dongbo19/VINS-MONO-ROS2/blob/main/config_pkg/config/gif/vins_ros2_ar_demo.gif)
-# 5. Run your own datasets
-If you need to run your own collected datasets, please add your configuration files to the _config_pkg/config_ directory, and then modify the **_config_path_** in the launch files mentioned above to find your configuration file:  
-```
-config_path = PathJoinSubstitution([
-    config_pkg_path,
-    'config/$(YOUR_YAML_FILE)'
-])
-```
-**PS: After modifying the launch files or config files, don't forget to run **_colcon build_** for those packages again.**  
-# 6. Acknowledgements
-We use ros1 version of [VINS MONO](https://github.com/HKUST-Aerial-Robotics/VINS-Mono),  [ceres solver](http://ceres-solver.org/installation.html) for non-linear optimization, [DBoW2](https://github.com/dorian3d/DBoW2) for loop detection, and a generic [camera model](https://github.com/hengli/camodocal). Also, we referred to parts of the implementations from [VINS-FUSION-ROS2](https://github.com/zinuok/VINS-Fusion-ROS2) and [vins-mono-ros2](https://github.com/hitzzq/vins-mono-ros2).
+ROS 2 port of [VINS-Mono](https://github.com/HKUST-Aerial-Robotics/VINS-Mono) for ASR-SDM, with an optional SVO-style sparse image-alignment front end.
 
-# 7. Licence
-The source code is released under [GPLv3](https://www.gnu.org/licenses/) license.
+[English](#english) · [中文](#中文)
 
-# 8 . D435i Demo
-```bash
-cd $WORKSPACE_ROOT
-colcon build --packages-up-to camera_model feature_tracker vins_estimator pose_graph benchmark_publisher ar_demo config_pkg
+---
 
-colcon build --packages-select asr_sdm_video_inertial_navigation_systems
-ros2 launch vins_estimator d435i_combined.launch.py
-ros2 bag play $DATASET_DIR/d435if_20260530_080612_resized
-```
+<a id="english"></a>
 
-# 9. SVO-style 稀疏前端改造（Sparse-prior KLT）
+## English
 
-> 在 `feature_tracker` 前端引入 SVO 的稀疏图像对齐（semi-direct photometric alignment）
-> 思想，让 KLT 用更小的搜索窗/金字塔就跑得动，从而**降低前端的算力消耗并提高
-> 在快速运动 / 低纹理场景下的鲁棒性**。后端 VINS-Mono 估计器**完全未改动**——
-> 改造成果只在 `feature_tracker` 内部可见。
+### Overview
 
-## 9.1 目标
+This stack provides monocular visual–inertial odometry and loop closure. The unified entry point is `vins_estimator/launch/vins_launch.py`, which starts:
 
-- 用 photometric alignment（Gauss-Newton + 4-level half-sampled pyramid）
-  估计**帧间旋转 R**，并根据其拟合质量**自适应地缩小 KLT 搜索窗**。
-- KLT 起点位置**不变**（仍用上一帧的 `cur_pts`），仅缩小 `winSize` 和 `maxLevel`。
-- 完全保留 IMU 的帧间 R 先验在 VINS estimator 内部的主导地位——本改造只
-  改前端跟踪成本，**不影响 VINS 的 IMU/Vision 紧耦合**。
-- 后端 VINS estimator 收到的特征点仍然是 KLT sub-pixel 输出，BA cost 行为
-  与原始 VINS 一致。
+`feature_tracker` → `vins_estimator` → `pose_graph` + `rviz2`
 
-## 9.2 改造流程
-
-原版（`feature_tracker.cpp`）每帧 KLT 用 21×21 搜索窗、3-level 金字塔：
-
-```cpp
-cv::calcOpticalFlowPyrLK(cur_img, forw_img, cur_pts, forw_pts,
-                          status, err, cv::Size(21, 21), 3);
-```
-
-改造后：
-
-```
-1. sparse align 跑在前
-   - 输入：prev_img 4-level pyramid (复用上一帧的) + cur_img pyramid +
-          cur_pts (前帧像素) + IMU 帧间 R (R_prev_cur_) + fx/fy/cx/cy
-   - 输出：R_k_kminus1, t_k_kminus1, final_chi2
-   - 复用 prev_pyr_：跨帧只 buildHalfSamplePyramid 一次 (cur 那张)
-   - 默认参数：patch_size=2, max_level=2, max_iter=4, chi2_thresh=50
-2. 根据 final_chi2 决定 KLT 搜索窗
-   - chi2 < 5   → 5×5, 1 level
-   - chi2 < 15  → 9×9, 1 level
-   - chi2 < 50  → 15×15, 2 levels
-   - sparse fail → fallback 到 21×21, 3 levels（原版）
-3. KLT 起点仍是 cur_pts，搜索窗变小 → sub-pixel 输出和原版一致
-```
-
-## 9.3 改动文件
-
-| 文件 | 改动 |
+| Package | Role |
 |---|---|
-| `feature_tracker/src/feature_tracker.h` | 新增 `saved_prev_pyr_`、`R_prev_cur_`、IMU preintegrator、KLT/sparse 统计字段 |
-| `feature_tracker/src/feature_tracker.cpp` | 调换顺序：sparse align 在 KLT 之前；复用 prev pyramid；按 chi2 选 win/level；周期性 INFO 统计 |
-| `feature_tracker/src/sparse_img_align.*` | 新增（半直接 photometric alignment，与 SVO 一致） |
-| `feature_tracker/src/imu_preint.*` | 新增（极简 IMU 帧间 R 预积分） |
-| `vins_estimator/launch/d435i_combined.launch.py` | 新增 `enable_sparse1:=1` 参数：起两条 VINS 链路（ORIGINAL 和 SPARSE1），共享同一个 bag input |
+| `camera_model` | Camodocal camera models |
+| `feature_tracker` | Front-end tracking (KLT, optional sparse alignment) |
+| `vins_estimator` | Sliding-window VIO + launch entry |
+| `pose_graph` | Loop closure / pose graph |
+| `config_pkg` | Shared configs, calibration, RViz, support files |
+| `benchmark_publisher` | EuRoC ground-truth playback (optional) |
+| `ar_demo` | AR demo (optional) |
 
-## 9.4 启动方法
+`config_pkg` exists because ROS 2 `get_package_share_directory()` resolves install-space paths; configs and support files must be installed, not read from `src/`.
 
-最简：一键起两条链路（ORIGINAL vs SPARSE1），共用 bag。
+![mh01](config_pkg/config/gif/vins_ros2_mh01.gif)
+![mh02](config_pkg/config/gif/vins_ros2_mh02.gif)
+
+### Prerequisites
+
+| Item | Suggested |
+|---|---|
+| OS | Ubuntu 24.04 |
+| ROS 2 | Jazzy |
+| OpenCV | 4.x |
+| Ceres Solver | 2.x (or system package) |
+| Eigen | 3.x |
+
+Older Foxy / Ubuntu 20.04 setups may still build, but this tree is maintained against Jazzy.
+
+### Build
+
+From the workspace root:
 
 ```bash
-cd $WORKSPACE_ROOT
 source /opt/ros/jazzy/setup.bash
+colcon build --packages-up-to \
+  camera_model feature_tracker vins_estimator pose_graph \
+  benchmark_publisher ar_demo config_pkg
 source install/setup.bash
+```
 
-# 1) build —— 首次构建需要把 VINS 完整链都编一遍。
-# 单独 build feature_tracker 是不够的，d435i_combined.launch.py
-# 会通过 ament_index 找 config_pkg/vins_estimator/pose_graph 的
-# install 目录（不能用 src/），缺一个就报
-# "package 'config_pkg' not found" 然后 launch 整个不启。
-#
-# a) 增量：只重建本次改了源码的包（已经 build 过全链时用这个）
+Incremental rebuild after front-end changes:
+
+```bash
 colcon build --packages-select feature_tracker
-
-# b) 干净环境 / 第一次构建：把 VINS 完整链全部 build
-colcon build --packages-up-to camera_model feature_tracker \
-                                 vins_estimator pose_graph \
-                                 benchmark_publisher ar_demo config_pkg
-
-# 2) launch（同时跑 ORIGINAL + SPARSE1，对比用）
-ros2 launch asr_sdm_video_inertial_navigation_systems vins_estimator/d435i_combined.launch.py enable_sparse1:=1
-
-# 3) 另起一个终端跑 bag
-ros2 bag play $DATASET_DIR/d435if_20260530_080612_resized/d435if_20260530_080612_resized_0.mcap --rate 1.0
+source install/setup.bash
 ```
 
-输出分别落在 `$OUTPUT_DIR/original/` 和 `$OUTPUT_DIR/sparse1/`，便于对比轨迹 csv。
+### Quick start
 
-只跑 ORIGINAL（关闭 SPARSE1）：
+Launch config presets live under `vins_estimator/config/`:
 
-```bash
-ros2 launch asr_sdm_video_inertial_navigation_systems vins_estimator/d435i_combined.launch.py enable_sparse1:=0
-```
+| Preset | Sparse (default) | Typical use |
+|---|---|---|
+| `vins.yaml` | off | EuRoC |
+| `vins_d435i.yaml` | on | RealSense D435i |
 
-只跑 SPARSE1（ORIGINAL 不起，节省资源）：
+#### EuRoC
 
-```bash
-ros2 launch asr_sdm_video_inertial_navigation_systems vins_estimator/d435i_combined.launch.py enable_sparse1:=1 skip_original:=1
-```
-
-## 9.5 效果（95s D435i bag，1x 速率）
-
-| 指标 | ORIGINAL | SPARSE1 | 变化 |
-|---|---|---|---|
-| **KLT mean cost** | 1.09ms | **0.89ms** | **-18%** |
-| **KLT 搜索窗** | 21×21 | 14.4×14.4 | **-53%** |
-| **KLT 金字塔** | 3.0 level | 1.91 level | **-36%** |
-| sparse pipeline cost | – | 0.97ms | +0.97ms |
-| sparse 成功率 | – | **100% (2920/2920)** | |
-| sparse mean_chi2 | – | 17.77 | |
-| sparse mean_nmeas | – | 537 像素/帧 | |
-| **VINS 轨迹** | baseline | 路径长度差 0.13%、端到端位移差 0.4% | 一致 |
-| **VINS init** | 1 次成功 | 1 次成功 | |
-| VINS reboot / big bias | 0 | 0 | |
-
-**总账**（慢速纹理丰富场景下）：KLT 节省 0.20ms，sparse 自身 +0.97ms，**总 +0.77ms/帧（慢 70%）**。
-但在**快速运动**或**低纹理**场景下，sparse 提供的 R 先验会让 KLT 起点更接近真值、
-不再需要 21 像素大窗搜索，**速度提升和鲁棒性收益才会体现**（这部分用 0.5x/2x bag
-速率可以进一步验证）。
-
-**总结**：本改造在**保持 VINS-Mono 后端完整一致**的前提下，把前端 KLT 的搜索范围
-砍掉一半、深度砍掉 1/3；sparse 自身额外 ~1ms/帧的代价换来的是更稳的 KLT 起点
-预测，是为后续在快速运动场景下使用更激进 KLT 窗、或者把 sparse R publish 给
-VINS 当帧间 R 先验（方向 B）打基础的中间步骤。
-
-# 10. 统一启动入口 `vins_launch.py`
-
-`vins_estimator/launch/vins_launch.py` 是一条不带 D435i 偏见的一键启动入口：
-- 同一份 launch 既能跑 EuRoC 也能跑 D435i / 自定义 rosbag / mcap。
-- 通过 `config_file` 参数指定数据集对应的 VINS yaml（image_topic / imu_topic /
-  `model_type` + `distortion_parameters` + `projection_parameters` +
-  `image_width/height` 都从这一份 yaml 读）。
-- `enable_sparse:=1` 切到第 9 节描述的 SVO-style sparse photometric alignment
-  前端；`enable_sparse:=0` 走原始 KLT 路线。
-- 启动时会把 `config_file` 拷贝到 `install/config_pkg/share/config_pkg/config/`
-  下，必要时追加 `# Sparse image alignment` 小节（已有则覆盖），
-  之后用这份 materialized yaml 喂给 feature_tracker / vins_estimator / pose_graph。
-
-## 10.1 用法
-
-Launch 默认配置在 `vins_estimator/config/vins.yaml`（`params_file`、`namespace`、
-`sparse_align`、`pose_graph` 等）。修改该文件后重新 `colcon build vins_estimator`。
+Convert ROS 1 bags to ROS 2 first (e.g. with [rosbags](https://pypi.org/project/rosbags/)). Download datasets from [EuRoC MAV](https://projects.asl.ethz.ch/datasets/doku.php?id=kmavvisualinertialdatasets).
 
 ```bash
-# EuRoC（默认）
+# Terminal 1
+ros2 launch vins_estimator vins_launch.py
+
+# Enable sparse front end for this run
 ros2 launch vins_estimator vins_launch.py enable_sparse:=1
 
-# 仅 feature tracker + rviz2
-ros2 launch feature_tracker feature_tracker.launch.py
+# Terminal 2
+ros2 bag play /path/to/MH_01_easy
+```
 
-# 显式覆盖参数文件
+#### RealSense D435i
+
+```bash
+# Terminal 1
+ros2 launch vins_estimator vins_launch.py vins_launch_config:=vins_d435i.yaml
+
+# Terminal 2
+ros2 bag play /path/to/your_d435i_bag
+```
+
+#### Feature tracker only
+
+```bash
+ros2 launch feature_tracker feature_tracker.launch.py
+```
+
+### Launch arguments
+
+```bash
+ros2 launch vins_estimator vins_launch.py --show-args
+```
+
+| Argument | Default | Meaning |
+|---|---|---|
+| `vins_launch_config` | `vins.yaml` | Launch preset under `vins_estimator/config/` |
+| `params_file` | from preset | Runtime params yaml (relative to `config_pkg` unless absolute) |
+| `calibration_file` | from preset | OpenCV / camodocal calibration yaml |
+| `config_file` | empty | Legacy single OpenCV yaml; overrides `params_file` when set |
+| `enable_sparse` | empty | `0` / `1` override; empty = use preset (`enable_sparse` in yaml) |
+
+Examples:
+
+```bash
+# Explicit params + calibration
 ros2 launch vins_estimator vins_launch.py \
   params_file:=config/euroc/euroc_config.yaml \
   calibration_file:=config/euroc/euroc_cam_calibration.yaml
 
-# 旧版 OpenCV 单文件配置（向后兼容）
+# Legacy OpenCV single-file config
 ros2 launch vins_estimator vins_launch.py \
   config_file:=/path/to/euroc_config_opencv.yaml
 ```
 
-## 10.2 相机校准文件选择
+Edit presets in `vins_estimator/config/*.yaml`, then rebuild `vins_estimator` (or use `--symlink-install`).
 
-`feature_tracker` 内部用 camodocal 解析相机内参 + 畸变。
-解析来源由 launch 参数 `camera_calibration_file` 控制：
+### Namespace and topics
 
-- **不传**（默认）：使用 `config_file` 本身作为校准文件。前提是这份 yaml
-  是 camodocal 兼容的 OpenCV YAML（`model_type` + `distortion_parameters` +
-  `projection_parameters` + `image_width`/`image_height`），其他 VINS
-  字段（`imu_topic`、`extrinsicRotation` 等）会被 camodocal 静默忽略。
-  EuRoC / D435i 自带的 `euroc_config.yaml` / `realsense_d435i_config.yaml`
-  都满足此要求。
-- **显式传入**：把它指向单独的校准 yaml 即可。
+Default namespace: `/localization/video_inertial_navigation_systems`
 
-> **历史 bug 修复**：之前 `feature_tracker` 内部把校准文件硬编码为
-> `config_pkg/config/realsense/d435i_cam_calibration.yaml`，导致换数据集时
-> feature_tracker 仍然用 D435i 的 640×480 内参（fx=453 / fy=603.9 / k1=0）
-> 处理 EuRoC 752×480 灰度图，几何完全错位、轨迹瞬间漂到几十米外。
-> 该硬编码已删除，由 `camera_calibration_file` launch 参数替代。
+| Topic | Description |
+|---|---|
+| `.../odometry` | VIO odometry |
+| `.../path` | Trajectory path |
+| `.../imu_propagate` | IMU-propagated pose |
+| `.../feature` | Tracked features |
+| `.../sparse_rot` | Sparse-align rotation (when enabled) |
 
-## 10.3 启动示例
+RViz defaults follow this namespace (`config_pkg/config/vins_euroc_rviz.rviz`).
+
+### Camera calibration
+
+`feature_tracker` loads intrinsics / distortion via camodocal.
+
+- Default: `calibration_file` from the launch preset (or `config_file` in legacy mode).
+- EuRoC and D435i presets ship matching calibration yaml under `config_pkg/config/`.
+- Prefer the launch `calibration_file` argument over hardcoding paths; historical D435i hardcoding mixed datasets and broke EuRoC geometry.
+
+### Sparse front end (SVO-style)
+
+Optional photometric sparse image alignment runs **before** KLT in `feature_tracker` only. The VINS estimator backend is unchanged: it still receives KLT sub-pixel features.
+
+Pipeline:
+
+1. Build / reuse a half-sampled pyramid; optionally use an IMU inter-frame rotation prior.
+2. Run Gauss–Newton sparse alignment → `R`, `t`, `chi2`.
+3. Adapt KLT `winSize` / `maxLevel` from `chi2` (fallback to 21×21 / 3 levels on failure).
+4. KLT start points remain previous-frame pixels; only the search window shrinks.
+
+Key sources:
+
+| File | Change |
+|---|---|
+| `feature_tracker/src/sparse_img_align.*` | Semi-direct photometric alignment |
+| `feature_tracker/src/imu_preintegrate.*` | Lightweight IMU rotation preintegration |
+| `feature_tracker/src/feature_tracker.cpp` | Sparse → adaptive KLT order |
+
+Toggle sparse at launch (`enable_sparse:=0/1`) or in the preset / runtime yaml (`use_sparse_align`).
+
+Indicative D435i bag result (slow, textured scene): smaller KLT window/depth with trajectory close to baseline; sparse itself adds ~1 ms/frame, so net win shows mainly under fast motion / low texture.
+
+### Custom datasets
+
+1. Add params + calibration under `config_pkg/config/<dataset>/`.
+2. Point `params_file` / `calibration_file` at them (CLI or a new `vins_estimator/config/*.yaml` preset).
+3. Rebuild affected packages if install space is not symlinked.
+4. Ensure `image_topic`, `imu_topic`, image size, and calibration match the bag.
+
+### Ground truth (EuRoC)
+
+Set `sequence_name` in `benchmark_publisher/launch/benchmark_publisher.launch.py`, rebuild, then:
 
 ```bash
-# EuRoC
+ros2 launch vins_estimator vins_launch.py
+ros2 launch benchmark_publisher benchmark_publisher.launch.py
+ros2 bag play /path/to/MH_01_easy
+```
+
+### Acknowledgements
+
+Based on [VINS-Mono](https://github.com/HKUST-Aerial-Robotics/VINS-Mono), [Ceres Solver](http://ceres-solver.org/), [DBoW2](https://github.com/dorian3d/DBoW2), and [camodocal](https://github.com/hengli/camodocal). ROS 2 porting also drew from [VINS-Fusion-ROS2](https://github.com/zinuok/VINS-Fusion-ROS2), [vins-mono-ros2](https://github.com/hitzzq/vins-mono-ros2), and [VINS-MONO-ROS2](https://github.com/dongbo19/VINS-MONO-ROS2).
+
+### License
+
+Released under [GPLv3](https://www.gnu.org/licenses/).
+
+---
+
+<a id="中文"></a>
+
+## 中文
+
+### 概述
+
+本仓库是面向 ASR-SDM 的 [VINS-Mono](https://github.com/HKUST-Aerial-Robotics/VINS-Mono) ROS 2 移植，并可选开启 SVO 风格的稀疏图像对齐前端。
+
+统一入口为 `vins_estimator/launch/vins_launch.py`，会启动：
+
+`feature_tracker` → `vins_estimator` → `pose_graph` + `rviz2`
+
+| 包名 | 职责 |
+|---|---|
+| `camera_model` | Camodocal 相机模型 |
+| `feature_tracker` | 前端跟踪（KLT，可选稀疏对齐） |
+| `vins_estimator` | 滑动窗口 VIO + 启动入口 |
+| `pose_graph` | 回环 / 位姿图 |
+| `config_pkg` | 共享配置、标定、RViz、资源文件 |
+| `benchmark_publisher` | EuRoC 真值回放（可选） |
+| `ar_demo` | AR 演示（可选） |
+
+ROS 2 的 `get_package_share_directory()` 只能定位到 **install** 目录，因此配置与资源集中放在 `config_pkg` 中安装，而不是直接从 `src/` 读取。
+
+![mh01](config_pkg/config/gif/vins_ros2_mh01.gif)
+![mh02](config_pkg/config/gif/vins_ros2_mh02.gif)
+
+### 依赖
+
+| 项目 | 建议版本 |
+|---|---|
+| 系统 | Ubuntu 24.04 |
+| ROS 2 | Jazzy |
+| OpenCV | 4.x |
+| Ceres Solver | 2.x（或系统包） |
+| Eigen | 3.x |
+
+旧版 Foxy / Ubuntu 20.04 或许可编过，但当前以 Jazzy 为准。
+
+### 编译
+
+在工作空间根目录：
+
+```bash
+source /opt/ros/jazzy/setup.bash
+colcon build --packages-up-to \
+  camera_model feature_tracker vins_estimator pose_graph \
+  benchmark_publisher ar_demo config_pkg
+source install/setup.bash
+```
+
+只改前端时的增量编译：
+
+```bash
+colcon build --packages-select feature_tracker
+source install/setup.bash
+```
+
+### 快速开始
+
+启动预设位于 `vins_estimator/config/`：
+
+| 预设 | 稀疏对齐默认 | 典型用途 |
+|---|---|---|
+| `vins.yaml` | 关闭 | EuRoC |
+| `vins_d435i.yaml` | 开启 | RealSense D435i |
+
+#### EuRoC
+
+请先把 ROS 1 bag 转为 ROS 2（例如 [rosbags](https://pypi.org/project/rosbags/)）。数据集见 [EuRoC MAV](https://projects.asl.ethz.ch/datasets/doku.php?id=kmavvisualinertialdatasets)。
+
+```bash
+# 终端 1
+ros2 launch vins_estimator vins_launch.py
+
+# 本次运行打开稀疏前端
 ros2 launch vins_estimator vins_launch.py enable_sparse:=1
-ros2 bag play /path/to/MH_01_easy_ros2
+
+# 终端 2
+ros2 bag play /path/to/MH_01_easy
 ```
 
-注意：所有节点默认落在 `/localization/video_inertial_navigation_systems` namespace 下（与默认 rviz 配置匹配），
-公共话题如 `/localization/video_inertial_navigation_systems/odometry` / `/localization/video_inertial_navigation_systems/path`。
+#### RealSense D435i
 
-由于程序整体架构有变化，原来的命令已经不能使用，请使用最新的命令
-
-## How to start system
-```sh
-# 完整 pipeline - EuRoC
-ros2 launch vins_estimator vins_launch.py
-# 完整 pipeline - D435i
+```bash
+# 终端 1
 ros2 launch vins_estimator vins_launch.py vins_launch_config:=vins_d435i.yaml
+
+# 终端 2
+ros2 bag play /path/to/your_d435i_bag
 ```
-`enable_sparse: true` is configured in vins_estimator/config/.yaml, default is `true`.
 
-
-# 完整 sparse ON/OFF 对比实验
-下面给出在 *EuRoC* 与 *TUM-VI* 上的最小可复现流程。所有 `<...>` 均为**占位符**，请按本地实际路径替换：
-
-- `<path_to_workspace>` ：colcon workspace 根目录（含 `src/`、`install/`）
-- `<path_to_dataset>`   ：rosbag 所在根目录（包含 `MH_03_medium_ros2/`、`room1_512_16/` 等子目录）
-- `<path_to_vins_yaml>` ：本仓库 `src/.../vins_estimator/config/vins.yaml`
-
-> 说明：以下示例与 README 第 9、10 节的 launch 入口完全等价，只是把环境变量写法的 `$WORKSPACE_ROOT` / `$DATASET_DIR` 显式展开为占位符，方便新人无需再去查 `~/.bashrc` 也能跑通。
-
-实验 1：sparse ON（当前 `enable_sparse: true`）
+#### 仅前端
 
 ```bash
-# 终端 1 — 启动 VINS
-cd <path_to_workspace>
-source install/setup.bash
-rm -f output/vins_result_loop.csv
+ros2 launch feature_tracker feature_tracker.launch.py
+```
+
+### 启动参数
+
+```bash
+ros2 launch vins_estimator vins_launch.py --show-args
+```
+
+| 参数 | 默认 | 含义 |
+|---|---|---|
+| `vins_launch_config` | `vins.yaml` | `vins_estimator/config/` 下的启动预设 |
+| `params_file` | 来自预设 | 运行时参数 yaml（相对 `config_pkg`，或绝对路径） |
+| `calibration_file` | 来自预设 | OpenCV / camodocal 标定 yaml |
+| `config_file` | 空 | 旧版单文件 OpenCV yaml；非空时覆盖 `params_file` |
+| `enable_sparse` | 空 | `0` / `1` 覆盖；空则使用预设里的 `enable_sparse` |
+
+示例：
+
+```bash
+# 显式指定参数与标定
+ros2 launch vins_estimator vins_launch.py \
+  params_file:=config/euroc/euroc_config.yaml \
+  calibration_file:=config/euroc/euroc_cam_calibration.yaml
+
+# 旧版 OpenCV 单文件配置
+ros2 launch vins_estimator vins_launch.py \
+  config_file:=/path/to/euroc_config_opencv.yaml
+```
+
+修改 `vins_estimator/config/*.yaml` 后需重新编译 `vins_estimator`（使用 `--symlink-install` 时可直接重开 launch）。
+
+### 命名空间与话题
+
+默认命名空间：`/localization/video_inertial_navigation_systems`
+
+| 话题 | 说明 |
+|---|---|
+| `.../odometry` | VIO 里程计 |
+| `.../path` | 轨迹 |
+| `.../imu_propagate` | IMU 递推位姿 |
+| `.../feature` | 跟踪特征 |
+| `.../sparse_rot` | 稀疏对齐旋转（开启时） |
+
+默认 RViz 配置与该命名空间一致（`config_pkg/config/vins_euroc_rviz.rviz`）。
+
+### 相机标定
+
+`feature_tracker` 通过 camodocal 读取内参与畸变。
+
+- 默认使用启动预设中的 `calibration_file`（旧模式则用 `config_file`）。
+- EuRoC / D435i 预设在 `config_pkg/config/` 下有对应标定文件。
+- 请用 launch 参数传入标定路径，不要硬编码；历史上写死 D435i 标定会导致 EuRoC 几何错位。
+
+### 稀疏前端（SVO 风格）
+
+可选的光度稀疏图像对齐仅作用于 `feature_tracker`，在 KLT **之前**运行。VINS 后端未改动，仍接收 KLT 亚像素特征。
+
+流程：
+
+1. 构建 / 复用半采样金字塔；可选使用 IMU 帧间旋转先验。
+2. Gauss–Newton 稀疏对齐 → `R`、`t`、`chi2`。
+3. 按 `chi2` 自适应缩小 KLT 的 `winSize` / `maxLevel`（失败则回退 21×21 / 3 层）。
+4. KLT 起点仍为上一帧像素，仅搜索窗变小。
+
+关键源码：
+
+| 文件 | 说明 |
+|---|---|
+| `feature_tracker/src/sparse_img_align.*` | 半直接光度对齐 |
+| `feature_tracker/src/imu_preintegrate.*` | 轻量 IMU 旋转预积分 |
+| `feature_tracker/src/feature_tracker.cpp` | 稀疏对齐 → 自适应 KLT |
+
+可通过 `enable_sparse:=0/1`，或在预设 / 运行 yaml 中设置 `use_sparse_align`。
+
+在较慢、纹理丰富的 D435i bag 上：KLT 窗口与金字塔深度下降，轨迹与基线接近；稀疏自身约 +1 ms/帧，净收益更多体现在快速运动或低纹理场景。
+
+### 自定义数据集
+
+1. 在 `config_pkg/config/<dataset>/` 添加参数与标定。
+2. 通过 CLI 或新建 `vins_estimator/config/*.yaml` 预设指向这些文件。
+3. 若未使用 symlink install，请重新编译相关包。
+4. 确认 `image_topic`、`imu_topic`、图像尺寸与标定与 bag 一致。
+
+### 真值对比（EuRoC）
+
+修改 `benchmark_publisher/launch/benchmark_publisher.launch.py` 中的 `sequence_name`，重新编译后：
+
+```bash
 ros2 launch vins_estimator vins_launch.py
-
-# 终端 2 — 播放 bag
-cd <path_to_workspace>
-source install/setup.bash
-ros2 bag play <path_to_dataset>/MH_03_medium_ros2/MH_03_medium_ros2.db3
+ros2 launch benchmark_publisher benchmark_publisher.launch.py
+ros2 bag play /path/to/MH_01_easy
 ```
 
-等 bag 播完（约 135 秒），再等 3 秒让 `pose_graph` 写完，然后 Ctrl+C 两个终端。
+### 致谢
 
-保存 sparse ON 的结果：
+基于 [VINS-Mono](https://github.com/HKUST-Aerial-Robotics/VINS-Mono)、[Ceres Solver](http://ceres-solver.org/)、[DBoW2](https://github.com/dorian3d/DBoW2)、[camodocal](https://github.com/hengli/camodocal)。ROS 2 移植亦参考 [VINS-Fusion-ROS2](https://github.com/zinuok/VINS-Fusion-ROS2)、[vins-mono-ros2](https://github.com/hitzzq/vins-mono-ros2)、[VINS-MONO-ROS2](https://github.com/dongbo19/VINS-MONO-ROS2)。
 
-```bash
-cp <path_to_workspace>/output/vins_result_loop.csv <path_to_workspace>/output/sparse_on/vins_sparse_on.csv
-wc -l <path_to_workspace>/output/sparse_on/vins_sparse_on.csv
-```
+### 许可证
 
-实验 2：sparse OFF
-
-把 `<path_to_vins_yaml>` 中 `enable_sparse: true` 改成 `false`（也可以直接改 `euroc_config.yaml` 的 `use_sparse_align` 参数）：
-
-```bash
-sed -i 's/enable_sparse: true/enable_sparse: false/' <path_to_vins_yaml>
-# 重新编译（也可以直接改 euroc_config.yaml 的 use_sparse_align 参数）
-```
-
-然后重复上面的 VINS 启动 + bag 播放流程，最后：
-
-```bash
-cp <path_to_workspace>/output/vins_result_loop.csv <path_to_workspace>/output/sparse_off/vins_sparse_off.csv
-```
-
-实验 3：重新绘图 / 跟踪性能
-
-```bash
-cd <path_to_workspace>
-python3 experiments/sparse_compare/scripts/plot_compare.py
-
-cd <path_to_workspace> && python3 experiments/sparse_compare/scripts/plot_compare.py \
-  --seq MH04 --align-mode gt_align --out output/MH04/gt_align_test
-
-python3 experiments/sparse_compare/scripts/track_perf.py \
-  --seq MH01 --mode sparse_off \
-  --bag <path_to_dataset>/MH_04_difficult_ros2/MH_04_difficult_ros2.db3 \
-  --runs 1 --bin-start 500 --bin-count 3
-
-# TUM-VI sparse off（推荐加 --no-rviz）
-python3 experiments/sparse_compare/scripts/track_perf.py \
-  --seq room1_512_16 --mode sparse_off --no-rviz \
-  --bag <path_to_dataset>/room1_512_16/room1_512_16.db3 \
-  --runs 1 --bin-start 500 --bin-count 3
-
-# TUM-VI sparse on（同样选 vins_tumvi.yaml，enable_sparse:=1）
-python3 experiments/sparse_compare/scripts/track_perf.py \
-  --seq room1_512_16 --mode sparse_on --no-rviz \
-  --bag <path_to_dataset>/room1_512_16/room1_512_16.db3 \
-  --runs 1 --bin-start 500 --bin-count 3
-
-# EuRoC 路径完全兼容旧用法
-python3 experiments/sparse_compare/scripts/track_perf.py \
-  --seq MH04 --mode sparse_off \
-  --bag <path_to_dataset>/MH_04_difficult_ros2/MH_04.db3 \
-  --runs 5 --bin-start 1500 --bin-count 3
+以 [GPLv3](https://www.gnu.org/licenses/) 发布。
