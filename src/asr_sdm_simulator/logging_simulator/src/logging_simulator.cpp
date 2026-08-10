@@ -303,6 +303,7 @@ main(int argc, char** argv)
   */
 
   rclcpp::Time next_odom_pub_time = n->now();
+  try {
   while (rclcpp::ok())
   {
     rclcpp::spin_some(n);
@@ -358,6 +359,10 @@ main(int argc, char** argv)
 
     r.sleep();
   }
+  // Catch the exception thrown by r.sleep() when rclcpp::shutdown() was
+  // called (SIGINT handler sets context to SHUTDOWN, making ok() return false
+  // while r.sleep() still tries to sleep — a rclcpp bug).  Catch and exit.
+  } catch (const std::exception &) {}
 
   rclcpp::shutdown();
   return 0;

@@ -7,7 +7,7 @@ The robot model and its controller come from the package named by the robot_mode
 argument, which defaults to asr_sdm:
 
     ros2 launch logging_simulator logging_simulator_launch.py robot_model:=asr_sdm
-
+    10|
 That package must ship launch/<robot_model>_description.launch.py, which is included here
 and reads the same config file.
 
@@ -17,7 +17,7 @@ odometry topic into the world->base transform. Pick the source with:
     odom_source:=auto      whichever source published most recently (default)
     odom_source:=control   /control/asr_sdm/odom, the kinematic controller
     odom_source:=vins      /localization/video_inertial_navigation_systems/odometry
-
+    20|
 odom_visualization subscribes to the selected topics and only it broadcasts that
 transform, so the sources never fight over TF. With auto, run either stack alone
 and the model follows it; run both and the pose alternates between the estimates.
@@ -27,8 +27,10 @@ Optional stacks, each included from <package>/launch/<package>.launch.py:
     control:=enable    asr_sdm_control_manager, the kinematic controller (default on)
     teleop:=enable     asr_sdm_teleop, the gamepad chain (default off)
     planning:=enable   asr_sdm_planning_manager, topological replanning (default off)
+    30|    vins:=enable       vins_estimator, VIO localization with its own RViz window (default off)
 
     ros2 launch logging_simulator logging_simulator_launch.py teleop:=enable
+    ros2 launch logging_simulator logging_simulator_launch.py vins:=enable use_sim_time:=true
 """
 
 from __future__ import annotations
@@ -39,11 +41,11 @@ from typing import Any
 import yaml
 from ament_index_python.packages import PackageNotFoundError, get_package_share_directory
 from launch import LaunchDescription
-from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription, OpaqueFunction
+from launch.actions import DeclareLaunchArgument, GroupAction, IncludeLaunchDescription, OpaqueFunction
 from launch.conditions import IfCondition
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.substitutions import LaunchConfiguration
-from launch_ros.actions import Node
+from launch_ros.actions import Node, SetParameter
 
 
 DEFAULT_SIM_ODOM = '/control/asr_sdm/odom'
@@ -70,30 +72,6 @@ def _flatten_params(prefix: str, value: Any) -> dict[str, Any]:
     return out
 
 
-def _make_map_generator_node(cfg: dict[str, Any], map_generator_config: str) -> Node:
-    topics = cfg.get('topics', {})
-    sim = cfg.get('simulator', {})
-    features = cfg.get('features', {})
-    return Node(
-        package='asr_sdm_map_generator',
-        executable='random_forest_test',
-        name='random_map_sensing',
-        output='screen',
-        emulate_tty=True,
-        condition=_if_bool(bool(features.get('use_asr_sdm_map_generator', True))),
-        parameters=[
-            map_generator_config,
-            {
-                'init_state_x': float(sim.get('init_state_x', -5.0)),
-                'init_state_y': float(sim.get('init_state_y', 0.0)),
-                'sensing.enable_click_map': bool(features.get('enable_click_map', True)),
-                'topics.add_static_obstacle': topics.get('add_static_obstacle', '/simulator/logging_simulator/add_static_obstacle'),
-            },
-        ],
-        remappings=[
-            ('odometry', topics.get('visual_slam_odom', '/visual_slam/odom')),
-        ],
-    )
 
 
 def _make_logging_simulator_node(cfg: dict[str, Any]) -> Node:
@@ -203,12 +181,7 @@ def _make_odom_visualization_node(cfg: dict[str, Any], odom_source: str) -> Node
 
 
 def _make_robot_model_action(robot_model: str, config_path: str) -> IncludeLaunchDescription:
-    """Bring up the robot model and its controller from the selected robot package.
-
-    robot_model names a package that ships launch/<robot_model>_description.launch.py.
-    The included launch reads the same config file, so the robot_model,
-    kinematic_controller and topics sections below stay authoritative here.
-    """
+    """Bring up the robot model and its controller from the selected robot package."""
     try:
         robot_model_share = get_package_share_directory(robot_model)
     except PackageNotFoundError as error:
@@ -232,7 +205,8 @@ def _make_optional_include(
     value: str,
     package: str,
     launch_arguments: dict[str, str] | None = None,
-) -> list[IncludeLaunchDescription]:
+    set_parameters: dict[str, Any] | None = None,
+) -> list[GroupAction]:
     """Include <package>/launch/<package>.launch.py when the argument is 'enable'."""
     if value != 'enable':
         return []
@@ -242,11 +216,72 @@ def _make_optional_include(
     except PackageNotFoundError as error:
         raise RuntimeError(f'{argument}:=enable needs the {package} package') from error
 
-    return [IncludeLaunchDescription(
-        PythonLaunchDescriptionSource(
-            os.path.join(package_share, 'launch', f'{package}.launch.py')),
-        launch_arguments=(launch_arguments or {}).items(),
-    )]
+    actions: list[Any] = [
+        IncludeLaunchDescription(
+            PythonLaunchDescriptionSource(
+                os.path.join(package_share, 'launch', f'{package}.launch.py')),
+            launch_arguments=(launch_arguments or {}).items(),
+        ),
+    ]
+    for name, val in (set_parameters or {}).items():
+        actions.append(SetParameter(name=name, value=val))
+
+    return [GroupAction(actions)]
+
+
+# Default EuRoC parameter values used when launching VINS for bag replay of
+# EuRoC sequences. These get pushed onto every VINS node via SetParameter.
+_VINS_DEFAULT_EUROC_PARAMS: dict[str, Any] = {
+    'image_topic': '/cam0/image_raw',
+    'imu_topic': '/imu0',
+    'image_height': 480,
+    'image_width': 752,
+    'loop_closure': 0,
+    'fast_relocalization': 0,
+    'visualize_camera_size': 0.4,
+}
+
+
+def launch_setup(context) -> list[Any]:
+    robot_model = LaunchConfiguration('robot_model').perform(context)
+    odom_source = LaunchConfiguration('odom_source').perform(context)
+    control = LaunchConfiguration('control').perform(context)
+    teleop = LaunchConfiguration('teleop').perform(context)
+    planning = LaunchConfiguration('planning').perform(context)
+    vins = LaunchConfiguration('vins').perform(context)
+    use_sim_time = LaunchConfiguration('use_sim_time').perform(context) == 'true'
+
+    pkg_share = get_package_share_directory('logging_simulator')
+    config_path = os.path.join(pkg_share, 'config', 'logging_simulator.yaml')
+    rviz_config = os.path.join(pkg_share, 'config', 'rviz.rviz')
+
+    cfg = _load_yaml(config_path)
+
+    return [
+        SetParameter(name='use_sim_time', value=use_sim_time),
+        _make_logging_simulator_node(cfg),
+        _make_so3_control_node(cfg),
+        _make_disturbance_node(cfg),
+        _make_odom_visualization_node(cfg, odom_source),
+        _make_robot_model_action(robot_model, config_path),
+        _make_rviz_node(cfg, rviz_config),
+        *_make_optional_include(
+            'control', control, 'asr_sdm_control_manager',
+            {'config_file': config_path},
+        ),
+        *_make_optional_include('teleop', teleop, 'asr_sdm_teleop'),
+        *_make_optional_include(
+            'planning', planning, 'asr_sdm_planning_manager',
+            {'odom_topic': cfg.get('topics', {}).get('visual_slam_odom', '/visual_slam/odom')},
+        ),
+        *_make_optional_include(
+            'vins', vins, 'vins_estimator',
+            # Force ``config_file=`` to empty so the vins launch falls through
+            # to the ROS-params branch (euroc_config.yaml).
+            launch_arguments={'config_file': ''},
+            set_parameters=_VINS_DEFAULT_EUROC_PARAMS,
+        ),
+    ]
 
 
 def _make_rviz_node(cfg: dict[str, Any], rviz_config: str) -> Node:
@@ -258,40 +293,6 @@ def _make_rviz_node(cfg: dict[str, Any], rviz_config: str) -> Node:
         condition=_if_bool(bool(features.get('use_rviz', True))),
         arguments=['-d', rviz_config],
     )
-
-
-def launch_setup(context) -> list[Any]:
-    robot_model = LaunchConfiguration('robot_model').perform(context)
-    odom_source = LaunchConfiguration('odom_source').perform(context)
-    control = LaunchConfiguration('control').perform(context)
-    teleop = LaunchConfiguration('teleop').perform(context)
-    planning = LaunchConfiguration('planning').perform(context)
-
-    pkg_share = get_package_share_directory('logging_simulator')
-    config_path = os.path.join(pkg_share, 'config', 'logging_simulator.yaml')
-    rviz_config = os.path.join(pkg_share, 'config', 'rviz.rviz')
-    map_generator_config = os.path.join(
-        get_package_share_directory('asr_sdm_map_generator'),
-        'config', 'asr_sdm_map_generator.yaml')
-
-    cfg = _load_yaml(config_path)
-
-    return [
-        _make_map_generator_node(cfg, map_generator_config),
-        _make_logging_simulator_node(cfg),
-        _make_so3_control_node(cfg),
-        _make_disturbance_node(cfg),
-        _make_odom_visualization_node(cfg, odom_source),
-        _make_robot_model_action(robot_model, config_path),
-        *_make_optional_include(
-            'control', control, 'asr_sdm_control_manager', {'config_file': config_path}),
-        *_make_optional_include('teleop', teleop, 'asr_sdm_teleop'),
-        *_make_optional_include(
-            'planning', planning, 'asr_sdm_planning_manager',
-            {'odom_topic': cfg.get('topics', {}).get('visual_slam_odom', '/visual_slam/odom')},
-        ),
-        _make_rviz_node(cfg, rviz_config),
-    ]
 
 
 def generate_launch_description() -> LaunchDescription:
@@ -326,6 +327,20 @@ def generate_launch_description() -> LaunchDescription:
             default_value='disable',
             choices=['enable', 'disable'],
             description='Start asr_sdm_planning_manager planning chain',
+        ),
+        DeclareLaunchArgument(
+            'vins',
+            default_value='disable',
+            choices=['enable', 'disable'],
+            description='Start vins_estimator VIO pipeline (feature_tracker + '
+                        'vins_estimator + pose_graph + RViz).',
+        ),
+        DeclareLaunchArgument(
+            'use_sim_time',
+            default_value='false',
+            choices=['true', 'false'],
+            description='Use /clock instead of wall clock. '
+                        'Set true when replaying a bag with `ros2 bag play --clock`.',
         ),
         OpaqueFunction(function=launch_setup),
     ])

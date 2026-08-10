@@ -42,6 +42,7 @@ ros2 launch logging_simulator logging_simulator_launch.py --show-args
 | `control` | `enable` / `disable` | `enable` | Starts `asr_sdm_control_manager` (kinematic controller) |
 | `teleop` | `enable` / `disable` | `disable` | Starts `asr_sdm_teleop` (joy driver + teleop node) |
 | `planning` | `enable` / `disable` | `disable` | Starts `asr_sdm_planning_manager` (topological replanning) |
+| `vins` | `enable` / `disable` | `disable` | Starts `vins_estimator` (VIO localization); opens its own RViz window |
 
 Common combinations:
 
@@ -54,6 +55,9 @@ ros2 launch logging_simulator logging_simulator_launch.py teleop:=enable
 
 # Add planning
 ros2 launch logging_simulator logging_simulator_launch.py planning:=enable
+
+# Add VIO localization (opens a second RViz window for VINS)
+ros2 launch logging_simulator logging_simulator_launch.py vins:=enable
 
 # Pin the model pose to one source instead of following whoever publishes
 ros2 launch logging_simulator logging_simulator_launch.py odom_source:=vins
@@ -177,6 +181,7 @@ ros2 launch logging_simulator logging_simulator_launch.py --show-args
 | `control` | `enable` / `disable` | `enable` | 启动 `asr_sdm_control_manager`（运动学控制器） |
 | `teleop` | `enable` / `disable` | `disable` | 启动 `asr_sdm_teleop`（手柄驱动 + teleop 节点） |
 | `planning` | `enable` / `disable` | `disable` | 启动 `asr_sdm_planning_manager`（拓扑重规划） |
+| `vins` | `enable` / `disable` | `disable` | 启动 `vins_estimator`（VIO 定位），自带 RViz 窗口 |
 
 常用组合：
 
@@ -189,6 +194,9 @@ ros2 launch logging_simulator logging_simulator_launch.py teleop:=enable
 
 # 加规划
 ros2 launch logging_simulator logging_simulator_launch.py planning:=enable
+
+# 加 VIO 定位（开启第二个 RViz 窗口）
+ros2 launch logging_simulator logging_simulator_launch.py vins:=enable
 
 # 固定用某一路里程计驱动模型，不再自动跟随
 ros2 launch logging_simulator logging_simulator_launch.py odom_source:=vins
