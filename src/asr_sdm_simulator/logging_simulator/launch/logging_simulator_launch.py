@@ -1,7 +1,34 @@
 #!/usr/bin/env python3
-"""Launch the planning simulator stack.
+"""Launch the logging simulator stack.
 
 Node parameters and topic names live in config/logging_simulator.yaml.
+
+The robot model and its controller come from the package named by the robot_model
+argument, which defaults to asr_sdm:
+
+    ros2 launch logging_simulator logging_simulator_launch.py robot_model:=asr_sdm
+
+That package must ship launch/<robot_model>_description.launch.py, which is included here
+and reads the same config file.
+
+The robot model pose in RViz comes from odom_visualization, which turns one
+odometry topic into the world->base transform. Pick the source with:
+
+    odom_source:=auto      whichever source published most recently (default)
+    odom_source:=control   /control/asr_sdm/odom, the kinematic controller
+    odom_source:=vins      /localization/video_inertial_navigation_systems/odometry
+
+odom_visualization subscribes to the selected topics and only it broadcasts that
+transform, so the sources never fight over TF. With auto, run either stack alone
+and the model follows it; run both and the pose alternates between the estimates.
+
+Optional stacks, each included from <package>/launch/<package>.launch.py:
+
+    control:=enable    asr_sdm_control_manager, the kinematic controller (default on)
+    teleop:=enable     asr_sdm_teleop, the gamepad chain (default off)
+    planning:=enable   asr_sdm_planning_manager, topological replanning (default off)
+
+    ros2 launch logging_simulator logging_simulator_launch.py teleop:=enable
 """
 
 from __future__ import annotations
@@ -10,12 +37,17 @@ import os
 from typing import Any
 
 import yaml
-from ament_index_python.packages import get_package_share_directory
+from ament_index_python.packages import PackageNotFoundError, get_package_share_directory
 from launch import LaunchDescription
-from launch.actions import IncludeLaunchDescription
+from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription, OpaqueFunction
 from launch.conditions import IfCondition
 from launch.launch_description_sources import PythonLaunchDescriptionSource
+from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
+
+
+DEFAULT_SIM_ODOM = '/control/asr_sdm/odom'
+DEFAULT_VINS_ODOM = '/localization/video_inertial_navigation_systems/odometry'
 
 
 def _load_yaml(path: str) -> dict[str, Any]:
@@ -85,7 +117,7 @@ def _make_logging_simulator_node(cfg: dict[str, Any]) -> Node:
             ('imu', topics.get('imu', 'sim/imu')),
             ('force_disturbance', topics.get('force_disturbance', 'force_disturbance')),
             ('moment_disturbance', topics.get('moment_disturbance', 'moment_disturbance')),
-            ('initialpose', topics.get('initialpose', '/initialpose')),
+            ('initialpose', topics.get('initialpose', '/control/initial_pose')),
         ],
     )
 
@@ -136,8 +168,19 @@ def _make_disturbance_node(cfg: dict[str, Any]) -> Node:
     )
 
 
-def _make_odom_visualization_node(cfg: dict[str, Any]) -> Node:
+def _odom_source_topics(cfg: dict[str, Any], odom_source: str) -> list[str]:
+    """Odometry inputs that become the world->base transform of the robot model."""
     topics = cfg.get('topics', {})
+    sim_odom = topics.get('sim_odom', DEFAULT_SIM_ODOM)
+    vins_odom = topics.get('vins_odom', DEFAULT_VINS_ODOM)
+    if odom_source == 'control':
+        return [sim_odom]
+    if odom_source == 'vins':
+        return [vins_odom]
+    return [sim_odom, vins_odom]
+
+
+def _make_odom_visualization_node(cfg: dict[str, Any], odom_source: str) -> Node:
     features = cfg.get('features', {})
     viz = cfg.get('odom_visualization', {})
     color = viz.get('color', {})
@@ -152,37 +195,58 @@ def _make_odom_visualization_node(cfg: dict[str, Any]) -> Node:
             'color.g': float(color.get('g', 0.0)),
             'color.b': float(color.get('b', 0.0)),
             'covariance_scale': float(viz.get('covariance_scale', 100.0)),
+            'odom_topics': _odom_source_topics(cfg, odom_source),
             # Publish world->base TF so the asr_sdm model can follow odometry.
             'tf45': bool(features.get('use_asr_sdm_model', True)),
         }],
-        remappings=[
-            ('odom', topics.get('visual_slam_odom', '/visual_slam/odom')),
-        ],
     )
 
 
-def _make_robot_model_actions(cfg: dict[str, Any], config_path: str) -> list[Any]:
-    features = cfg.get('features', {})
-    enabled = _if_bool(bool(features.get('use_asr_sdm_model', True)))
+def _make_robot_model_action(robot_model: str, config_path: str) -> IncludeLaunchDescription:
+    """Bring up the robot model and its controller from the selected robot package.
 
-    asr_sdm_share = get_package_share_directory('asr_sdm')
+    robot_model names a package that ships launch/<robot_model>_description.launch.py.
+    The included launch reads the same config file, so the robot_model,
+    kinematic_controller and topics sections below stay authoritative here.
+    """
+    try:
+        robot_model_share = get_package_share_directory(robot_model)
+    except PackageNotFoundError as error:
+        raise RuntimeError(
+            f"robot_model:={robot_model} is not an installed package") from error
+
     description_launch = os.path.join(
-        asr_sdm_share, 'launch', 'asr_sdm_description.launch.py')
+        robot_model_share, 'launch', f'{robot_model}_description.launch.py')
+    if not os.path.isfile(description_launch):
+        raise RuntimeError(
+            f"robot_model:={robot_model} does not provide {description_launch}")
 
-    return [
-        IncludeLaunchDescription(
-            PythonLaunchDescriptionSource(description_launch),
-            condition=enabled,
-            launch_arguments={'config_file': config_path}.items(),
-        ),
-        Node(
-            package='joint_state_publisher',
-            executable='joint_state_publisher',
-            name='joint_state_publisher',
-            output='screen',
-            condition=enabled,
-        ),
-    ]
+    return IncludeLaunchDescription(
+        PythonLaunchDescriptionSource(description_launch),
+        launch_arguments={'config_file': config_path}.items(),
+    )
+
+
+def _make_optional_include(
+    argument: str,
+    value: str,
+    package: str,
+    launch_arguments: dict[str, str] | None = None,
+) -> list[IncludeLaunchDescription]:
+    """Include <package>/launch/<package>.launch.py when the argument is 'enable'."""
+    if value != 'enable':
+        return []
+
+    try:
+        package_share = get_package_share_directory(package)
+    except PackageNotFoundError as error:
+        raise RuntimeError(f'{argument}:=enable needs the {package} package') from error
+
+    return [IncludeLaunchDescription(
+        PythonLaunchDescriptionSource(
+            os.path.join(package_share, 'launch', f'{package}.launch.py')),
+        launch_arguments=(launch_arguments or {}).items(),
+    )]
 
 
 def _make_rviz_node(cfg: dict[str, Any], rviz_config: str) -> Node:
@@ -196,7 +260,13 @@ def _make_rviz_node(cfg: dict[str, Any], rviz_config: str) -> Node:
     )
 
 
-def generate_launch_description() -> LaunchDescription:
+def launch_setup(context) -> list[Any]:
+    robot_model = LaunchConfiguration('robot_model').perform(context)
+    odom_source = LaunchConfiguration('odom_source').perform(context)
+    control = LaunchConfiguration('control').perform(context)
+    teleop = LaunchConfiguration('teleop').perform(context)
+    planning = LaunchConfiguration('planning').perform(context)
+
     pkg_share = get_package_share_directory('logging_simulator')
     config_path = os.path.join(pkg_share, 'config', 'logging_simulator.yaml')
     rviz_config = os.path.join(pkg_share, 'config', 'rviz.rviz')
@@ -206,13 +276,56 @@ def generate_launch_description() -> LaunchDescription:
 
     cfg = _load_yaml(config_path)
 
-    actions: list[Any] = [
+    return [
         _make_map_generator_node(cfg, map_generator_config),
         _make_logging_simulator_node(cfg),
         _make_so3_control_node(cfg),
         _make_disturbance_node(cfg),
-        _make_odom_visualization_node(cfg),
-        *_make_robot_model_actions(cfg, config_path),
+        _make_odom_visualization_node(cfg, odom_source),
+        _make_robot_model_action(robot_model, config_path),
+        *_make_optional_include(
+            'control', control, 'asr_sdm_control_manager', {'config_file': config_path}),
+        *_make_optional_include('teleop', teleop, 'asr_sdm_teleop'),
+        *_make_optional_include(
+            'planning', planning, 'asr_sdm_planning_manager',
+            {'odom_topic': cfg.get('topics', {}).get('visual_slam_odom', '/visual_slam/odom')},
+        ),
         _make_rviz_node(cfg, rviz_config),
     ]
-    return LaunchDescription(actions)
+
+
+def generate_launch_description() -> LaunchDescription:
+    return LaunchDescription([
+        DeclareLaunchArgument(
+            'robot_model',
+            default_value='asr_sdm',
+            description='Robot model package name; must provide launch/<name>_description.launch.py',
+        ),
+        DeclareLaunchArgument(
+            'odom_source',
+            default_value='auto',
+            choices=['auto', 'control', 'vins'],
+            description='Odometry that drives the robot model pose: auto follows whichever '
+                        'source published most recently, control pins controller odom, '
+                        'vins pins VINS localization odometry',
+        ),
+        DeclareLaunchArgument(
+            'control',
+            default_value='enable',
+            choices=['enable', 'disable'],
+            description='Start asr_sdm_control_manager kinematic controller (model will not move if disabled)',
+        ),
+        DeclareLaunchArgument(
+            'teleop',
+            default_value='disable',
+            choices=['enable', 'disable'],
+            description='Start asr_sdm_teleop gamepad teleop chain',
+        ),
+        DeclareLaunchArgument(
+            'planning',
+            default_value='disable',
+            choices=['enable', 'disable'],
+            description='Start asr_sdm_planning_manager planning chain',
+        ),
+        OpaqueFunction(function=launch_setup),
+    ])
