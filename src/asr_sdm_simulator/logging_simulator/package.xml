@@ -19,9 +19,14 @@
   <depend>eigen</depend>
 
   <exec_depend>asr_sdm</exec_depend>
+  <exec_depend>asr_sdm_control_manager</exec_depend>
   <exec_depend>asr_sdm_map_generator</exec_depend>
+  <exec_depend>asr_sdm_planning_manager</exec_depend>
+  <exec_depend>asr_sdm_teleop</exec_depend>
   <exec_depend>joint_state_publisher</exec_depend>
+  <exec_depend>odom_visualization</exec_depend>
   <exec_depend>robot_state_publisher</exec_depend>
+  <exec_depend>so3_disturbance_generator</exec_depend>
   <exec_depend>tf2_ros</exec_depend>
   <exec_depend>xacro</exec_depend>
 
