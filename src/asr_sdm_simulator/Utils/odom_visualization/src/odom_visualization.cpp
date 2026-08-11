@@ -1,3 +1,5 @@
+#include <chrono>
+#include <cmath>
 #include <iostream>
 #include <string.h>
 #include <memory>
@@ -25,12 +27,21 @@ static double color_r, color_g, color_b, color_a, cov_scale, scale;
 
 bool   cross_config = false;
 bool   tf45       = false;
+bool   stamp_tf_with_now = true;
 bool   cov_pos    = false;
 bool   cov_vel    = false;
 bool   cov_color  = false;
 bool   origin       = false;
 bool   isOriginSet  = false;
+bool   have_odom_pose = false;
 colvec poseOrigin(6);
+colvec last_tf_pose(6);
+colvec last_tf_q(4);
+double initial_x = 0.0;
+double initial_y = 0.0;
+double initial_z = 0.0;
+double initial_yaw = 0.0;
+double tf_publish_rate = 50.0;
 
 rclcpp::Node::SharedPtr node;
 rclcpp::Publisher<geometry_msgs::msg::PoseStamped>::SharedPtr posePub;
@@ -54,6 +65,82 @@ visualization_msgs::msg::Marker meshROS;
 sensor_msgs::msg::Range         heightROS;
 string _frame_id;
 string active_odom_topic;
+
+void publish_base_tf(const rclcpp::Time& stamp, double x, double y, double z,
+                     double qw, double qx, double qy, double qz)
+{
+  geometry_msgs::msg::TransformStamped transform;
+  transform.header.stamp = stamp;
+  transform.header.frame_id = string("world");
+  transform.child_frame_id = string("base");
+  transform.transform.translation.x = x;
+  transform.transform.translation.y = y;
+  transform.transform.translation.z = z;
+  transform.transform.rotation.w = qw;
+  transform.transform.rotation.x = qx;
+  transform.transform.rotation.y = qy;
+  transform.transform.rotation.z = qz;
+
+  colvec y45 = zeros<colvec>(3);
+  y45(0) = 45.0 * M_PI/180;
+  colvec q45 = R_to_quaternion(ypr_to_R(y45));
+
+  colvec p90 = zeros<colvec>(3);
+  p90(1) = 90.0 * M_PI/180;
+  colvec q90 = R_to_quaternion(ypr_to_R(p90));
+
+  geometry_msgs::msg::TransformStamped transform45;
+  transform45.header.stamp = stamp;
+  transform45.header.frame_id = string("base");
+  transform45.child_frame_id = string("laser");
+  transform45.transform.translation.x = 0;
+  transform45.transform.translation.y = 0;
+  transform45.transform.translation.z = 0;
+  transform45.transform.rotation.w = q45(0);
+  transform45.transform.rotation.x = q45(1);
+  transform45.transform.rotation.y = q45(2);
+  transform45.transform.rotation.z = q45(3);
+
+  geometry_msgs::msg::TransformStamped transform_vision = transform45;
+  transform_vision.child_frame_id = string("vision");
+
+  geometry_msgs::msg::TransformStamped transform90;
+  transform90.header.stamp = stamp;
+  transform90.header.frame_id = string("base");
+  transform90.child_frame_id = string("height");
+  transform90.transform.translation.x = 0;
+  transform90.transform.translation.y = 0;
+  transform90.transform.translation.z = 0;
+  transform90.transform.rotation.w = q90(0);
+  transform90.transform.rotation.x = q90(1);
+  transform90.transform.rotation.y = q90(2);
+  transform90.transform.rotation.z = q90(3);
+
+  broadcaster->sendTransform(transform);
+  broadcaster->sendTransform(transform45);
+  broadcaster->sendTransform(transform_vision);
+  broadcaster->sendTransform(transform90);
+}
+
+void tf_timer_callback()
+{
+  if (!tf45 || !broadcaster)
+    return;
+
+  const rclcpp::Time stamp = node->now();
+  if (have_odom_pose)
+  {
+    publish_base_tf(stamp,
+                    last_tf_pose(0), last_tf_pose(1), last_tf_pose(2),
+                    last_tf_q(0), last_tf_q(1), last_tf_q(2), last_tf_q(3));
+    return;
+  }
+
+  const double half = 0.5 * initial_yaw;
+  publish_base_tf(stamp,
+                  initial_x, initial_y, initial_z,
+                  std::cos(half), 0.0, 0.0, std::sin(half));
+}
 
 void odom_callback(const nav_msgs::msg::Odometry::ConstSharedPtr msg)
 {
@@ -363,60 +450,16 @@ void odom_callback(const nav_msgs::msg::Odometry::ConstSharedPtr msg)
   meshROS.mesh_resource = mesh_resource;
   meshPub->publish(meshROS);
 
-  // TF for raw sensor visualization
+  // TF for robot model / sensor frames. Pose is cached and rebroadcast on a
+  // timer with "now" so RViz Fixed Frame lookups succeed when odometry carries
+  // sensor/bag timestamps.
   if (tf45)
   {
-    geometry_msgs::msg::TransformStamped transform;
-    transform.header.stamp = msg->header.stamp;
-    transform.header.frame_id = string("world");
-    transform.child_frame_id = string("base");
-    transform.transform.translation.x = pose(0);
-    transform.transform.translation.y = pose(1);
-    transform.transform.translation.z = pose(2);
-    transform.transform.rotation.w = q(0);
-    transform.transform.rotation.x = q(1);
-    transform.transform.rotation.y = q(2);
-    transform.transform.rotation.z = q(3);
-
-    colvec y45 = zeros<colvec>(3);
-    y45(0) = 45.0 * M_PI/180;
-    colvec q45 = R_to_quaternion(ypr_to_R(y45));
-
-    colvec p90 = zeros<colvec>(3);
-    p90(1) = 90.0 * M_PI/180;
-    colvec q90 = R_to_quaternion(ypr_to_R(p90));
-
-    geometry_msgs::msg::TransformStamped transform45;
-    transform45.header.stamp = msg->header.stamp;
-    transform45.header.frame_id = string("base");
-    transform45.child_frame_id = string("laser");
-    transform45.transform.translation.x = 0;
-    transform45.transform.translation.y = 0;
-    transform45.transform.translation.z = 0;
-    transform45.transform.rotation.w = q45(0);
-    transform45.transform.rotation.x = q45(1);
-    transform45.transform.rotation.y = q45(2);
-    transform45.transform.rotation.z = q45(3);
-
-    geometry_msgs::msg::TransformStamped transform_vision = transform45;
-    transform_vision.child_frame_id = string("vision");
-
-    geometry_msgs::msg::TransformStamped transform90;
-    transform90.header.stamp = msg->header.stamp;
-    transform90.header.frame_id = string("base");
-    transform90.child_frame_id = string("height");
-    transform90.transform.translation.x = 0;
-    transform90.transform.translation.y = 0;
-    transform90.transform.translation.z = 0;
-    transform90.transform.rotation.w = q90(0);
-    transform90.transform.rotation.x = q90(1);
-    transform90.transform.rotation.y = q90(2);
-    transform90.transform.rotation.z = q90(3);
-
-    broadcaster->sendTransform(transform);
-    broadcaster->sendTransform(transform45);
-    broadcaster->sendTransform(transform_vision);
-    broadcaster->sendTransform(transform90);
+    have_odom_pose = true;
+    last_tf_pose = pose;
+    last_tf_q = q;
+    const rclcpp::Time stamp = stamp_tf_with_now ? node->now() : rclcpp::Time(msg->header.stamp);
+    publish_base_tf(stamp, pose(0), pose(1), pose(2), q(0), q(1), q(2), q(3));
   }
 }
 
@@ -486,10 +529,20 @@ int main(int argc, char** argv)
 
   node->get_parameter_or("cross_config", cross_config, false);
   node->get_parameter_or("tf45", tf45, false);
+  node->get_parameter_or("stamp_tf_with_now", stamp_tf_with_now, true);
+  node->get_parameter_or("initial_x", initial_x, 0.0);
+  node->get_parameter_or("initial_y", initial_y, 0.0);
+  node->get_parameter_or("initial_z", initial_z, 0.0);
+  node->get_parameter_or("initial_yaw", initial_yaw, 0.0);
+  node->get_parameter_or("tf_publish_rate", tf_publish_rate, 50.0);
   node->get_parameter_or("covariance_scale",    cov_scale,  100.0);
   node->get_parameter_or("covariance_position", cov_pos,    false);
   node->get_parameter_or("covariance_velocity", cov_vel,    false);
   node->get_parameter_or("covariance_color",    cov_color,  false);
+
+  last_tf_pose.zeros();
+  last_tf_q.zeros();
+  last_tf_q(0) = 1.0;
 
   auto latched = rclcpp::QoS(rclcpp::KeepLast(100)).transient_local();
 
@@ -530,6 +583,15 @@ int main(int argc, char** argv)
   meshPub   = node->create_publisher<visualization_msgs::msg::Marker>("robot",               latched);
   heightPub = node->create_publisher<sensor_msgs::msg::Range>(        "height",              latched);
   broadcaster = std::make_shared<tf2_ros::TransformBroadcaster>(node);
+
+  rclcpp::TimerBase::SharedPtr tf_timer;
+  if (tf45)
+  {
+    const double rate = tf_publish_rate > 0.0 ? tf_publish_rate : 50.0;
+    tf_timer = node->create_wall_timer(
+        std::chrono::duration<double>(1.0 / rate),
+        tf_timer_callback);
+  }
 
   rclcpp::spin(node);
   rclcpp::shutdown();

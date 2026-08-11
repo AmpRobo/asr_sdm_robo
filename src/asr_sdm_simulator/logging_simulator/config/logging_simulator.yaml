@@ -11,9 +11,10 @@ features:
   use_rviz: true
 
 topics:
-  # Pose sources for odom_visualization (world->base). Select with odom_source:=.
-  sim_odom: /control/asr_sdm/odom
+  # Pose source for odom_visualization (world->base) and planning.
   vins_odom: /localization/video_inertial_navigation_systems/odometry
+  # Published by asr_sdm_control_manager when control:=enable (not used for model pose).
+  sim_odom: /control/asr_sdm/odom
   initialpose: /control/initial_pose
   joint_states: /control/joint_states
   cmd_vel: /control/asr_sdm/cmd_vel
@@ -26,8 +27,9 @@ odom_visualization:
   covariance_scale: 100.0
 
 robot_model:
-  # Mesh is modeled along +Z; pitch +90 deg lays the body in the XY plane.
-  # Yaw +180 deg aligns the visual heading with odom / 2D Pose Estimate.
+  # Static TF base -> screwdrive_segment_0 (mesh length along CAD +Z).
+  # Tune yaw_rad / pitch_rad here if the RViz model heading/attitude is wrong.
+  # pitch -π/2 lays the body to match the VINS camera frustum.
   parent_frame: base
   child_frame: screwdrive_segment_0
   yaw_rad: 3.141592653589793
@@ -35,9 +37,8 @@ robot_model:
   use_sim_time: false
   model_xacro: urdf/asr_sdm_wrapper.urdf.xacro
 
-# Drives the robot model: publishes joint states plus the odometry that
-# odom_visualization turns into the world->base transform.
-# Topic names come from the topics section above.
+# Initial pose used by odom_visualization (world->base) until the first VINS
+# odometry message arrives. Also used by asr_sdm_control_manager when control:=enable.
 kinematic_controller:
   world_frame: world
   controller_base_frame: base

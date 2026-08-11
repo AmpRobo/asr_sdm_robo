@@ -1,32 +1,25 @@
 #!/usr/bin/env python3
 """Launch the logging simulator stack.
 
-Core job: load the asr_sdm robot model, follow odometry, show it in RViz.
+Core job: load the asr_sdm robot model, follow VINS odometry, show it in RViz.
 
     ros2 launch logging_simulator logging_simulator_launch.py
 
-odom_visualization listens to one or both of:
+odom_visualization listens to:
 
-    /control/asr_sdm/odom
     /localization/video_inertial_navigation_systems/odometry
 
-and publishes world->base so the model moves in RViz. Pick the source with:
-
-    odom_source:=auto      whichever published most recently (default)
-    odom_source:=control   pin /control/asr_sdm/odom
-    odom_source:=vins      pin VINS odometry
+and publishes world->base (stamped with now) so the asr_sdm RobotModel is
+visible in RViz. Until VINS publishes, it holds the configured initial pose.
 
 Node parameters and topic names live in config/logging_simulator.yaml.
 robot_model:=asr_sdm includes asr_sdm/launch/asr_sdm_description.launch.py.
 
-Optional stacks, each from <package>/launch/<package>.launch.py:
+Optional stacks:
 
-    control:=enable    asr_sdm_control_manager (default off; also publishes joint states + odom)
+    control:=enable    asr_sdm_control_manager (default off)
     teleop:=enable     asr_sdm_teleop (default off)
     planning:=enable   asr_sdm_planning_manager (default off)
-
-With control:=disable, a zero joint_state_publisher keeps the model visible while
-an external odom source drives the pose.
 """
 
 from __future__ import annotations
@@ -44,7 +37,6 @@ from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
 
 
-DEFAULT_SIM_ODOM = '/control/asr_sdm/odom'
 DEFAULT_VINS_ODOM = '/localization/video_inertial_navigation_systems/odometry'
 
 
@@ -57,22 +49,15 @@ def _if_bool(flag: bool) -> IfCondition:
     return IfCondition('true' if flag else 'false')
 
 
-def _odom_source_topics(cfg: dict[str, Any], odom_source: str) -> list[str]:
-    """Odometry inputs that become the world->base transform of the robot model."""
-    topics = cfg.get('topics', {})
-    sim_odom = topics.get('sim_odom', DEFAULT_SIM_ODOM)
-    vins_odom = topics.get('vins_odom', DEFAULT_VINS_ODOM)
-    if odom_source == 'control':
-        return [sim_odom]
-    if odom_source == 'vins':
-        return [vins_odom]
-    return [sim_odom, vins_odom]
+def _vins_odom_topic(cfg: dict[str, Any]) -> str:
+    return cfg.get('topics', {}).get('vins_odom', DEFAULT_VINS_ODOM)
 
 
-def _make_odom_visualization_node(cfg: dict[str, Any], odom_source: str) -> Node:
+def _make_odom_visualization_node(cfg: dict[str, Any]) -> Node:
     features = cfg.get('features', {})
     viz = cfg.get('odom_visualization', {})
     color = viz.get('color', {})
+    kc = cfg.get('kinematic_controller', {})
     return Node(
         package='odom_visualization',
         executable='odom_visualization',
@@ -84,9 +69,15 @@ def _make_odom_visualization_node(cfg: dict[str, Any], odom_source: str) -> Node
             'color.g': float(color.get('g', 0.0)),
             'color.b': float(color.get('b', 0.0)),
             'covariance_scale': float(viz.get('covariance_scale', 100.0)),
-            'odom_topics': _odom_source_topics(cfg, odom_source),
-            # Publish world->base TF so the asr_sdm model can follow odometry.
+            'odom_topics': [_vins_odom_topic(cfg)],
+            # world->base for the asr_sdm RobotModel; stamps TF with now.
             'tf45': bool(features.get('use_asr_sdm_model', True)),
+            'stamp_tf_with_now': True,
+            'initial_x': float(kc.get('initial_x', -5.0)),
+            'initial_y': float(kc.get('initial_y', 0.0)),
+            'initial_z': float(kc.get('initial_z', 0.0)),
+            'initial_yaw': float(kc.get('initial_yaw', 0.0)),
+            'tf_publish_rate': 50.0,
         }],
     )
 
@@ -100,10 +91,7 @@ def _make_joint_state_publisher(cfg: dict[str, Any], control: str) -> list[Node]
         package='joint_state_publisher',
         executable='joint_state_publisher',
         name='joint_state_publisher',
-        parameters=[{
-            'source_list': [],
-            'rate': 30.0,
-        }],
+        parameters=[{'rate': 30.0}],
         remappings=[
             ('joint_states', topics.get('joint_states', '/control/joint_states')),
         ],
@@ -112,12 +100,7 @@ def _make_joint_state_publisher(cfg: dict[str, Any], control: str) -> list[Node]
 
 
 def _make_robot_model_action(robot_model: str, config_path: str) -> IncludeLaunchDescription:
-    """Bring up the robot model and its controller from the selected robot package.
-
-    robot_model names a package that ships launch/<robot_model>_description.launch.py.
-    The included launch reads the same config file, so the robot_model,
-    kinematic_controller and topics sections below stay authoritative here.
-    """
+    """Bring up the robot model from the selected robot package."""
     try:
         robot_model_share = get_package_share_directory(robot_model)
     except PackageNotFoundError as error:
@@ -132,7 +115,7 @@ def _make_robot_model_action(robot_model: str, config_path: str) -> IncludeLaunc
 
     return IncludeLaunchDescription(
         PythonLaunchDescriptionSource(description_launch),
-        launch_arguments={'config_file': config_path}.items(),
+        launch_arguments=[('config_file', config_path)],
     )
 
 
@@ -151,10 +134,14 @@ def _make_optional_include(
     except PackageNotFoundError as error:
         raise RuntimeError(f'{argument}:=enable needs the {package} package') from error
 
+    include_kwargs: dict[str, Any] = {}
+    if launch_arguments:
+        include_kwargs['launch_arguments'] = list(launch_arguments.items())
+
     return [IncludeLaunchDescription(
         PythonLaunchDescriptionSource(
             os.path.join(package_share, 'launch', f'{package}.launch.py')),
-        launch_arguments=(launch_arguments or {}).items(),
+        **include_kwargs,
     )]
 
 
@@ -171,7 +158,6 @@ def _make_rviz_node(cfg: dict[str, Any], rviz_config: str) -> Node:
 
 def launch_setup(context) -> list[Any]:
     robot_model = LaunchConfiguration('robot_model').perform(context)
-    odom_source = LaunchConfiguration('odom_source').perform(context)
     control = LaunchConfiguration('control').perform(context)
     teleop = LaunchConfiguration('teleop').perform(context)
     planning = LaunchConfiguration('planning').perform(context)
@@ -181,10 +167,9 @@ def launch_setup(context) -> list[Any]:
     rviz_config = os.path.join(pkg_share, 'config', 'rviz.rviz')
 
     cfg = _load_yaml(config_path)
-    topics = cfg.get('topics', {})
 
     return [
-        _make_odom_visualization_node(cfg, odom_source),
+        _make_odom_visualization_node(cfg),
         _make_robot_model_action(robot_model, config_path),
         *_make_joint_state_publisher(cfg, control),
         *_make_optional_include(
@@ -192,7 +177,7 @@ def launch_setup(context) -> list[Any]:
         *_make_optional_include('teleop', teleop, 'asr_sdm_teleop'),
         *_make_optional_include(
             'planning', planning, 'asr_sdm_planning_manager',
-            {'odom_topic': topics.get('sim_odom', DEFAULT_SIM_ODOM)},
+            {'odom_topic': _vins_odom_topic(cfg)},
         ),
         _make_rviz_node(cfg, rviz_config),
     ]
@@ -204,14 +189,6 @@ def generate_launch_description() -> LaunchDescription:
             'robot_model',
             default_value='asr_sdm',
             description='Robot model package name; must provide launch/<name>_description.launch.py',
-        ),
-        DeclareLaunchArgument(
-            'odom_source',
-            default_value='auto',
-            choices=['auto', 'control', 'vins'],
-            description='Odometry that drives the robot model pose: auto follows whichever '
-                        'source published most recently, control pins controller odom, '
-                        'vins pins VINS localization odometry',
         ),
         DeclareLaunchArgument(
             'control',

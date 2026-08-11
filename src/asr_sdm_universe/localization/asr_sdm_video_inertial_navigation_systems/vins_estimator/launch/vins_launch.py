@@ -152,12 +152,11 @@ def _pipeline(config_pkg_path, common_params, vins_config):
     """
     Return launch actions for the VINS pipeline.
 
-    Pipeline: feature_tracker -> vins_estimator -> pose_graph + rviz2
+    Pipeline: feature_tracker -> vins_estimator -> pose_graph.
+    Visualization lives in logging_simulator (config/rviz.rviz).
     All nodes run under the namespace configured in config/vins.yaml.
     """
     ns = vins_config.get('namespace', 'localization/video_inertial_navigation_systems')
-    rviz_cfg = os.path.join(
-        config_pkg_path, vins_config.get('rviz_config', 'config/vins_euroc_rviz.rviz'))
     pose_graph_cfg = vins_config.get('pose_graph', {})
 
     ft_remaps = [
@@ -238,13 +237,5 @@ def _pipeline(config_pkg_path, common_params, vins_config):
             output='screen',
             remappings=pg_remaps,
             parameters=pose_graph_params,
-        ),
-
-        Node(
-            package='rviz2',
-            executable='rviz2',
-            name='rviz2',
-            output='screen',
-            arguments=['-d', rviz_cfg],
         ),
     ])
