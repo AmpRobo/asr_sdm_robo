@@ -24,5 +24,9 @@ extern int COL;
 extern std::string VINS_RESULT_PATH;
 extern int DEBUG_IMAGE;
 extern int FAST_RELOCALIZATION;
+extern bool USE_SPARSE_ROTATION_GATE;
+extern double SPARSE_GATE_ANGLE_THRESH_DEG;
+extern double SPARSE_GATE_MAX_YAW_DIFF_DEG;
+extern int SPARSE_GATE_MIN_INLIERS;
 
 

@@ -201,12 +201,17 @@ def _pipeline(config_pkg_path, common_params, vins_config):
     pg_remaps = pg_sub_remaps + pg_remaps
 
     support_path = os.path.join(config_pkg_path, 'support_files')
+    sparse_gate_cfg = vins_config.get('sparse_rotation_gate', {})
     pose_graph_params = common_params + [{
         'support_file': support_path,
         'visualization_shift_x': pose_graph_cfg.get('visualization_shift_x', 0),
         'visualization_shift_y': pose_graph_cfg.get('visualization_shift_y', 0),
         'skip_cnt': pose_graph_cfg.get('skip_cnt', 0),
         'skip_dis': pose_graph_cfg.get('skip_dis', 0.0),
+        'pose_graph.sparse_rotation_gate.enable': int(bool(sparse_gate_cfg.get('enable', False))),
+        'pose_graph.sparse_rotation_gate.angle_thresh_deg': float(sparse_gate_cfg.get('angle_thresh_deg', 30.0)),
+        'pose_graph.sparse_rotation_gate.max_yaw_diff_deg': float(sparse_gate_cfg.get('max_yaw_diff_deg', 45.0)),
+        'pose_graph.sparse_rotation_gate.min_inliers': int(sparse_gate_cfg.get('min_inliers', 20)),
     }]
 
     ns_actions = [PushRosNamespace(part) for part in ns.split('/') if part]
