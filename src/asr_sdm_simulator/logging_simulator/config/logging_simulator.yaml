@@ -3,62 +3,23 @@
 # asr_sdm/launch/asr_sdm_description.launch.py, which this launch includes.
 
 features:
-  # Start asr_sdm_map_generator (random forest map).
-  use_asr_sdm_map_generator: true
-  # Click RViz "Static Obstacle" tool (/simulator/logging_simulator/add_static_obstacle) to add pillar obstacles.
-  enable_click_map: true
   # Load and display the asr_sdm robot model in RViz.
   use_asr_sdm_model: true
-  # Start the kinematic controller that drives the robot model. Without it nothing
-  # publishes joint states or odometry, so the model stays invisible in RViz.
+  # Read by asr_sdm_control_manager when control:=enable.
   use_kinematic_controller: true
   # Start RViz with the package rviz config.
   use_rviz: true
-  # Start so3_control_node.
-  use_so3_control: false
-
-rate:
-  odom: 100.0
-
-simulator:
-  init_state_x: -5.0
-  init_state_y: 0.0
-  init_state_z: 3.0
 
 topics:
+  # Pose sources for odom_visualization (world->base). Select with odom_source:=.
   sim_odom: /control/asr_sdm/odom
-  # Alternative pose source for the robot model, selected with odom_source:=vins.
-  # odom_source:=auto follows whichever of the two published last.
   vins_odom: /localization/video_inertial_navigation_systems/odometry
-  visual_slam_odom: /visual_slam/odom
-  state_ukf_odom: /state_ukf/odom
-  visual_slam_correction: /visual_slam/correction
-  so3_cmd: so3_cmd
-  imu: sim/imu
-  force_disturbance: force_disturbance
-  moment_disturbance: moment_disturbance
   initialpose: /control/initial_pose
   joint_states: /control/joint_states
   cmd_vel: /control/asr_sdm/cmd_vel
   controller_state: /control/asr_sdm/controller_state_3d
   control_cmd: /control/asr_sdm/control_cmd_3d
-  position_cmd: position_cmd
-  motors: motors
-  corrections: corrections
   goal_pose: /goal_pose
-  add_static_obstacle: /simulator/logging_simulator/add_static_obstacle
-
-so3_control:
-  mass: 0.98
-  use_angle_corrections: false
-  use_external_yaw: false
-  gains:
-    rot: {x: 1.0, y: 1.0, z: 1.0}
-    ang: {x: 0.07, y: 0.07, z: 0.1}
-  corrections:
-    z: 0.0
-    r: 0.0
-    p: 0.0
 
 odom_visualization:
   color: {a: 0.8, r: 1.0, g: 0.0, b: 0.0}

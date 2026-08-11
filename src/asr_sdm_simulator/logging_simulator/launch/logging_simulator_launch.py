@@ -1,34 +1,32 @@
 #!/usr/bin/env python3
 """Launch the logging simulator stack.
 
+Core job: load the asr_sdm robot model, follow odometry, show it in RViz.
+
+    ros2 launch logging_simulator logging_simulator_launch.py
+
+odom_visualization listens to one or both of:
+
+    /control/asr_sdm/odom
+    /localization/video_inertial_navigation_systems/odometry
+
+and publishes world->base so the model moves in RViz. Pick the source with:
+
+    odom_source:=auto      whichever published most recently (default)
+    odom_source:=control   pin /control/asr_sdm/odom
+    odom_source:=vins      pin VINS odometry
+
 Node parameters and topic names live in config/logging_simulator.yaml.
+robot_model:=asr_sdm includes asr_sdm/launch/asr_sdm_description.launch.py.
 
-The robot model and its controller come from the package named by the robot_model
-argument, which defaults to asr_sdm:
+Optional stacks, each from <package>/launch/<package>.launch.py:
 
-    ros2 launch logging_simulator logging_simulator_launch.py robot_model:=asr_sdm
+    control:=enable    asr_sdm_control_manager (default off; also publishes joint states + odom)
+    teleop:=enable     asr_sdm_teleop (default off)
+    planning:=enable   asr_sdm_planning_manager (default off)
 
-That package must ship launch/<robot_model>_description.launch.py, which is included here
-and reads the same config file.
-
-The robot model pose in RViz comes from odom_visualization, which turns one
-odometry topic into the world->base transform. Pick the source with:
-
-    odom_source:=auto      whichever source published most recently (default)
-    odom_source:=control   /control/asr_sdm/odom, the kinematic controller
-    odom_source:=vins      /localization/video_inertial_navigation_systems/odometry
-
-odom_visualization subscribes to the selected topics and only it broadcasts that
-transform, so the sources never fight over TF. With auto, run either stack alone
-and the model follows it; run both and the pose alternates between the estimates.
-
-Optional stacks, each included from <package>/launch/<package>.launch.py:
-
-    control:=enable    asr_sdm_control_manager, the kinematic controller (default on)
-    teleop:=enable     asr_sdm_teleop, the gamepad chain (default off)
-    planning:=enable   asr_sdm_planning_manager, topological replanning (default off)
-
-    ros2 launch logging_simulator logging_simulator_launch.py teleop:=enable
+With control:=disable, a zero joint_state_publisher keeps the model visible while
+an external odom source drives the pose.
 """
 
 from __future__ import annotations
@@ -57,115 +55,6 @@ def _load_yaml(path: str) -> dict[str, Any]:
 
 def _if_bool(flag: bool) -> IfCondition:
     return IfCondition('true' if flag else 'false')
-
-
-def _flatten_params(prefix: str, value: Any) -> dict[str, Any]:
-    """Flatten nested dicts into ROS dotted parameter names."""
-    if not isinstance(value, dict):
-        return {prefix: value}
-    out: dict[str, Any] = {}
-    for key, child in value.items():
-        dotted = f'{prefix}.{key}' if prefix else str(key)
-        out.update(_flatten_params(dotted, child))
-    return out
-
-
-def _make_map_generator_node(cfg: dict[str, Any], map_generator_config: str) -> Node:
-    topics = cfg.get('topics', {})
-    sim = cfg.get('simulator', {})
-    features = cfg.get('features', {})
-    return Node(
-        package='asr_sdm_map_generator',
-        executable='random_forest_test',
-        name='random_map_sensing',
-        output='screen',
-        emulate_tty=True,
-        condition=_if_bool(bool(features.get('use_asr_sdm_map_generator', True))),
-        parameters=[
-            map_generator_config,
-            {
-                'init_state_x': float(sim.get('init_state_x', -5.0)),
-                'init_state_y': float(sim.get('init_state_y', 0.0)),
-                'sensing.enable_click_map': bool(features.get('enable_click_map', True)),
-                'topics.add_static_obstacle': topics.get('add_static_obstacle', '/simulator/logging_simulator/add_static_obstacle'),
-            },
-        ],
-        remappings=[
-            ('odometry', topics.get('visual_slam_odom', '/visual_slam/odom')),
-        ],
-    )
-
-
-def _make_logging_simulator_node(cfg: dict[str, Any]) -> Node:
-    topics = cfg.get('topics', {})
-    sim = cfg.get('simulator', {})
-    rate = cfg.get('rate', {})
-    return Node(
-        package='logging_simulator',
-        executable='logging_simulator',
-        name='logging_simulator',
-        output='screen',
-        parameters=[{
-            'rate.odom': float(rate.get('odom', 100.0)),
-            'simulator.init_state_x': float(sim.get('init_state_x', -5.0)),
-            'simulator.init_state_y': float(sim.get('init_state_y', 0.0)),
-            'simulator.init_state_z': float(sim.get('init_state_z', 3.0)),
-        }],
-        remappings=[
-            ('odom', topics.get('visual_slam_odom', '/visual_slam/odom')),
-            ('cmd', topics.get('so3_cmd', 'so3_cmd')),
-            ('imu', topics.get('imu', 'sim/imu')),
-            ('force_disturbance', topics.get('force_disturbance', 'force_disturbance')),
-            ('moment_disturbance', topics.get('moment_disturbance', 'moment_disturbance')),
-            ('initialpose', topics.get('initialpose', '/control/initial_pose')),
-        ],
-    )
-
-
-def _make_so3_control_node(cfg: dict[str, Any]) -> Node:
-    topics = cfg.get('topics', {})
-    features = cfg.get('features', {})
-    so3 = cfg.get('so3_control', {})
-    params = {
-        'mass': float(so3.get('mass', 0.98)),
-        'use_angle_corrections': bool(so3.get('use_angle_corrections', False)),
-        'use_external_yaw': bool(so3.get('use_external_yaw', False)),
-    }
-    params.update(_flatten_params('gains', so3.get('gains', {})))
-    params.update(_flatten_params('corrections', so3.get('corrections', {})))
-    return Node(
-        package='so3_control',
-        executable='so3_control_node',
-        name='so3_control',
-        output='screen',
-        condition=_if_bool(bool(features.get('use_so3_control', False))),
-        parameters=[params],
-        remappings=[
-            ('odom', topics.get('state_ukf_odom', '/state_ukf/odom')),
-            ('position_cmd', topics.get('position_cmd', 'position_cmd')),
-            ('motors', topics.get('motors', 'motors')),
-            ('corrections', topics.get('corrections', 'corrections')),
-            ('so3_cmd', topics.get('so3_cmd', 'so3_cmd')),
-            ('imu', topics.get('imu', 'sim/imu')),
-        ],
-    )
-
-
-def _make_disturbance_node(cfg: dict[str, Any]) -> Node:
-    topics = cfg.get('topics', {})
-    return Node(
-        package='so3_disturbance_generator',
-        executable='so3_disturbance_generator',
-        name='so3_disturbance_generator',
-        output='screen',
-        remappings=[
-            ('odom', topics.get('visual_slam_odom', '/visual_slam/odom')),
-            ('noisy_odom', topics.get('state_ukf_odom', '/state_ukf/odom')),
-            ('correction', topics.get('visual_slam_correction', '/visual_slam/correction')),
-            ('force_disturbance', topics.get('force_disturbance', 'force_disturbance')),
-            ('moment_disturbance', topics.get('moment_disturbance', 'moment_disturbance')),
-        ],
-    )
 
 
 def _odom_source_topics(cfg: dict[str, Any], odom_source: str) -> list[str]:
@@ -200,6 +89,26 @@ def _make_odom_visualization_node(cfg: dict[str, Any], odom_source: str) -> Node
             'tf45': bool(features.get('use_asr_sdm_model', True)),
         }],
     )
+
+
+def _make_joint_state_publisher(cfg: dict[str, Any], control: str) -> list[Node]:
+    """Zero joint states when the kinematic controller is not running."""
+    if control == 'enable':
+        return []
+    topics = cfg.get('topics', {})
+    return [Node(
+        package='joint_state_publisher',
+        executable='joint_state_publisher',
+        name='joint_state_publisher',
+        parameters=[{
+            'source_list': [],
+            'rate': 30.0,
+        }],
+        remappings=[
+            ('joint_states', topics.get('joint_states', '/control/joint_states')),
+        ],
+        output='screen',
+    )]
 
 
 def _make_robot_model_action(robot_model: str, config_path: str) -> IncludeLaunchDescription:
@@ -270,25 +179,20 @@ def launch_setup(context) -> list[Any]:
     pkg_share = get_package_share_directory('logging_simulator')
     config_path = os.path.join(pkg_share, 'config', 'logging_simulator.yaml')
     rviz_config = os.path.join(pkg_share, 'config', 'rviz.rviz')
-    map_generator_config = os.path.join(
-        get_package_share_directory('asr_sdm_map_generator'),
-        'config', 'asr_sdm_map_generator.yaml')
 
     cfg = _load_yaml(config_path)
+    topics = cfg.get('topics', {})
 
     return [
-        _make_map_generator_node(cfg, map_generator_config),
-        _make_logging_simulator_node(cfg),
-        _make_so3_control_node(cfg),
-        _make_disturbance_node(cfg),
         _make_odom_visualization_node(cfg, odom_source),
         _make_robot_model_action(robot_model, config_path),
+        *_make_joint_state_publisher(cfg, control),
         *_make_optional_include(
             'control', control, 'asr_sdm_control_manager', {'config_file': config_path}),
         *_make_optional_include('teleop', teleop, 'asr_sdm_teleop'),
         *_make_optional_include(
             'planning', planning, 'asr_sdm_planning_manager',
-            {'odom_topic': cfg.get('topics', {}).get('visual_slam_odom', '/visual_slam/odom')},
+            {'odom_topic': topics.get('sim_odom', DEFAULT_SIM_ODOM)},
         ),
         _make_rviz_node(cfg, rviz_config),
     ]
@@ -311,9 +215,9 @@ def generate_launch_description() -> LaunchDescription:
         ),
         DeclareLaunchArgument(
             'control',
-            default_value='enable',
+            default_value='disable',
             choices=['enable', 'disable'],
-            description='Start asr_sdm_control_manager kinematic controller (model will not move if disabled)',
+            description='Start asr_sdm_control_manager kinematic controller (default off)',
         ),
         DeclareLaunchArgument(
             'teleop',
