@@ -49,6 +49,9 @@ def _load_robot_description(model_path: Path) -> str:
 
 
 def _make_description_actions(cfg: dict[str, Any], package_share: str) -> list[Any]:
+    import math
+    import numpy as np
+
     features = cfg.get('features', {})
     model_cfg = cfg.get('robot_model', {})
     topics = cfg.get('topics', {})
@@ -59,6 +62,18 @@ def _make_description_actions(cfg: dict[str, Any], package_share: str) -> list[A
     robot_description = _load_robot_description(Path(model_xacro))
     use_sim_time = bool(model_cfg.get('use_sim_time', False))
     joint_states_topic = topics.get('joint_states', '/control/joint_states')
+
+    # Compute quaternion from yaw/pitch/roll to avoid tf2_ros YPR order ambiguity.
+    yaw = float(model_cfg.get('yaw_rad', math.pi))
+    pitch = float(model_cfg.get('pitch_rad', math.pi / 2.0))
+    roll = float(model_cfg.get('roll_rad', 0.0))
+    cy, sy = math.cos(yaw * 0.5), math.sin(yaw * 0.5)
+    cp, sp = math.cos(pitch * 0.5), math.sin(pitch * 0.5)
+    cr, sr = math.cos(roll * 0.5), math.sin(roll * 0.5)
+    qw = cr * cp * cy + sr * sp * sy
+    qx = sr * cp * cy - cr * sp * sy
+    qy = cr * sp * cy + sr * cp * sy
+    qz = cr * cp * sy - sr * sp * cy
 
     return [
         Node(
@@ -82,8 +97,10 @@ def _make_description_actions(cfg: dict[str, Any], package_share: str) -> list[A
             arguments=[
                 '--frame-id', model_cfg.get('parent_frame', 'base'),
                 '--child-frame-id', model_cfg.get('child_frame', 'screwdrive_segment_0'),
-                '--yaw', str(float(model_cfg.get('yaw_rad', math.pi))),
-                '--pitch', str(float(model_cfg.get('pitch_rad', math.pi / 2.0))),
+                '--qx', str(qx),
+                '--qy', str(qy),
+                '--qz', str(qz),
+                '--qw', str(qw),
             ],
         ),
     ]

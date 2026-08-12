@@ -38,7 +38,14 @@
               <origin rpy="0 0 0" xyz="-6.77842e-05 0.000168756 0.0781638" />
               <inertia ixx="0.0008368145831015" ixy="3.348578885e-07" ixz="1.3959146972e-06" iyy="0.0008365215316531" iyz="4.092756065e-07" izz="0.0001491920058212" />
             </inertial>
-          <visual><origin rpy="0 0 0" xyz="0 0 0" /><geometry><mesh filename="package://asr_sdm/meshes/screwdrive_segment_0.stl" /></geometry><material name="mat_screwdrive_segment_${idx}"><color rgba="0.678431 0.709804 0.741176 1" /></material></visual></link>
+          <visual>
+              <origin rpy="0 0 0" xyz="0 0 0.08725" />
+              <geometry>
+                <cylinder length="0.1855000000000001" radius="0.03" />
+              </geometry>
+              <material name="mat_screwdrive_segment_${idx}"><color rgba="0.678431 0.709804 0.741176 1" /></material>
+            </visual>
+        </link>
         <link name="screw_rotor_left_${idx}">
             <collision>
               
@@ -52,7 +59,14 @@
               <origin rpy="-2.98023224e-08 0 0" xyz="0.0 0.0 0.0" />
               <inertia ixx="1.94327521911e-05" ixy="8.165e-13" ixz="-2.5e-15" iyy="1.94376384386e-05" iyz="-1.817e-13" izz="3.56879993201e-05" />
             </inertial>
-          <visual><origin rpy="0 0 0" xyz="0 0 0" /><geometry><mesh filename="package://asr_sdm/meshes/screw_rotor_left_0.stl" /></geometry><material name="mat_screw_rotor_left_${idx}"><color rgba="0.678431 0.709804 0.741176 1" /></material></visual></link>
+            <visual>
+              <origin rpy="0 0 0" xyz="0 0 0" />
+              <geometry>
+                <cylinder length="0.0255" radius="0.047" />
+              </geometry>
+              <material name="mat_screw_rotor_left_${idx}"><color rgba="0.5 0.5 0.5 1" /></material>
+            </visual>
+        </link>
         <link name="screw_rotor_right_${idx}">
             <collision>
               
@@ -66,7 +80,14 @@
               <origin rpy="0 0 0" xyz="0.0 0.0 0.0" />
               <inertia ixx="1.94322695895e-05" ixy="8.147e-13" ixz="5.3e-15" iyy="1.94371557899e-05" iyz="1.806e-13" izz="3.5687294149e-05" />
             </inertial>
-          <visual><origin rpy="0 0 0" xyz="0 0 0" /><geometry><mesh filename="package://asr_sdm/meshes/screw_rotor_right_0.stl" /></geometry><material name="mat_screw_rotor_right_${idx}"><color rgba="0.678431 0.709804 0.741176 1" /></material></visual></link>
+            <visual>
+              <origin rpy="0 0 0" xyz="0 0 0" />
+              <geometry>
+                <cylinder length="0.0255" radius="0.047" />
+              </geometry>
+              <material name="mat_screw_rotor_right_${idx}"><color rgba="0.5 0.5 0.5 1" /></material>
+            </visual>
+        </link>
         <joint name="joint_screwdrive_segment_0__screw_rotor_left_0__${idx}" type="continuous">
             <parent link="screwdrive_segment_${idx}" />
             <child link="screw_rotor_left_${idx}" />
@@ -88,8 +109,6 @@
     <!-- A / Cross / B 关节单元，末节跳过。 -->
     <xacro:if value="${idx + 1 &lt; int(N)}">
             <link name="joint_unit_a_${idx}">
-              <!-- XM430-W350 与输出/从动侧安装附件的等效质量属性。 -->
-              <!-- 质量取 0.105 kg；惯量由 82 g STL 均匀分布结果按质量线性缩放。 -->
               <inertial>
                 <mass value="0.105" />
                 <origin rpy="0 0 0" xyz="-0.000354695736 -0.0000183839643 0.0219250269" />
@@ -104,7 +123,7 @@
               <visual>
                 <origin rpy="0 0 0" xyz="0 0 0" />
                 <geometry>
-                  <mesh filename="package://asr_sdm/meshes/joint_unit_a.stl" />
+                  <box size="0.04 0.04 0.04" />
                 </geometry>
                 <material name="mat_joint_unit_a_${idx}">
                   <color rgba="0.678431 0.709804 0.741176 1" />
@@ -112,8 +131,6 @@
               </visual>
             </link>
             <link name="joint_unit_cross_${idx}">
-              <!-- 两个 FR12-H101K 正交连接及紧固件的等效质量属性。 -->
-              <!-- 质量取 0.020 kg；质心和惯量由组合 STL 的均匀质量分布计算。 -->
               <inertial>
                 <mass value="0.020" />
                 <origin rpy="0 0 0" xyz="0.000313986224 -0.018982444334 0.019003452419" />
@@ -128,7 +145,7 @@
               <visual>
                 <origin rpy="0 0 0" xyz="0 0 0" />
                 <geometry>
-                  <mesh filename="package://asr_sdm/meshes/joint_unit_cross.stl" />
+                  <box size="0.04 0.04 0.04" />
                 </geometry>
                 <material name="mat_joint_unit_cross_${idx}">
                   <color rgba="0.678431 0.709804 0.741176 1" />
@@ -136,8 +153,6 @@
               </visual>
             </link>
             <link name="joint_unit_b_${idx}">
-              <!-- XM430-W350 与输出/从动侧安装附件的等效质量属性。 -->
-              <!-- 质量取 0.105 kg；惯量由 82 g STL 均匀分布结果按质量线性缩放。 -->
               <inertial>
                 <mass value="0.105" />
                 <origin rpy="0 0 0" xyz="-0.0169779299 0.000139808905 -0.0186162548" />
@@ -152,7 +167,7 @@
               <visual>
                 <origin rpy="0 0 0" xyz="0 0 0" />
                 <geometry>
-                  <mesh filename="package://asr_sdm/meshes/joint_unit_b.stl" />
+                  <box size="0.04 0.04 0.04" />
                 </geometry>
                 <material name="mat_joint_unit_b_${idx}">
                   <color rgba="0.678431 0.709804 0.741176 1" />

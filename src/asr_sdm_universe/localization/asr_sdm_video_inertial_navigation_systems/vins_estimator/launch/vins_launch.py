@@ -111,6 +111,26 @@ def declare_vins_config_args(vins_config, launch_config_name='vins.yaml'):
                 '0/1 - override yaml and enable sparse alignment. Empty = use launch config yaml.'
             ),
         ),
+        DeclareLaunchArgument(
+            'enable_frame_correction',
+            default_value='false',
+            description='Apply rotation correction to odometry output for frame alignment.',
+        ),
+        DeclareLaunchArgument(
+            'frame_correction_roll',
+            default_value='0.0',
+            description='Roll angle in degrees for frame correction.',
+        ),
+        DeclareLaunchArgument(
+            'frame_correction_pitch',
+            default_value='0.0',
+            description='Pitch angle in degrees for frame correction.',
+        ),
+        DeclareLaunchArgument(
+            'frame_correction_yaw',
+            default_value='0.0',
+            description='Yaw angle in degrees for frame correction.',
+        ),
     ]
 
 
@@ -121,6 +141,15 @@ def _launch_setup(context, *args, **kwargs):
         LaunchConfiguration('vins_launch_config'))
     vins_config = load_vins_config(vins_share, launch_config_name)
 
+    enable_frame_correction = context.perform_substitution(
+        LaunchConfiguration('enable_frame_correction'))
+    frame_correction_roll = context.perform_substitution(
+        LaunchConfiguration('frame_correction_roll'))
+    frame_correction_pitch = context.perform_substitution(
+        LaunchConfiguration('frame_correction_pitch'))
+    frame_correction_yaw = context.perform_substitution(
+        LaunchConfiguration('frame_correction_yaw'))
+
     common_params, log_params, log_calib, enable_sparse = build_common_params(
         context, config_pkg_path, LaunchConfiguration, vins_config)
 
@@ -129,10 +158,15 @@ def _launch_setup(context, *args, **kwargs):
         LogInfo(msg=[f'[vins launch] params file: {log_params}']),
         LogInfo(msg=[f'[vins launch] calibration file: {log_calib}']),
         LogInfo(msg=[f'[vins launch] sparse alignment override: {"ON" if enable_sparse else "OFF"}']),
+        LogInfo(msg=[f'[vins launch] frame correction: {"ON" if enable_frame_correction.lower() == "true" else "OFF"}']),
         _pipeline(
             config_pkg_path=config_pkg_path,
             common_params=common_params,
             vins_config=vins_config,
+            enable_frame_correction=enable_frame_correction.lower() == "true",
+            frame_correction_roll=float(frame_correction_roll or "0.0"),
+            frame_correction_pitch=float(frame_correction_pitch or "0.0"),
+            frame_correction_yaw=float(frame_correction_yaw or "0.0"),
         ),
     ]
 
@@ -148,7 +182,11 @@ def generate_launch_description():
     )
 
 
-def _pipeline(config_pkg_path, common_params, vins_config):
+def _pipeline(config_pkg_path, common_params, vins_config,
+              enable_frame_correction=False,
+              frame_correction_roll=0.0,
+              frame_correction_pitch=0.0,
+              frame_correction_yaw=0.0):
     """
     Return launch actions for the VINS pipeline.
 
@@ -181,6 +219,16 @@ def _pipeline(config_pkg_path, common_params, vins_config):
         ('/feature_tracker/td_estimate', f'/{ns}/td_estimate'),
     ]
     ve_remaps = ve_sub_remaps + ve_remaps
+
+    # Frame correction parameters for vins_estimator
+    frame_correction_params = {}
+    if enable_frame_correction:
+        frame_correction_params = {
+            'enable_frame_correction': True,
+            'frame_correction_roll': frame_correction_roll,
+            'frame_correction_pitch': frame_correction_pitch,
+            'frame_correction_yaw': frame_correction_yaw,
+        }
 
     pg_remaps = [
         (t, f'/{ns}/{t}') for t in [
@@ -227,7 +275,7 @@ def _pipeline(config_pkg_path, common_params, vins_config):
             name='vins_estimator',
             output='screen',
             remappings=ve_remaps,
-            parameters=common_params,
+            parameters=common_params + [frame_correction_params],
         ),
 
         Node(

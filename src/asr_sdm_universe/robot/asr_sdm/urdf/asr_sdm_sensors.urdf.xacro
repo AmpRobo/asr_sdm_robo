@@ -1,4 +1,14 @@
 <?xml version="1.0"?>
 <robot xmlns:xacro="http://www.ros.org/wiki/xacro" name="asr_sdm_sensors">
-  <!-- 传感器和 Gazebo 插件将在此扩展。 -->
+  <!-- ================= ROOT BASE FRAME ================= -->
+  <!-- 'base' is the VINS body frame (published by odom_visualization) and is the
+       URDF root. The RPY here MUST match the static TF published by
+       tf2_ros static_transform_publisher in asr_sdm_description.launch.py
+       (yaml.robot_model.yaw_rad / pitch_rad). Currently: yaw=π, pitch=-π/2. -->
+  <link name="base"/>
+  <joint name="joint_base_to_screwdrive_segment_0" type="fixed">
+    <parent link="base"/>
+    <child link="screwdrive_segment_0"/>
+    <origin rpy="0 0 0" xyz="0 0 0"/>
+  </joint>
 </robot>
