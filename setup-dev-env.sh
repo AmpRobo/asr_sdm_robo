@@ -5,10 +5,29 @@
 
 set -euo pipefail
 
+option_common=false
 option_pinocchio=false
 option_ros=false
+option_nvidia=false
+option_no_nvidia=false
+option_no_cuda_drivers=false
+option_runtime=false
 option_yes=false
 option_list=false
+
+# Versions of the NVIDIA stack (see src/asr_sdm_universe/common/tensorrt_common/README.md)
+nvidia_driver_branch="595"
+cuda_version="13.2"
+cuda_apt_suffix="13-2"          # apt package suffix for CUDA 13.2
+cudnn_cuda_major="13"           # cuDNN 9 flavour matching the CUDA major version
+tensorrt_version="11.1.0"
+opencv_version="4.14.0"
+
+# CUDA library search paths, filled in by install_opencv_cuda
+cuda_lib_dirs=()
+
+# Env exports written to ~/.bashrc at the end of the NVIDIA role
+nvidia_env_content=""
 
 print_help() {
     echo "Usage: setup-dev-env.sh [OPTIONS]"
@@ -16,8 +35,11 @@ print_help() {
     echo "  --help                  Display this help message"
     echo "  -h                      Display this help message"
     echo "  --list                  List all installable components"
+    echo "  --common                Install common development packages (toolchain, git, python3, CLI tools)"
     echo "  --ros                   Install ROS 2 Jazzy (Ubuntu 24.04)"
     echo "  --pinocchio             Install Pinocchio from robotpkg apt packages"
+    echo "  --nvidia                Install the NVIDIA stack (driver ${nvidia_driver_branch}, CUDA ${cuda_version},"
+    echo "                          cuBLAS, NPP, cuDNN, TensorRT ${tensorrt_version}, OpenCV ${opencv_version} + CUDA)"
     echo "  -y                      Use non-interactive mode"
     echo "  -v                      Enable debug outputs"
     echo "  --no-nvidia             Disable installation of the NVIDIA-related roles ('cuda' and 'tensorrt')"
@@ -35,14 +57,28 @@ print_list() {
     echo ""
     echo "  Flag          Component    Description"
     echo "  ----          ---------    -----------"
+    echo "  --common      Common       Install build toolchain, git, python3 and everyday CLI tools"
     echo "  --ros         ROS 2        Install ROS 2 Jazzy desktop + rosdep/colcon (Ubuntu 24.04)"
     echo "  --pinocchio   Pinocchio    Install Pinocchio and Python bindings via robotpkg apt"
+    echo "  --nvidia      NVIDIA       Install the GPU stack below (Ubuntu 24.04, x86_64)"
+    echo ""
+    echo "  Components of --nvidia:"
+    echo "    NVIDIA driver   ${nvidia_driver_branch} (cuda-drivers-${nvidia_driver_branch}; skip with --no-cuda-drivers)"
+    echo "    CUDA Toolkit    ${cuda_version} (cuda-toolkit-${cuda_apt_suffix})"
+    echo "    CUDA cuBLAS     libcublas-${cuda_apt_suffix}"
+    echo "    CUDA NPP        libnpp-${cuda_apt_suffix} (plus cuFFT, required by OpenCV CUDA)"
+    echo "    cuDNN           libcudnn9-cuda-${cudnn_cuda_major}"
+    echo "    TensorRT        ${tensorrt_version} (needs the NVIDIA TensorRT local apt repo)"
+    echo "    OpenCV + CUDA   ${opencv_version} into ~/.local/opencv-cuda"
     echo ""
     echo "Examples:"
     echo "  ./setup-dev-env.sh --list"
+    echo "  ./setup-dev-env.sh --common"
     echo "  ./setup-dev-env.sh --ros"
     echo "  ./setup-dev-env.sh --pinocchio"
-    echo "  ./setup-dev-env.sh --ros --pinocchio -y"
+    echo "  ./setup-dev-env.sh --nvidia"
+    echo "  ./setup-dev-env.sh --nvidia --runtime --no-cuda-drivers"
+    echo "  ./setup-dev-env.sh --ros --nvidia --pinocchio -y"
 }
 
 run_cmd() {
@@ -70,6 +106,67 @@ apt_install() {
     else
         sudo apt-get "$@"
     fi
+}
+
+install_common() {
+    local -a common_packages
+
+    if ! command -v apt-get >/dev/null 2>&1; then
+        echo -e "\e[33mSkipping common packages: apt-get is not available.\e[m"
+        return 0
+    fi
+
+    common_packages=(
+        # Toolchain and build systems
+        build-essential
+        cmake
+        ninja-build
+        pkg-config
+        ccache
+        gdb
+        clang-format
+        # Version control
+        git
+        git-lfs
+        # Fetching and archives
+        ca-certificates
+        curl
+        wget
+        gnupg
+        unzip
+        zip
+        # Python
+        python3
+        python3-pip
+        python3-venv
+        python3-dev
+        # Everyday CLI tools
+        vim
+        tmux
+        htop
+        tree
+        jq
+        ripgrep
+        # Distro and hardware inspection
+        lsb-release
+        software-properties-common
+        net-tools
+        iputils-ping
+        pciutils
+        usbutils
+    )
+
+    echo -e "\e[36mInstalling common development packages...\e[m"
+
+    if ! command -v sudo >/dev/null 2>&1; then
+        apt-get -y update
+        apt-get -y install sudo
+    fi
+
+    apt_install update
+    apt_install install "${common_packages[@]}"
+
+    echo -e "\e[32mDone.\e[0m Common packages installed."
 }
 
 install_ros() {
@@ -207,6 +304,559 @@ EOF
     echo "Pinocchio installation and environment setup complete."
 }
 
+portable_home_path() {
+    # Keep a leading home directory as a literal ${HOME} so generated env exports stay user-agnostic
+    local path="$1"
+
+    if [[ "${path}" == "${HOME}" ]]; then
+        printf '${HOME}'
+    elif [[ "${path}" == "${HOME}/"* ]]; then
+        printf '${HOME}/%s' "${path#"${HOME}/"}"
+    else
+        printf '%s' "${path}"
+    fi
+}
+
+portable_home_path_list() {
+    # portable_home_path applied to every entry of a colon-separated path list
+    local list="$1"
+    local result=""
+    local item
+
+    local IFS=':'
+    for item in ${list}; do
+        [[ -n "${item}" ]] || continue
+        if [[ -z "${result}" ]]; then
+            result="$(portable_home_path "${item}")"
+        else
+            result="${result}:$(portable_home_path "${item}")"
+        fi
+    done
+
+    printf '%s' "${result}"
+}
+
+write_bashrc_block() {
+    # write_bashrc_block <marker> <content>; rewrites the block when it already exists
+    local marker="$1"
+    local content="$2"
+    local bashrc_path="${HOME}/.bashrc"
+    local begin_line="# >>> ${marker} >>>"
+    local end_line="# <<< ${marker} <<<"
+    local tmp_file
+
+    touch "${bashrc_path}"
+
+    if grep -qxF "${begin_line}" "${bashrc_path}"; then
+        tmp_file="$(mktemp)"
+        awk -v begin_line="${begin_line}" -v end_line="${end_line}" '
+            $0 == begin_line { inside = 1 }
+            inside == 0      { print }
+            $0 == end_line   { inside = 0 }
+        ' "${bashrc_path}" > "${tmp_file}"
+        # Command substitution drops the trailing blank lines left behind by the removed block
+        printf '%s\n' "$(cat "${tmp_file}")" > "${bashrc_path}"
+        rm -f "${tmp_file}"
+        echo "Refreshed '${marker}' in ~/.bashrc."
+    else
+        echo "Appended '${marker}' to ~/.bashrc."
+    fi
+
+    {
+        echo ""
+        echo "${begin_line}"
+        echo "${content}"
+        echo "${end_line}"
+    } >> "${bashrc_path}"
+}
+
+apt_candidate_version() {
+    # apt_candidate_version <package> <version-prefix>
+    local pkg="$1"
+    local prefix="$2"
+    apt-cache madison "${pkg}" 2>/dev/null | awk -F'|' -v p="${prefix}" '
+        { gsub(/^[ \t]+|[ \t]+$/, "", $2); if (index($2, p) == 1) { print $2; exit } }'
+}
+
+check_nvidia_prerequisites() {
+    local ubuntu_codename
+    local arch
+
+    ubuntu_codename="$(lsb_release -sc 2>/dev/null || echo unknown)"
+    arch="$(dpkg --print-architecture 2>/dev/null || echo unknown)"
+
+    if [[ "${ubuntu_codename}" != "noble" ]]; then
+        echo -e "\e[33mSkipping NVIDIA stack: unsupported Ubuntu (${ubuntu_codename}). Supported: noble (24.04).\e[m"
+        return 1
+    fi
+
+    if [[ "${arch}" != "amd64" ]]; then
+        echo -e "\e[33mSkipping NVIDIA stack: unsupported architecture (${arch}). Supported: amd64.\e[m"
+        return 1
+    fi
+}
+
+setup_cuda_apt_repo() {
+    local keyring_deb="/tmp/cuda-keyring_1.1-1_all.deb"
+    local keyring_url="https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2404/x86_64/cuda-keyring_1.1-1_all.deb"
+
+    if dpkg -s cuda-keyring >/dev/null 2>&1; then
+        echo "cuda-keyring already installed, skipping."
+    else
+        echo -e "\e[36mAdding the NVIDIA CUDA apt repository...\e[m"
+        apt_install update
+        apt_install install ca-certificates curl gnupg
+        run_cmd curl -fsSL -o "${keyring_deb}" "${keyring_url}"
+        run_cmd sudo dpkg -i "${keyring_deb}"
+    fi
+
+    apt_install update
+}
+
+detect_nvidia_driver_version() {
+    # Prints the installed driver version, or nothing when no driver is found
+    local version=""
+
+    if command -v nvidia-smi >/dev/null 2>&1; then
+        version="$(nvidia-smi --query-gpu=driver_version --format=csv,noheader 2>/dev/null | head -1 | tr -d '[:space:]' || true)"
+    fi
+
+    # A driver installed but not yet loaded (no reboot yet) is only visible below
+    if [[ -z "${version}" && -r /proc/driver/nvidia/version ]]; then
+        version="$(awk '{ for (i = 1; i <= NF; i++) if ($i ~ /^[0-9]+\.[0-9]+/) { print $i; exit } }' /proc/driver/nvidia/version || true)"
+    fi
+
+    if [[ -z "${version}" ]] && command -v modinfo >/dev/null 2>&1; then
+        version="$(modinfo nvidia -F version 2>/dev/null | head -1 | tr -d '[:space:]' || true)"
+    fi
+
+    printf '%s' "${version}"
+}
+
+install_nvidia_driver() {
+    local installed_version
+    local installed_branch
+
+    if [[ "${option_no_cuda_drivers}" == true ]]; then
+        echo -e "\e[33mSkipping NVIDIA driver (--no-cuda-drivers).\e[m"
+        return 0
+    fi
+
+    installed_version="$(detect_nvidia_driver_version)"
+    installed_branch="${installed_version%%.*}"
+
+    if [[ "${installed_branch}" =~ ^[0-9]+$ ]]; then
+        if ((installed_branch >= nvidia_driver_branch)); then
+            echo -e "\e[32mNVIDIA driver ${installed_version} already installed (branch >= ${nvidia_driver_branch}), skipping.\e[m"
+            return 0
+        fi
+        echo -e "\e[36mNVIDIA driver ${installed_version} is older than branch ${nvidia_driver_branch}; upgrading...\e[m"
+    else
+        echo -e "\e[36mNo NVIDIA driver detected; installing branch ${nvidia_driver_branch}...\e[m"
+    fi
+
+    apt_install install "cuda-drivers-${nvidia_driver_branch}"
+
+    echo -e "\e[32mDone.\e[0m Driver ${nvidia_driver_branch} installed; reboot before running 'nvidia-smi'."
+}
+
+install_cuda_toolkit() {
+    local -a cuda_packages
+
+    echo -e "\e[36mInstalling CUDA Toolkit ${cuda_version} with cuBLAS / NPP / cuFFT...\e[m"
+
+    if [[ "${option_runtime}" == true ]]; then
+        cuda_packages=(
+            "cuda-runtime-${cuda_apt_suffix}"
+            "cuda-cudart-${cuda_apt_suffix}"
+            "libcublas-${cuda_apt_suffix}"
+            "libcufft-${cuda_apt_suffix}"
+            "libnpp-${cuda_apt_suffix}"
+        )
+    else
+        cuda_packages=(
+            "cuda-toolkit-${cuda_apt_suffix}"
+            "cuda-cudart-${cuda_apt_suffix}"
+            "cuda-cudart-dev-${cuda_apt_suffix}"
+            "libcublas-${cuda_apt_suffix}"
+            "libcublas-dev-${cuda_apt_suffix}"
+            "libcufft-${cuda_apt_suffix}"
+            "libcufft-dev-${cuda_apt_suffix}"
+            "libnpp-${cuda_apt_suffix}"
+            "libnpp-dev-${cuda_apt_suffix}"
+        )
+    fi
+
+    apt_install install "${cuda_packages[@]}"
+
+    # Superseded by the OpenCV env below once that build succeeds
+    nvidia_env_content="export CUDA_HOME=\"/usr/local/cuda\"
+export PATH=\"\${CUDA_HOME}/bin:\${PATH}\"
+export LD_LIBRARY_PATH=\"\${CUDA_HOME}/lib64\${LD_LIBRARY_PATH:+:\${LD_LIBRARY_PATH}}\""
+
+    echo -e "\e[32mDone.\e[0m CUDA ${cuda_version} installed. Verify: /usr/local/cuda/bin/nvcc --version"
+}
+
+install_cudnn() {
+    local -a cudnn_packages
+
+    echo -e "\e[36mInstalling cuDNN 9 for CUDA ${cudnn_cuda_major}...\e[m"
+
+    cudnn_packages=("libcudnn9-cuda-${cudnn_cuda_major}")
+    if [[ "${option_runtime}" != true ]]; then
+        cudnn_packages+=(
+            "libcudnn9-dev-cuda-${cudnn_cuda_major}"
+            "libcudnn9-headers-cuda-${cudnn_cuda_major}"
+        )
+    fi
+
+    if ! apt-cache show "libcudnn9-cuda-${cudnn_cuda_major}" >/dev/null 2>&1; then
+        echo -e "\e[33mSkipping cuDNN: 'libcudnn9-cuda-${cudnn_cuda_major}' not found in any apt source.\e[m"
+        echo "Install the cuDNN local repo from https://developer.nvidia.com/cudnn and re-run."
+        return 0
+    fi
+
+    apt_install install "${cudnn_packages[@]}"
+    echo -e "\e[32mDone.\e[0m cuDNN installed."
+}
+
+install_tensorrt() {
+    local -a tensorrt_packages
+    local trt_major="${tensorrt_version%%.*}"
+    local pinned_version
+
+    echo -e "\e[36mInstalling TensorRT ${tensorrt_version}...\e[m"
+
+    if [[ "${option_runtime}" == true ]]; then
+        tensorrt_packages=(
+            "libnvinfer${trt_major}"
+            "libnvinfer-plugin${trt_major}"
+            "libnvonnxparsers${trt_major}"
+        )
+    else
+        tensorrt_packages=(
+            "libnvinfer-dev"
+            "libnvinfer-plugin-dev"
+            "libnvonnxparsers-dev"
+            "libnvinfer-headers-dev"
+            "libnvinfer-bin"
+        )
+    fi
+
+    if ! apt-cache show "${tensorrt_packages[0]}" >/dev/null 2>&1; then
+        echo -e "\e[33mSkipping TensorRT: '${tensorrt_packages[0]}' not found in any apt source.\e[m"
+        echo "TensorRT needs the NVIDIA local apt repo (login required):"
+        echo "  1. Download 'nv-tensorrt-local-repo-ubuntu2404-${tensorrt_version}-cuda-*.deb' from"
+        echo "     https://developer.nvidia.com/tensorrt"
+        echo "  2. sudo dpkg -i nv-tensorrt-local-repo-*.deb && sudo apt update"
+        echo "  3. Re-run: ./setup-dev-env.sh --nvidia"
+        return 0
+    fi
+
+    # Pin every package to the same TensorRT release when that version is available.
+    pinned_version="$(apt_candidate_version "${tensorrt_packages[0]}" "${tensorrt_version}")"
+    if [[ -n "${pinned_version}" ]]; then
+        echo "Pinning TensorRT packages to ${pinned_version}."
+        local -a pinned_packages=()
+        local pkg
+        for pkg in "${tensorrt_packages[@]}"; do
+            pinned_packages+=("${pkg}=${pinned_version}")
+        done
+        apt_install install "${pinned_packages[@]}"
+    else
+        echo -e "\e[33mTensorRT ${tensorrt_version} not available in apt; installing the default candidate.\e[m"
+        apt_install install "${tensorrt_packages[@]}"
+    fi
+
+    echo -e "\e[32mDone.\e[0m TensorRT installed. Verify: dpkg -l | grep -E 'libnvinfer|libnvonnx'"
+}
+
+find_cuda_lib() {
+    # find_cuda_lib <soname-stem>, searching cuda_lib_dirs and skipping stub libraries
+    local name="$1"
+    local dir
+    local candidate
+
+    for dir in "${cuda_lib_dirs[@]}"; do
+        for candidate in "${dir}/lib${name}.so" "${dir}/lib${name}.so."*; do
+            if [[ -e "${candidate}" && "${candidate}" != *"/stubs/"* ]]; then
+                readlink -f "${candidate}"
+                return 0
+            fi
+        done
+    done
+
+    return 1
+}
+
+ensure_unversioned_cuda_lib() {
+    # CMake's FindCUDA needs lib<name>.so next to the versioned library
+    local name="$1"
+    local real_path
+    local lib_dir
+
+    real_path="$(find_cuda_lib "${name}" || true)"
+    if [[ -z "${real_path}" ]]; then
+        return 0
+    fi
+
+    lib_dir="$(dirname "${real_path}")"
+    if [[ -e "${lib_dir}/lib${name}.so" ]]; then
+        return 0
+    fi
+
+    if [[ -w "${lib_dir}" ]]; then
+        ln -sfn "$(basename "${real_path}")" "${lib_dir}/lib${name}.so"
+    else
+        sudo ln -sfn "$(basename "${real_path}")" "${lib_dir}/lib${name}.so"
+    fi
+}
+
+install_opencv_cuda() {
+    local previous_dir="${PWD}"
+    local install_prefix="${OPENCV_CUDA_PREFIX:-${HOME}/.local/opencv-cuda}"
+    local build_root="${OPENCV_CUDA_BUILD_ROOT:-${HOME}/.cache/opencv_cuda_build}"
+    local src_root="${build_root}/src"
+    local build_dir="${build_root}/build-${opencv_version}"
+    local cuda_libs_root
+    local cuda_lib_path
+    local cuda_arch_bin
+    local env_file
+    local lib
+    local -a generator
+    local -a missing_libs
+
+    # Only core + the contrib CUDA modules used by tensorrt_common
+    local build_list="core,imgproc,imgcodecs,cudev,cudaarithm,cudawarping,cudaimgproc,cudafilters"
+
+    echo -e "\e[36mBuilding OpenCV ${opencv_version} with CUDA...\e[m"
+
+    apt_install install \
+        build-essential \
+        cmake \
+        ninja-build \
+        pkg-config \
+        wget \
+        unzip \
+        libavcodec-dev \
+        libavformat-dev \
+        libswscale-dev \
+        libjpeg-dev \
+        libpng-dev \
+        libtiff-dev \
+        libtbb-dev
+
+    if [[ -z "${CUDA_HOME:-}" ]]; then
+        if [[ -x /usr/local/cuda/bin/nvcc ]]; then
+            export CUDA_HOME=/usr/local/cuda
+        elif [[ -x "${HOME}/.local/cuda-${cuda_version}-root/usr/local/cuda-${cuda_version}/bin/nvcc" ]]; then
+            export CUDA_HOME="${HOME}/.local/cuda-${cuda_version}-root/usr/local/cuda-${cuda_version}"
+        fi
+    fi
+
+    if [[ -z "${CUDA_HOME:-}" || ! -x "${CUDA_HOME}/bin/nvcc" ]]; then
+        echo -e "\e[33mSkipping OpenCV: nvcc not found (install the CUDA Toolkit first, or set CUDA_HOME).\e[m"
+        return 0
+    fi
+
+    export PATH="${CUDA_HOME}/bin:${PATH}"
+
+    # cuBLAS / NPP / cuFFT may live in a separate tree from the toolkit
+    cuda_libs_root="${CUDA_LIBS_ROOT:-${CUDA_HOME}}"
+    cuda_lib_dirs=("${CUDA_HOME}/lib64")
+    if [[ -d "${cuda_libs_root}/targets/x86_64-linux/lib" ]]; then
+        cuda_lib_dirs+=("${cuda_libs_root}/targets/x86_64-linux/lib")
+    fi
+    cuda_lib_path="$(IFS=:; echo "${cuda_lib_dirs[*]}")"
+    export LD_LIBRARY_PATH="${cuda_lib_path}:${LD_LIBRARY_PATH:-}"
+    export LIBRARY_PATH="${cuda_lib_path}:${LIBRARY_PATH:-}"
+
+    for lib in cublas cublasLt cufft nppc nppial nppicc nppidei nppif nppig nppim nppist nppisu nppitc npps; do
+        ensure_unversioned_cuda_lib "${lib}" || true
+    done
+
+    local cublas_lib cufft_lib
+    local nppc_lib nppial_lib nppicc_lib nppidei_lib nppif_lib nppig_lib
+    local nppim_lib nppist_lib nppisu_lib nppitc_lib npps_lib
+
+    cublas_lib="$(find_cuda_lib cublas || true)"
+    cufft_lib="$(find_cuda_lib cufft || true)"
+    nppc_lib="$(find_cuda_lib nppc || true)"
+    nppial_lib="$(find_cuda_lib nppial || true)"
+    nppicc_lib="$(find_cuda_lib nppicc || true)"
+    nppidei_lib="$(find_cuda_lib nppidei || true)"
+    nppif_lib="$(find_cuda_lib nppif || true)"
+    nppig_lib="$(find_cuda_lib nppig || true)"
+    nppim_lib="$(find_cuda_lib nppim || true)"
+    nppist_lib="$(find_cuda_lib nppist || true)"
+    nppisu_lib="$(find_cuda_lib nppisu || true)"
+    nppitc_lib="$(find_cuda_lib nppitc || true)"
+    npps_lib="$(find_cuda_lib npps || true)"
+
+    missing_libs=()
+    [[ -n "${cublas_lib}" ]] || missing_libs+=("cublas")
+    [[ -n "${cufft_lib}" ]] || missing_libs+=("cufft")
+    [[ -n "${nppc_lib}" ]] || missing_libs+=("nppc")
+    [[ -n "${npps_lib}" ]] || missing_libs+=("npps")
+
+    if ((${#missing_libs[@]})); then
+        echo -e "\e[33mSkipping OpenCV: missing CUDA libraries: ${missing_libs[*]}\e[m"
+        echo "Expected under ${cuda_lib_path}"
+        echo "Install libcublas-${cuda_apt_suffix} / libcufft-${cuda_apt_suffix} / libnpp-${cuda_apt_suffix}, or set CUDA_LIBS_ROOT."
+        return 0
+    fi
+
+    cuda_arch_bin="${OPENCV_CUDA_ARCH_BIN:-}"
+    if [[ -z "${cuda_arch_bin}" ]]; then
+        cuda_arch_bin="$(nvidia-smi --query-gpu=compute_cap --format=csv,noheader 2>/dev/null | head -1 | tr -d ' ' || true)"
+        cuda_arch_bin="${cuda_arch_bin:-8.6}"
+    fi
+
+    echo "  CUDA_HOME       = ${CUDA_HOME}"
+    echo "  CUDA_LIBS_ROOT  = ${cuda_libs_root}"
+    echo "  CUDA_ARCH_BIN   = ${cuda_arch_bin}"
+    echo "  INSTALL_PREFIX  = ${install_prefix}"
+    echo "  BUILD_DIR       = ${build_dir}"
+
+    mkdir -p "${src_root}" "${install_prefix}"
+    cd "${src_root}"
+
+    if [[ ! -d "opencv-${opencv_version}" ]]; then
+        echo "Downloading OpenCV ${opencv_version}..."
+        run_cmd wget -q --show-progress -O "opencv-${opencv_version}.zip" \
+            "https://github.com/opencv/opencv/archive/refs/tags/${opencv_version}.zip"
+        unzip -q "opencv-${opencv_version}.zip"
+    fi
+
+    if [[ ! -d "opencv_contrib-${opencv_version}" ]]; then
+        echo "Downloading OpenCV contrib ${opencv_version}..."
+        run_cmd wget -q --show-progress -O "opencv_contrib-${opencv_version}.zip" \
+            "https://github.com/opencv/opencv_contrib/archive/refs/tags/${opencv_version}.zip"
+        unzip -q "opencv_contrib-${opencv_version}.zip"
+    fi
+
+    rm -rf "${build_dir}"
+    mkdir -p "${build_dir}"
+    cd "${build_dir}"
+
+    if command -v ninja >/dev/null 2>&1; then
+        generator=(-G Ninja)
+    else
+        generator=()
+    fi
+
+    cmake "${generator[@]}" \
+        -D CMAKE_BUILD_TYPE=Release \
+        -D CMAKE_INSTALL_PREFIX="${install_prefix}" \
+        -D CMAKE_CXX_STANDARD=17 \
+        -D CMAKE_PREFIX_PATH="${cuda_libs_root}/targets/x86_64-linux" \
+        -D CMAKE_LIBRARY_PATH="${cuda_lib_path}" \
+        -D OPENCV_EXTRA_MODULES_PATH="${src_root}/opencv_contrib-${opencv_version}/modules" \
+        -D BUILD_LIST="${build_list}" \
+        -D WITH_CUDA=ON \
+        -D WITH_CUDNN=ON \
+        -D OPENCV_DNN_CUDA=OFF \
+        -D ENABLE_FAST_MATH=ON \
+        -D CUDA_FAST_MATH=ON \
+        -D WITH_CUBLAS=ON \
+        -D WITH_CUFFT=ON \
+        -D CUDA_ARCH_BIN="${cuda_arch_bin}" \
+        -D CUDA_ARCH_PTX="" \
+        -D CUDA_TOOLKIT_ROOT_DIR="${CUDA_HOME}" \
+        -D CUDA_NVCC_FLAGS="-std=c++17" \
+        -D CMAKE_CUDA_STANDARD=17 \
+        -D CMAKE_CXX_FLAGS="-I${cuda_libs_root}/targets/x86_64-linux/include" \
+        -D CUDA_cublas_LIBRARY="${cublas_lib}" \
+        -D CUDA_cufft_LIBRARY="${cufft_lib}" \
+        -D CUDA_nppc_LIBRARY="${nppc_lib}" \
+        -D CUDA_nppial_LIBRARY="${nppial_lib}" \
+        -D CUDA_nppicc_LIBRARY="${nppicc_lib}" \
+        -D CUDA_nppidei_LIBRARY="${nppidei_lib}" \
+        -D CUDA_nppif_LIBRARY="${nppif_lib}" \
+        -D CUDA_nppig_LIBRARY="${nppig_lib}" \
+        -D CUDA_nppim_LIBRARY="${nppim_lib}" \
+        -D CUDA_nppist_LIBRARY="${nppist_lib}" \
+        -D CUDA_nppisu_LIBRARY="${nppisu_lib}" \
+        -D CUDA_nppitc_LIBRARY="${nppitc_lib}" \
+        -D CUDA_npps_LIBRARY="${npps_lib}" \
+        -D CUDNN_INCLUDE_DIR=/usr/include/x86_64-linux-gnu \
+        -D CUDNN_LIBRARY=/usr/lib/x86_64-linux-gnu/libcudnn.so \
+        -D WITH_GTK=OFF \
+        -D WITH_QT=OFF \
+        -D WITH_OPENGL=OFF \
+        -D BUILD_EXAMPLES=OFF \
+        -D BUILD_TESTS=OFF \
+        -D BUILD_PERF_TESTS=OFF \
+        -D BUILD_opencv_apps=OFF \
+        -D BUILD_opencv_python2=OFF \
+        -D BUILD_opencv_python3=OFF \
+        -D BUILD_JAVA=OFF \
+        -D OPENCV_GENERATE_PKGCONFIG=ON \
+        -D OPENCV_ENABLE_NONFREE=OFF \
+        "${src_root}/opencv-${opencv_version}"
+
+    echo "Building (this can take a while)..."
+    if command -v ninja >/dev/null 2>&1; then
+        ninja -j"$(nproc)"
+        ninja install
+    else
+        make -j"$(nproc)"
+        make install
+    fi
+
+    if [[ ! -f "${install_prefix}/include/opencv4/opencv2/cudaimgproc.hpp" ]]; then
+        echo -e "\e[33mWarning: cudaimgproc.hpp is missing; the OpenCV CUDA modules were not built.\e[m"
+    fi
+
+    # Same content lands in ~/.bashrc and in the sourceable env file, with $HOME left unexpanded
+    local prefix_expr cuda_home_expr cuda_lib_path_expr
+    prefix_expr="$(portable_home_path "${install_prefix}")"
+    cuda_home_expr="$(portable_home_path "${CUDA_HOME}")"
+    cuda_lib_path_expr="$(portable_home_path_list "${cuda_lib_path}")"
+
+    nvidia_env_content="export CUDA_HOME=\"${cuda_home_expr}\"
+export PATH=\"\${CUDA_HOME}/bin:\${PATH}\"
+export LD_LIBRARY_PATH=\"${prefix_expr}/lib:${cuda_lib_path_expr}\${LD_LIBRARY_PATH:+:\${LD_LIBRARY_PATH}}\"
+export OpenCV_DIR=\"${prefix_expr}/lib/cmake/opencv4\"
+export PKG_CONFIG_PATH=\"${prefix_expr}/lib/pkgconfig\${PKG_CONFIG_PATH:+:\${PKG_CONFIG_PATH}}\""
+
+    env_file="${install_prefix}/setup_env.sh"
+    {
+        echo "# Generated by setup-dev-env.sh --nvidia"
+        echo "${nvidia_env_content}"
+    } > "${env_file}"
+
+    cd "${previous_dir}"
+
+    echo -e "\e[32mDone.\e[0m OpenCV ${opencv_version} installed into ${install_prefix}."
+    echo "Sourceable copy of the same env: ${env_file}"
+}
+
+install_nvidia_stack() {
+    if [[ "${option_no_nvidia}" == true ]]; then
+        echo -e "\e[33mSkipping the NVIDIA stack (--no-nvidia).\e[m"
+        return 0
+    fi
+
+    if ! check_nvidia_prerequisites; then
+        return 0
+    fi
+
+    setup_cuda_apt_repo
+    install_nvidia_driver
+    install_cuda_toolkit
+    install_cudnn
+    install_tensorrt
+    install_opencv_cuda
+
+    if [[ -n "${nvidia_env_content}" ]]; then
+        write_bashrc_block "asr_sdm nvidia env" "${nvidia_env_content}"
+    fi
+
+    echo -e "\e[32mNVIDIA stack setup complete.\e[0m"
+    echo "Reload: source ~/.bashrc  |  Reboot first if the driver was installed."
+}
+
 parse_args() {
     while [[ $# -gt 0 ]]; do
         case "$1" in
@@ -218,6 +868,10 @@ parse_args() {
                 option_list=true
                 shift
                 ;;
+            --common)
+                option_common=true
+                shift
+                ;;
             --ros)
                 option_ros=true
                 shift
@@ -226,11 +880,27 @@ parse_args() {
                 option_pinocchio=true
                 shift
                 ;;
+            --nvidia)
+                option_nvidia=true
+                shift
+                ;;
+            --no-nvidia)
+                option_no_nvidia=true
+                shift
+                ;;
+            --no-cuda-drivers)
+                option_no_cuda_drivers=true
+                shift
+                ;;
+            --runtime)
+                option_runtime=true
+                shift
+                ;;
             -y)
                 option_yes=true
                 shift
                 ;;
-            -v | --no-nvidia | --no-cuda-drivers | --runtime | --download-artifacts)
+            -v | --download-artifacts)
                 echo "Warning: option '$1' is not implemented yet, ignoring."
                 shift
                 ;;
@@ -260,16 +930,25 @@ main() {
         exit 0
     fi
 
-    if [[ "${option_ros}" != true && "${option_pinocchio}" != true ]]; then
+    if [[ "${option_common}" != true && "${option_ros}" != true \
+        && "${option_pinocchio}" != true && "${option_nvidia}" != true ]]; then
         print_help
-        echo "No actionable option provided. Use --list, --ros and/or --pinocchio."
+        echo "No actionable option provided. Use --list, --common, --ros, --nvidia and/or --pinocchio."
         exit 1
     fi
 
     confirm_or_exit
 
+    if [[ "${option_common}" == true ]]; then
+        install_common
+    fi
+
     if [[ "${option_ros}" == true ]]; then
         install_ros
+    fi
+
+    if [[ "${option_nvidia}" == true ]]; then
+        install_nvidia_stack
     fi
 
     if [[ "${option_pinocchio}" == true ]]; then
