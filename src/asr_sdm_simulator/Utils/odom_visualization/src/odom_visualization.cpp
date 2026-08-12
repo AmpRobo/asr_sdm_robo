@@ -101,8 +101,17 @@ void publish_base_tf(const rclcpp::Time& stamp, double x, double y, double z,
   transform45.transform.rotation.y = q45(2);
   transform45.transform.rotation.z = q45(3);
 
-  geometry_msgs::msg::TransformStamped transform_vision = transform45;
+  geometry_msgs::msg::TransformStamped transform_vision;
+  transform_vision.header.stamp = stamp;
+  transform_vision.header.frame_id = string("base");
   transform_vision.child_frame_id = string("vision");
+  transform_vision.transform.translation.x = 0;
+  transform_vision.transform.translation.y = 0;
+  transform_vision.transform.translation.z = 0;
+  transform_vision.transform.rotation.w = 1.0;
+  transform_vision.transform.rotation.x = 0.0;
+  transform_vision.transform.rotation.y = 0.0;
+  transform_vision.transform.rotation.z = 0.0;
 
   geometry_msgs::msg::TransformStamped transform90;
   transform90.header.stamp = stamp;
