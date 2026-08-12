@@ -28,6 +28,8 @@ target_include_directories(pinocchio_dynamics_node
 target_link_libraries(pinocchio_dynamics_node
   PRIVATE
     ament_index_cpp::ament_index_cpp
+    # pinocchio_headers adds include/pinocchio/deprecated (needed for some v3-era paths).
+    pinocchio::pinocchio_headers
     pinocchio::pinocchio
     rclcpp::rclcpp
     Eigen3::Eigen

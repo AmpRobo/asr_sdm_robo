@@ -21,8 +21,8 @@
 #include <pinocchio/algorithm/center-of-mass.hpp>
 #include <pinocchio/algorithm/crba.hpp>
 #include <pinocchio/algorithm/joint-configuration.hpp>
-#include <pinocchio/multibody/joint/joint-free-flyer.hpp>
-#include <pinocchio/multibody/model.hpp>
+#include <pinocchio/multibody.hpp>
+#include <pinocchio/multibody/joint.hpp>
 #include <pinocchio/parsers/urdf.hpp>
 
 namespace asr_sdm_kinematic_dynamic_model
