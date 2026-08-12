@@ -2,6 +2,10 @@
 
 using namespace Eigen;
 
+// Configurable frame correction quaternion (set via registerPub parameters)
+static Eigen::Quaterniond frame_correction_q = Eigen::Quaterniond::Identity();
+static bool frame_correction_enabled = false;
+
 rclcpp::Publisher<nav_msgs::msg::Odometry>::SharedPtr pub_odometry;
 rclcpp::Publisher<nav_msgs::msg::Odometry>::SharedPtr pub_latest_odometry;
 rclcpp::Publisher<nav_msgs::msg::Path>::SharedPtr pub_path;
@@ -44,6 +48,38 @@ void registerPub(rclcpp::Node::SharedPtr n)
 
     br = std::make_shared<tf2_ros::TransformBroadcaster>(n);
 
+    // Read optional frame correction parameters
+    // enable_frame_correction: apply rotation to odometry output
+    // frame_correction_roll/yaw/pitch: rotation angles in degrees
+    n->declare_parameter<bool>("enable_frame_correction", false);
+    n->declare_parameter<double>("frame_correction_roll", 0.0);
+    n->declare_parameter<double>("frame_correction_pitch", 0.0);
+    n->declare_parameter<double>("frame_correction_yaw", 0.0);
+
+    bool enable_correction = false;
+    n->get_parameter("enable_frame_correction", enable_correction);
+    if (enable_correction)
+    {
+        double roll_deg, pitch_deg, yaw_deg;
+        n->get_parameter("frame_correction_roll", roll_deg);
+        n->get_parameter("frame_correction_pitch", pitch_deg);
+        n->get_parameter("frame_correction_yaw", yaw_deg);
+
+        double roll_rad = roll_deg * M_PI / 180.0;
+        double pitch_rad = pitch_deg * M_PI / 180.0;
+        double yaw_rad = yaw_deg * M_PI / 180.0;
+
+        Eigen::AngleAxisd roll_angle(roll_rad, Eigen::Vector3d::UnitX());
+        Eigen::AngleAxisd pitch_angle(pitch_rad, Eigen::Vector3d::UnitY());
+        Eigen::AngleAxisd yaw_angle(yaw_rad, Eigen::Vector3d::UnitZ());
+
+        frame_correction_q = yaw_angle * pitch_angle * roll_angle;
+        frame_correction_enabled = true;
+
+        RCUTILS_LOG_INFO("Frame correction enabled: roll=%.1f, pitch=%.1f, yaw=%.1f deg",
+                        roll_deg, pitch_deg, yaw_deg);
+    }
+
     cameraposevisual.setScale(1);
     cameraposevisual.setLineWidth(0.05);
     keyframebasevisual.setScale(0.1);
@@ -52,7 +88,13 @@ void registerPub(rclcpp::Node::SharedPtr n)
 
 void pubLatestOdometry(const Eigen::Vector3d &P, const Eigen::Quaterniond &Q, const Eigen::Vector3d &V, const std_msgs::msg::Header &header)
 {
-    Eigen::Quaterniond quadrotor_Q = Q ;
+    Eigen::Quaterniond quadrotor_Q = Q;
+
+    // Apply frame correction to orientation if enabled
+    if (frame_correction_enabled)
+    {
+        quadrotor_Q = frame_correction_q * quadrotor_Q;
+    }
 
     nav_msgs::msg::Odometry odometry;
     odometry.header = header;
@@ -121,6 +163,13 @@ void pubOdometry(const Estimator &estimator, const std_msgs::msg::Header &header
         odometry.child_frame_id = "world";
         Quaterniond tmp_Q;
         tmp_Q = Quaterniond(estimator.Rs[WINDOW_SIZE]);
+
+        // Apply frame correction to orientation if enabled
+        if (frame_correction_enabled)
+        {
+            tmp_Q = frame_correction_q * tmp_Q;
+        }
+
         odometry.pose.pose.position.x = estimator.Ps[WINDOW_SIZE].x();
         odometry.pose.pose.position.y = estimator.Ps[WINDOW_SIZE].y();
         odometry.pose.pose.position.z = estimator.Ps[WINDOW_SIZE].z();
@@ -147,6 +196,13 @@ void pubOdometry(const Estimator &estimator, const std_msgs::msg::Header &header
         Quaterniond correct_q;
         correct_t = estimator.drift_correct_r * estimator.Ps[WINDOW_SIZE] + estimator.drift_correct_t;
         correct_q = estimator.drift_correct_r * estimator.Rs[WINDOW_SIZE];
+
+        // Apply frame correction to drift-corrected orientation if enabled
+        if (frame_correction_enabled)
+        {
+            correct_q = frame_correction_q * correct_q;
+        }
+
         odometry.pose.pose.position.x = correct_t.x();
         odometry.pose.pose.position.y = correct_t.y();
         odometry.pose.pose.position.z = correct_t.z();
@@ -317,6 +373,12 @@ void pubTF(const Estimator &estimator, const std_msgs::msg::Header &header)
     Quaterniond correct_q;
     correct_t = estimator.Ps[WINDOW_SIZE];
     correct_q = estimator.Rs[WINDOW_SIZE];
+
+    // Apply frame correction to orientation if enabled
+    if (frame_correction_enabled)
+    {
+        correct_q = frame_correction_q * correct_q;
+    }
 
     transform.header.frame_id = "world";
     transform.child_frame_id = "body";
