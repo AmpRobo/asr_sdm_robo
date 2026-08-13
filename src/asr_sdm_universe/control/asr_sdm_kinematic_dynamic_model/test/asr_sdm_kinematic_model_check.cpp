@@ -1,5 +1,5 @@
-#include "asr_sdm_control_manager/front_unit_following_controller_3d.hpp"
-#include "asr_sdm_control_manager/asr_sdm_kinematic_model.hpp"
+#include "asr_sdm_head_following_control/front_unit_following_controller_3d.hpp"
+#include "asr_sdm_kinematic_dynamic_model/asr_sdm_kinematic_model.hpp"
 
 #include <pinocchio/algorithm/joint-configuration.hpp>
 
@@ -250,6 +250,31 @@ bool checkVelocityMapping(BodyModel & body_model)
   return propagation_error < kVelocityTolerance && jacobian_error < kVelocityTolerance;
 }
 
+bool checkJointLimitIntegration()
+{
+  auto params = makeModelParameters();
+  params.joint_limit = 0.1;
+  BodyModel body_model(params);
+
+  Eigen::VectorXd q = body_model.neutralConfiguration();
+  BodyModel::JointVector theta_dot = BodyModel::JointVector::Constant(1.0);
+  const Eigen::VectorXd v = body_model.toVelocity(0.0, 0.0, 0.0, theta_dot);
+  for (int step = 0; step < 100; ++step) {
+    q = body_model.integrateConfiguration(q, v, 0.02);
+  }
+
+  Eigen::Vector3d head_position;
+  Eigen::Matrix3d head_frame;
+  BodyModel::JointVector theta;
+  body_model.fromConfiguration(q, head_position, head_frame, theta);
+
+  const double max_angle = theta.cwiseAbs().maxCoeff();
+  std::printf(
+    "joint limit integration: max articulation angle = %.6f rad, limit = %.6f rad\n",
+    max_angle, params.joint_limit);
+  return max_angle <= params.joint_limit + kTolerance;
+}
+
 void printDynamicsSample(BodyModel & body_model)
 {
   const Eigen::VectorXd q = body_model.neutralConfiguration();
@@ -272,6 +297,7 @@ int main()
   ok = checkRandomConfigurations(body_model) && ok;
   ok = checkControllerRollout(body_model) && ok;
   ok = checkVelocityMapping(body_model) && ok;
+  ok = checkJointLimitIntegration() && ok;
   printDynamicsSample(body_model);
 
   std::printf("%s\n", ok ? "ALL CHECKS PASSED" : "CHECKS FAILED");

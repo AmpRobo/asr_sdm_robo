@@ -1,7 +1,7 @@
-#ifndef FRONT_UNIT_FOLLOWING_CONTROLLER_2D_HPP_
-#define FRONT_UNIT_FOLLOWING_CONTROLLER_2D_HPP_
+#ifndef ASR_SDM_HEAD_FOLLOWING_CONTROL_FRONT_UNIT_FOLLOWING_CONTROLLER_2D_HPP_
+#define ASR_SDM_HEAD_FOLLOWING_CONTROL_FRONT_UNIT_FOLLOWING_CONTROLLER_2D_HPP_
 
-#include "asr_sdm_control_manager/types.hpp"
+#include "asr_sdm_head_following_control/types.hpp"
 
 namespace asr
 {
@@ -19,4 +19,4 @@ private:
 
 }  // namespace asr
 
-#endif  // FRONT_UNIT_FOLLOWING_CONTROLLER_2D_HPP_
+#endif  // ASR_SDM_HEAD_FOLLOWING_CONTROL_FRONT_UNIT_FOLLOWING_CONTROLLER_2D_HPP_

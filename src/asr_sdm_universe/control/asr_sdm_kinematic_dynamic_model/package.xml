@@ -16,6 +16,7 @@
   <depend>geometry_msgs</depend>
   <depend>std_msgs</depend>
   <depend>urdfdom_headers</depend>
+  <depend>eigen</depend>
 
   <build_depend>eigen3_cmake_module</build_depend>
   <build_export_depend>eigen3_cmake_module</build_export_depend>
@@ -24,6 +25,7 @@
   <exec_depend>launch</exec_depend>
   <exec_depend>launch_ros</exec_depend>
 
+  <test_depend>asr_sdm_head_following_control</test_depend>
   <test_depend>ament_lint_auto</test_depend>
   <test_depend>ament_lint_common</test_depend>
 

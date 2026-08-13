@@ -77,6 +77,11 @@ public:
 
   void updateKinematics(const Eigen::VectorXd & q);
   void updateKinematics(const Eigen::VectorXd & q, const Eigen::VectorXd & v);
+  Eigen::VectorXd integrateConfiguration(
+    const Eigen::VectorXd & q, const Eigen::VectorXd & v, double dt) const;
+  void fromConfiguration(
+    const Eigen::VectorXd & q, Eigen::Vector3d & head_position,
+    Eigen::Matrix3d & head_frame, JointVector & theta) const;
 
   std::array<Eigen::Vector3d, kNumPoints> computeBodyPoints() const;
   std::array<Eigen::Matrix3d, kNumLinks> computeLinkFrames() const;

@@ -117,6 +117,8 @@ public:
 
   SimulationState3D makeInitialState() const;
   HeadCommand3D limitCommand(const HeadCommand3D & cmd) const;
+  JointVelocity3D computeJointVelocity(
+    const HeadCommand3D & cmd, const SimulationState3D & state) const;
   JointVelocity3D step(const HeadCommand3D & cmd, double dt, SimulationState3D & state) const;
 
 private:

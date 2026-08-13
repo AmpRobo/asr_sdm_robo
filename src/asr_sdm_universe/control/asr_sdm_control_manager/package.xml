@@ -18,6 +18,8 @@
   <depend>asr_sdm_control_msgs</depend>
   <depend>eigen</depend>
   <depend>pinocchio</depend>
+  <depend>asr_sdm_kinematic_dynamic_model</depend>
+  <depend>asr_sdm_head_following_control</depend>
 
   <exec_depend>launch</exec_depend>
   <exec_depend>launch_ros</exec_depend>

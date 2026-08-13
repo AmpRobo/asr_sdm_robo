@@ -1,5 +1,5 @@
-#ifndef CONTROL_UTILS_HPP_
-#define CONTROL_UTILS_HPP_
+#ifndef ASR_SDM_HEAD_FOLLOWING_CONTROL_CONTROL_UTILS_HPP_
+#define ASR_SDM_HEAD_FOLLOWING_CONTROL_CONTROL_UTILS_HPP_
 
 #include <cmath>
 
@@ -21,4 +21,4 @@ inline double wrapAngle(double angle)
 
 }  // namespace asr
 
-#endif  // CONTROL_UTILS_HPP_
+#endif  // ASR_SDM_HEAD_FOLLOWING_CONTROL_CONTROL_UTILS_HPP_

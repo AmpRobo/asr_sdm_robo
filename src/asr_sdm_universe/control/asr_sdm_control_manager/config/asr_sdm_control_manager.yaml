@@ -3,7 +3,7 @@
 # which is what planning_simulator does with its own config.
 
 features:
-  # Start realtime_front_unit_controller_3d.
+  # Start asr_sdm_control_manager.
   use_kinematic_controller: true
 
 topics:
@@ -33,6 +33,13 @@ kinematic_controller:
   max_curvature: 1.2
   curvature_velocity_epsilon: 0.001
   damping: 0.02
+
+  # Additional Pinocchio model parameters. They are not required by the
+  # current kinematic calculations, but are used by the model's dynamics API.
+  link_mass: 1.5
+  link_radius: 0.05
+  joint_velocity_limit: 2.0
+  joint_effort_limit: 50.0
 
   # URDF joint mapping: index i is the URDF joint, the value is the controller DOF it reads.
   joint_source_indices: [0, 1, 2, 3, 4, 5]

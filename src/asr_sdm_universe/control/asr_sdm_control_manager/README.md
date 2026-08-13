@@ -1,7 +1,7 @@
 # asr_sdm_control_manager
 
 Front-unit following kinematic controller: turns `cmd_vel` into joint states and odometry to drive the robot model.
-Default node is the **3D controller** `realtime_front_unit_controller_3d` (used by this package’s launch and by `planning_simulator`).
+Default node is the **control manager** `asr_sdm_control_manager` (used by this package’s launch and by `planning_simulator`).
 
 [English](#english) · [中文](#中文)
 
@@ -15,7 +15,7 @@ Topic names live under `topics` in `config/asr_sdm_control_manager.yaml`. Caller
 
 ### Topics
 
-#### 3D controller (default, `realtime_front_unit_controller_3d`)
+#### Control manager (default, `asr_sdm_control_manager`)
 
 Main link with teleop / planning: `/control/asr_sdm/cmd_vel`.
 
@@ -32,7 +32,7 @@ Main link with teleop / planning: `/control/asr_sdm/cmd_vel`.
 |---|---|---|
 | `/control/asr_sdm/odom` | `nav_msgs/msg/Odometry` | Controller odometry |
 | `/control/joint_states` | `sensor_msgs/msg/JointState` | Joint states for `robot_state_publisher` |
-| `/control/asr_sdm/controller_state_3d` | `std_msgs/msg/Float64MultiArray` | Internal state (visualizer) |
+| `/control/asr_sdm/controller_state_3d` | `std_msgs/msg/Float64MultiArray` | Internal controller state |
 | `/control/asr_sdm/control_cmd_3d` | `asr_sdm_control_msgs/msg/ControlCmd` | Hardware command; **off by default** (`publish_control_cmd: false`) |
 
 YAML keys:
@@ -47,29 +47,12 @@ topics:
   control_cmd: /control/asr_sdm/control_cmd_3d
 ```
 
-#### 2D controller (`realtime_front_unit_controller_2d`)
+#### Controller libraries and optional demos
 
-For standalone `ros2 run` debugging; not started by the default launch.
-
-**Subscribe**
-
-| Topic | Type | Role |
-|---|---|---|
-| `/control/asr_sdm/cmd_vel` | `geometry_msgs/msg/Twist` | Velocity command |
-
-**Publish**
-
-| Topic | Type | Role |
-|---|---|---|
-| `/control/asr_sdm/control_cmd` | `asr_sdm_control_msgs/msg/ControlCmd` | Hardware command |
-| `/control/asr_sdm/controller_state` | `std_msgs/msg/Float64MultiArray` | Internal state (2D visualizer) |
-
-#### Visualizers
-
-| Node | Subscribe |
-|---|---|
-| `realtime_controller_visualizer_3d` | `/control/asr_sdm/controller_state_3d` |
-| `realtime_controller_visualizer_2d` | `/control/asr_sdm/controller_state` |
+The ROS-independent 2D/3D controller libraries are provided by
+`asr_sdm_head_following_control`. Its offline plotting demos are disabled in a
+normal build and can be enabled with `-DBUILD_CONTROLLER_DEMOS=ON`. The ROS
+control node remains in this package.
 
 ### Build
 
@@ -79,16 +62,18 @@ colcon build --packages-up-to asr_sdm_control_manager
 source install/setup.bash
 ```
 
-Offline 3D sims / visualizers need Matplot++ (and optional Python deps):
+Optional controller plotting demos need Matplot++ and Python dependencies:
 
 ```bash
 sudo apt install python3-dev python3-numpy python3-matplotlib python3-tk
 ./install_matplotplusplus.sh
+colcon build --packages-select asr_sdm_head_following_control \
+  --cmake-args -DBUILD_CONTROLLER_DEMOS=ON
 ```
 
 ### Launch
 
-This package’s launch starts only the kinematic controller:
+This package’s launch starts the control manager:
 
 ```bash
 ros2 launch asr_sdm_control_manager asr_sdm_control_manager.launch.py
@@ -106,38 +91,21 @@ ros2 launch planning_simulator planning_simulator_launch.py control:=enable tele
 
 `planning_simulator` includes this package’s launch and passes its own `config/planning_simulator.yaml` as `config_file`.
 
-Standalone nodes:
+Run the manager directly:
 
 ```bash
-ros2 run asr_sdm_control_manager realtime_front_unit_controller_3d
-ros2 run asr_sdm_control_manager realtime_controller_visualizer_3d
-ros2 run asr_sdm_control_manager realtime_front_unit_controller_2d
-ros2 run asr_sdm_control_manager realtime_controller_visualizer_2d
+ros2 run asr_sdm_control_manager asr_sdm_control_manager
 ```
 
 Gamepad input comes from `asr_sdm_teleop` (+ `joy`), which publishes to `/control/asr_sdm/cmd_vel`.
 
-### Topic smoke test
+### Optional offline plotting demos
 
-Without a gamepad:
-
-```bash
-ros2 topic pub --rate 50 /control/asr_sdm/cmd_vel geometry_msgs/msg/Twist \
-  "{linear: {x: 0.10, y: 0.0, z: 0.0}, angular: {x: 0.0, y: 0.12, z: 0.30}}"
-```
-
-Stop:
+Build the algorithm package with `-DBUILD_CONTROLLER_DEMOS=ON` first, then run:
 
 ```bash
-ros2 topic pub --once /control/asr_sdm/cmd_vel geometry_msgs/msg/Twist \
-  "{linear: {x: 0.0, y: 0.0, z: 0.0}, angular: {x: 0.0, y: 0.0, z: 0.0}}"
-```
-
-### Offline simulation
-
-```bash
-ros2 run asr_sdm_control_manager front_unit_following_controller_test_2d
-ros2 run asr_sdm_control_manager front_unit_following_controller_test_3d
+ros2 run asr_sdm_head_following_control front_unit_following_controller_test_2d
+ros2 run asr_sdm_head_following_control front_unit_following_controller_test_3d
 ```
 
 ### Main parameters (3D)
@@ -171,13 +139,13 @@ Override with `--ros-args -p name:=value` or edit the yaml.
 ## 中文
 
 前端跟随运动学控制器：将 `cmd_vel` 转为关节状态与里程计，驱动机器人模型。  
-默认使用 **3D 控制节点** `realtime_front_unit_controller_3d`（本包 launch 与 `planning_simulator` 均如此）。
+默认使用 **控制管理节点** `asr_sdm_control_manager`（本包 launch 与 `planning_simulator` 均如此）。
 
 话题名集中在 `config/asr_sdm_control_manager.yaml` 的 `topics` 段；`planning_simulator` 可通过 `config_file` 传入同 schema 配置覆盖。
 
 ### Topics
 
-#### 3D 控制节点（默认，`realtime_front_unit_controller_3d`）
+#### 控制管理节点（默认，`asr_sdm_control_manager`）
 
 与 teleop / planning 的主通道是 `/control/asr_sdm/cmd_vel`。
 
@@ -194,7 +162,7 @@ Override with `--ros-args -p name:=value` or edit the yaml.
 |---|---|---|
 | `/control/asr_sdm/odom` | `nav_msgs/msg/Odometry` | 控制器里程计 |
 | `/control/joint_states` | `sensor_msgs/msg/JointState` | 关节状态（供给 `robot_state_publisher`） |
-| `/control/asr_sdm/controller_state_3d` | `std_msgs/msg/Float64MultiArray` | 内部状态（可视化） |
+| `/control/asr_sdm/controller_state_3d` | `std_msgs/msg/Float64MultiArray` | 内部控制状态 |
 | `/control/asr_sdm/control_cmd_3d` | `asr_sdm_control_msgs/msg/ControlCmd` | 硬件指令；**默认不发布**（`publish_control_cmd: false`） |
 
 对应 yaml 键：
@@ -209,29 +177,11 @@ topics:
   control_cmd: /control/asr_sdm/control_cmd_3d
 ```
 
-#### 2D 控制节点（`realtime_front_unit_controller_2d`）
+#### 控制算法库和可选演示程序
 
-单独 `ros2 run` 调试时使用，不由默认 launch 启动。
-
-**Subscribe**
-
-| Topic | 类型 | 用途 |
-|---|---|---|
-| `/control/asr_sdm/cmd_vel` | `geometry_msgs/msg/Twist` | 速度指令 |
-
-**Publish**
-
-| Topic | 类型 | 用途 |
-|---|---|---|
-| `/control/asr_sdm/control_cmd` | `asr_sdm_control_msgs/msg/ControlCmd` | 硬件控制指令 |
-| `/control/asr_sdm/controller_state` | `std_msgs/msg/Float64MultiArray` | 内部状态（2D 可视化） |
-
-#### 可视化节点
-
-| 节点 | Subscribe |
-|---|---|
-| `realtime_controller_visualizer_3d` | `/control/asr_sdm/controller_state_3d` |
-| `realtime_controller_visualizer_2d` | `/control/asr_sdm/controller_state` |
+ROS-independent 的 2D/3D 控制算法库由
+`asr_sdm_head_following_control` 提供。离线绘图演示程序在普通构建中默认关闭，可通过
+`-DBUILD_CONTROLLER_DEMOS=ON` 显式启用；ROS 控制节点仍由本包提供。
 
 ### 编译
 
@@ -241,16 +191,18 @@ colcon build --packages-up-to asr_sdm_control_manager
 source install/setup.bash
 ```
 
-3D 离线仿真与可视化需要 Matplot++（及可选 Python 依赖）：
+可选控制器绘图演示需要 Matplot++ 和 Python 依赖：
 
 ```bash
 sudo apt install python3-dev python3-numpy python3-matplotlib python3-tk
 ./install_matplotplusplus.sh
+colcon build --packages-select asr_sdm_head_following_control \
+  --cmake-args -DBUILD_CONTROLLER_DEMOS=ON
 ```
 
 ### 启动
 
-本包 launch 只起运动学控制器：
+本包 launch 启动控制管理节点：
 
 ```bash
 ros2 launch asr_sdm_control_manager asr_sdm_control_manager.launch.py
@@ -268,38 +220,21 @@ ros2 launch planning_simulator planning_simulator_launch.py control:=enable tele
 
 `planning_simulator` 会 include 本包 launch，并用自己的 `config/planning_simulator.yaml` 作为 `config_file`。
 
-手动 `ros2 run`：
+直接运行控制管理节点：
 
 ```bash
-ros2 run asr_sdm_control_manager realtime_front_unit_controller_3d
-ros2 run asr_sdm_control_manager realtime_controller_visualizer_3d
-ros2 run asr_sdm_control_manager realtime_front_unit_controller_2d
-ros2 run asr_sdm_control_manager realtime_controller_visualizer_2d
+ros2 run asr_sdm_control_manager asr_sdm_control_manager
 ```
 
 手柄链路由 `asr_sdm_teleop`（及 `joy`）提供，发布到 `/control/asr_sdm/cmd_vel`。
 
-### Topic 输入测试
+### 可选离线绘图演示
 
-无手柄时直接发速度：
-
-```bash
-ros2 topic pub --rate 50 /control/asr_sdm/cmd_vel geometry_msgs/msg/Twist \
-  "{linear: {x: 0.10, y: 0.0, z: 0.0}, angular: {x: 0.0, y: 0.12, z: 0.30}}"
-```
-
-停止：
+先使用 `-DBUILD_CONTROLLER_DEMOS=ON` 构建算法包，然后运行：
 
 ```bash
-ros2 topic pub --once /control/asr_sdm/cmd_vel geometry_msgs/msg/Twist \
-  "{linear: {x: 0.0, y: 0.0, z: 0.0}, angular: {x: 0.0, y: 0.0, z: 0.0}}"
-```
-
-### 离线仿真
-
-```bash
-ros2 run asr_sdm_control_manager front_unit_following_controller_test_2d
-ros2 run asr_sdm_control_manager front_unit_following_controller_test_3d
+ros2 run asr_sdm_head_following_control front_unit_following_controller_test_2d
+ros2 run asr_sdm_head_following_control front_unit_following_controller_test_3d
 ```
 
 ### 主要参数（3D）
