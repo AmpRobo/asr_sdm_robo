@@ -140,6 +140,17 @@ install_common() {
         python3-pip
         python3-venv
         python3-dev
+        # Qt 6 and the QML modules needed at runtime by Qt Quick UIs
+        qt6-base-dev
+        qt6-declarative-dev
+        qt6-tools-dev
+        qml6-module-qtqml
+        qml6-module-qtqml-workerscript
+        qml6-module-qtquick
+        qml6-module-qtquick-controls
+        qml6-module-qtquick-layouts
+        qml6-module-qtquick-templates
+        qml6-module-qtquick-window
         # Everyday CLI tools
         vim
         tmux
