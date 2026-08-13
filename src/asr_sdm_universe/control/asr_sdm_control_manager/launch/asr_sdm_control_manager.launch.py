@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
-"""Launch the asr_sdm kinematic controller.
+"""
+Launch the asr_sdm kinematic controller.
 
-realtime_front_unit_controller_3d turns cmd_vel into joint states and odometry,
+asr_sdm_control_manager turns cmd_vel into joint states and odometry,
 which is what animates the robot model published by asr_sdm_model.launch.py.
 
 Parameters come from config/asr_sdm_control_manager.yaml. Pass config_file:=<path>
@@ -11,17 +12,15 @@ launch.
 
 from __future__ import annotations
 
-import os
 from typing import Any
 
-import yaml
-from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument, OpaqueFunction
 from launch.conditions import IfCondition
 from launch.substitutions import LaunchConfiguration, PathJoinSubstitution
 from launch_ros.actions import Node
 from launch_ros.substitutions import FindPackageShare
+import yaml
 
 
 PACKAGE_NAME = 'asr_sdm_control_manager'
@@ -52,7 +51,7 @@ def _make_kinematic_controller_node(cfg: dict[str, Any]) -> Node:
     })
     return Node(
         package=PACKAGE_NAME,
-        executable='realtime_front_unit_controller_3d',
+        executable='asr_sdm_control_manager',
         name='asr_sdm_kinematic_controller',
         output='screen',
         condition=_if_bool(bool(features.get('use_kinematic_controller', True))),

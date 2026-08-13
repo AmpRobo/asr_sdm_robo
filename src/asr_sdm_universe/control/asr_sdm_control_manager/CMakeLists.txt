@@ -11,12 +11,12 @@ endif()
 if(NOT CMAKE_CXX_STANDARD)
   set(CMAKE_CXX_STANDARD 17)
 endif()
+
 if(CMAKE_COMPILER_IS_GNUCXX OR CMAKE_CXX_COMPILER_ID MATCHES "Clang")
   add_compile_options(-Wall -Wextra -Wpedantic)
 endif()
 
 # find dependencies
-find_package(ament_cmake_auto REQUIRED)
 find_package(ament_cmake REQUIRED)
 find_package(rclcpp REQUIRED)
 find_package(std_msgs REQUIRED)
@@ -24,126 +24,15 @@ find_package(geometry_msgs REQUIRED)
 find_package(sensor_msgs REQUIRED)
 find_package(nav_msgs REQUIRED)
 find_package(asr_sdm_control_msgs REQUIRED)
-find_package(asr_sdm_hardware_msgs REQUIRED)
-# find_package(periphery REQUIRED)
-find_package(Python3 REQUIRED COMPONENTS Interpreter Development NumPy)
-# Pinocchio ships in /opt/openrobots when installed from robotpkg.
-list(APPEND CMAKE_PREFIX_PATH "/opt/openrobots")
-find_package(pinocchio QUIET)
-find_package(Matplot++ QUIET)
-if(NOT TARGET Matplot++::matplot)
-  set(MATPLOTPP_SOURCE_DIR "" CACHE PATH "Path to the Matplot++ source tree")
-  if(NOT MATPLOTPP_SOURCE_DIR)
-    message(FATAL_ERROR "Matplot++ was not found. Install Matplot++ so find_package(Matplot++) works, or configure with -DMATPLOTPP_SOURCE_DIR=/path/to/matplotplusplus.")
-  endif()
-  if(NOT EXISTS "${MATPLOTPP_SOURCE_DIR}/CMakeLists.txt")
-    message(FATAL_ERROR "MATPLOTPP_SOURCE_DIR must point to a Matplot++ source tree containing CMakeLists.txt: ${MATPLOTPP_SOURCE_DIR}")
-  endif()
-  set(MATPLOTPP_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
-  set(MATPLOTPP_BUILD_TESTS OFF CACHE BOOL "" FORCE)
-  set(MATPLOTPP_BUILD_INSTALLER OFF CACHE BOOL "" FORCE)
-  add_subdirectory("${MATPLOTPP_SOURCE_DIR}" ${CMAKE_CURRENT_BINARY_DIR}/matplotplusplus EXCLUDE_FROM_ALL)
-endif()
-# Find libgpiod
-# find_package(PkgConfig REQUIRED)
-# pkg_check_modules(GPIOD REQUIRED libgpiod)
-# uncomment the following section in order to fill in
-# further dependencies manually.
-# find_package(<dependency> REQUIRED)
+find_package(asr_sdm_kinematic_dynamic_model REQUIRED)
+find_package(asr_sdm_head_following_control REQUIRED)
 
-include_directories(
-  include
-  # ${GPIOD_INCLUDE_DIRS}
+add_executable(asr_sdm_control_manager
+  src/asr_sdm_control_manager_node.cpp
 )
-
-# add_executable(mcp_can src/mcp_can.cpp)
-# target_link_libraries(mcp_can ${MRAA_LIB})
-# ament_target_dependencies(mcp_can rclcpp)
-
-add_executable(asr_sdm_control_manager src/asr_sdm_control_manager_node.cpp)
-# target_link_libraries(asr_sdm_control_manager periphery)
 target_link_libraries(asr_sdm_control_manager PUBLIC
-  ${asr_sdm_control_msgs_TARGETS}
-  ${asr_sdm_hardware_msgs_TARGETS}
-  ${std_msgs_TARGETS}
-  rclcpp::rclcpp
-  # periphery
-)
-# ament_target_dependencies(asr_sdm_control_manager rclcpp std_msgs asr_sdm_control_msgs asr_sdm_hardware_msgs)
-
-add_executable(front_unit_following_controller_test_2d
-  test/front_unit_following_controller_test_2d.cpp
-  src/front_unit_following_controller_2d.cpp
-)
-target_link_libraries(front_unit_following_controller_test_2d PUBLIC
-  Python3::Python
-  Python3::NumPy
-)
-target_include_directories(front_unit_following_controller_test_2d PRIVATE
-  ${CMAKE_CURRENT_SOURCE_DIR}/test
-)
-# 抑制 vendored matplotlibcpp.h 中已弃用的 Python C API 警告
-target_compile_options(front_unit_following_controller_test_2d PRIVATE -Wno-deprecated-declarations)
-
-add_library(front_unit_following_controller_3d_core STATIC
-  src/front_unit_following_controller_3d.cpp
-)
-target_include_directories(front_unit_following_controller_3d_core PUBLIC
-  ${CMAKE_CURRENT_SOURCE_DIR}/include
-)
-
-if(pinocchio_FOUND)
-  # pinocchio_default excludes the URDF/SDF parsers on purpose: the model is
-  # assembled joint by joint instead of being read from a description file.
-  add_library(asr_sdm_kinematic_model STATIC
-    src/asr_sdm_kinematic_model.cpp
-  )
-  target_include_directories(asr_sdm_kinematic_model PUBLIC
-    ${CMAKE_CURRENT_SOURCE_DIR}/include
-  )
-  target_link_libraries(asr_sdm_kinematic_model PUBLIC
-    pinocchio::pinocchio_default
-  )
-
-  add_executable(asr_sdm_kinematic_model_check
-    test/asr_sdm_kinematic_model_check.cpp
-  )
-  target_link_libraries(asr_sdm_kinematic_model_check PUBLIC
-    asr_sdm_kinematic_model
-    front_unit_following_controller_3d_core
-  )
-
-  install(TARGETS asr_sdm_kinematic_model_check
-    DESTINATION lib/${PROJECT_NAME}
-  )
-else()
-  message(STATUS "pinocchio not found: skipping asr_sdm_kinematic_model targets")
-endif()
-
-add_executable(front_unit_following_controller_test_3d
-  test/front_unit_following_controller_test_3d.cpp
-)
-target_link_libraries(front_unit_following_controller_test_3d PUBLIC
-  front_unit_following_controller_3d_core
-  Matplot++::matplot
-)
-
-add_executable(realtime_front_unit_controller_2d
-  src/realtime_front_unit_controller_2d_node.cpp
-  src/front_unit_following_controller_2d.cpp
-)
-target_link_libraries(realtime_front_unit_controller_2d PUBLIC
-  ${asr_sdm_control_msgs_TARGETS}
-  ${geometry_msgs_TARGETS}
-  ${std_msgs_TARGETS}
-  rclcpp::rclcpp
-)
-
-add_executable(realtime_front_unit_controller_3d
-  src/realtime_front_unit_controller_3d_node.cpp
-)
-target_link_libraries(realtime_front_unit_controller_3d PUBLIC
-  front_unit_following_controller_3d_core
+  asr_sdm_kinematic_dynamic_model::asr_sdm_kinematic_model
+  asr_sdm_head_following_control::front_unit_following_controller_3d_core
   ${asr_sdm_control_msgs_TARGETS}
   ${geometry_msgs_TARGETS}
   ${nav_msgs_TARGETS}
@@ -152,36 +41,7 @@ target_link_libraries(realtime_front_unit_controller_3d PUBLIC
   rclcpp::rclcpp
 )
 
-add_executable(realtime_controller_visualizer_2d src/realtime_controller_visualizer_2d_node.cpp)
-target_link_libraries(realtime_controller_visualizer_2d PUBLIC
-  ${std_msgs_TARGETS}
-  rclcpp::rclcpp
-  Python3::Python
-  Python3::NumPy
-)
-target_include_directories(realtime_controller_visualizer_2d PRIVATE
-  ${CMAKE_CURRENT_SOURCE_DIR}/test
-)
-target_compile_options(realtime_controller_visualizer_2d PRIVATE -Wno-deprecated-declarations)
-
-add_executable(realtime_controller_visualizer_3d
-  src/realtime_controller_visualizer_3d_node.cpp
-)
-target_link_libraries(realtime_controller_visualizer_3d PUBLIC
-  front_unit_following_controller_3d_core
-  ${std_msgs_TARGETS}
-  rclcpp::rclcpp
-  Matplot++::matplot
-)
-
-install(TARGETS
-  asr_sdm_control_manager
-  front_unit_following_controller_test_2d
-  front_unit_following_controller_test_3d
-  realtime_front_unit_controller_2d
-  realtime_front_unit_controller_3d
-  realtime_controller_visualizer_2d
-  realtime_controller_visualizer_3d
+install(TARGETS asr_sdm_control_manager
   DESTINATION lib/${PROJECT_NAME}
 )
 
@@ -199,13 +59,6 @@ if(BUILD_TESTING)
   # a copyright and license is added to all source files
   set(ament_cmake_cpplint_FOUND TRUE)
   ament_lint_auto_find_test_dependencies()
-
-  if(TARGET asr_sdm_kinematic_model_check)
-    add_test(
-      NAME asr_sdm_kinematic_model_check
-      COMMAND asr_sdm_kinematic_model_check
-    )
-  endif()
 endif()
 
 ament_package()

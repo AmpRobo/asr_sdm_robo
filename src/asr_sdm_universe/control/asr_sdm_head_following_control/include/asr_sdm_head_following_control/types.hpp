@@ -1,5 +1,5 @@
-#ifndef TYPES_HPP_
-#define TYPES_HPP_
+#ifndef ASR_SDM_HEAD_FOLLOWING_CONTROL_TYPES_HPP_
+#define ASR_SDM_HEAD_FOLLOWING_CONTROL_TYPES_HPP_
 
 #include <cmath>
 #include <vector>
@@ -37,4 +37,4 @@ struct RobotParameters
 
 }  // namespace asr
 
-#endif  // TYPES_HPP_
+#endif  // ASR_SDM_HEAD_FOLLOWING_CONTROL_TYPES_HPP_

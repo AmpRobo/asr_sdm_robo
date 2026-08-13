@@ -1,4 +1,4 @@
-#include "asr_sdm_control_manager/front_unit_following_controller_3d.hpp"
+#include "asr_sdm_head_following_control/front_unit_following_controller_3d.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -258,64 +258,62 @@ Vec2 FrontUnitFollowingController3D::computePitchYawRateReference(
   return {pitchRate, yawRate};
 }
 
-JointVelocity3D FrontUnitFollowingController3D::step(
-  const HeadCommand3D & cmd, double dt, SimulationState3D & state) const
+JointVelocity3D FrontUnitFollowingController3D::computeJointVelocity(
+  const HeadCommand3D & cmd, const SimulationState3D & state) const
 {
   const HeadCommand3D limited_cmd = limitCommand(cmd);
   JointVelocity3D output;
-
-  // 1. 用当前构型计算头部速度和链节速度传播
-  const Mat3 head_frame = state.head_frame;
-  state.link_frames = linkFrames(head_frame, state.joints.theta);
-  state.link_axes = linkAxes(state.link_frames);
-  const Vec3 head_axis = column(head_frame, 0);
+  const auto frames = linkFrames(state.head_frame, state.joints.theta);
+  const auto axes = linkAxes(frames);
+  const Vec3 head_axis = column(state.head_frame, 0);
   const Vec3 head_velocity = limited_cmd.linear_velocity * head_axis;
-  const Vec3 headOmega = limited_cmd.yaw_rate * column(head_frame, 2) +
-                         limited_cmd.pitch_rate * column(head_frame, 1);
+  const Vec3 headOmega = limited_cmd.yaw_rate * column(state.head_frame, 2) +
+    limited_cmd.pitch_rate * column(state.head_frame, 1);
 
-  // 2. 速度传播初始化
-  std::array<Vec3, kNum3dLinks + 1> jointPointVel{};  // ṗ_{j(i)}: kNum3dLinks+1 = 5 个点（含超出）
-  std::array<Vec3, kNum3dLinks> linkOmega{};            // ω_i
-
+  std::array<Vec3, kNum3dLinks + 1> jointPointVel{};
+  std::array<Vec3, kNum3dLinks> linkOmega{};
   jointPointVel[0] = head_velocity;
   linkOmega[0] = headOmega;
-  jointPointVel[1] = jointPointVel[0] - params_.link_length * cross(linkOmega[0], state.link_axes[0]);
+  jointPointVel[1] = jointPointVel[0] - params_.link_length * cross(linkOmega[0], axes[0]);
 
-  // 4. 关节循环：computePitchYawRateReference → saturate → 传播 → 积分
   for (size_t j = 0; j < kNum3dJoints; ++j) {
-    const size_t ds = j + 1;  // 下游 link 索引
-
+    const size_t ds = j + 1;
     const Vec2 rate = computePitchYawRateReference(
-      state.link_frames[ds], state.joints.theta[pitchIndex(j)],
-      state.link_axes[ds],
-      jointPointVel[j + 1],
-      linkOmega[j],
-      params_.damping);
-
+      frames[ds], state.joints.theta[pitchIndex(j)], axes[ds],
+      jointPointVel[j + 1], linkOmega[j], params_.damping);
     const double pitchRate = saturate(rate.x, params_.joint_rate_limit);
     const double yawRate = saturate(rate.y, params_.joint_rate_limit);
     output.theta_dot[pitchIndex(j)] = -pitchRate;
     output.theta_dot[yawIndex(j)] = -yawRate;
 
-    // 角速度传播 ω_{i} = ω_{i-1} + pitchRate*jp + yawRate*jy
     Vec3 jp, jy;
-    pitchYawJacobianColumns(state.link_frames[ds], state.joints.theta[pitchIndex(j)], jp, jy);
+    pitchYawJacobianColumns(frames[ds], state.joints.theta[pitchIndex(j)], jp, jy);
     linkOmega[ds] = linkOmega[j] + pitchRate * jp + yawRate * jy;
-
-    // 关节速度传播 ṗ_{j(i+1)} = ṗ_{j(i)} − L·(ω_i × b_i)
     if (ds < kNum3dLinks) {
-      jointPointVel[ds + 1] = jointPointVel[j + 1] - params_.link_length * cross(linkOmega[ds], state.link_axes[ds]);
+      jointPointVel[ds + 1] = jointPointVel[j + 1] -
+        params_.link_length * cross(linkOmega[ds], axes[ds]);
     }
+  }
+  return output;
+}
 
-    // 关节积分 theta -= rate*dt（与 Rz(-θ_yaw)Ry(-θ_pitch) 同号）
-    const double jointLimit = std::abs(params_.joint_limit);
-    state.joints.theta[pitchIndex(j)] = saturate(
-      state.joints.theta[pitchIndex(j)] - pitchRate * dt, jointLimit);
-    state.joints.theta[yawIndex(j)] = saturate(
-      state.joints.theta[yawIndex(j)] - yawRate * dt, jointLimit);
+JointVelocity3D FrontUnitFollowingController3D::step(
+  const HeadCommand3D & cmd, double dt, SimulationState3D & state) const
+{
+  const HeadCommand3D limited_cmd = limitCommand(cmd);
+  const JointVelocity3D output = computeJointVelocity(limited_cmd, state);
+  const double jointLimit = std::abs(params_.joint_limit);
+  for (size_t joint = 0; joint < kNum3dJoints; ++joint) {
+    state.joints.theta[pitchIndex(joint)] = saturate(
+      state.joints.theta[pitchIndex(joint)] + output.theta_dot[pitchIndex(joint)] * dt,
+      jointLimit);
+    state.joints.theta[yawIndex(joint)] = saturate(
+      state.joints.theta[yawIndex(joint)] + output.theta_dot[yawIndex(joint)] * dt,
+      jointLimit);
   }
 
-  // 5. 头部积分并刷新几何
+  const Vec3 head_axis = column(state.head_frame, 0);
+  const Vec3 head_velocity = limited_cmd.linear_velocity * head_axis;
   state.head_position = state.head_position + head_velocity * dt;
   state.head_frame = orthonormalize(
     multiply(
@@ -325,8 +323,8 @@ JointVelocity3D FrontUnitFollowingController3D::step(
   state.link_frames = linkFrames(state.head_frame, state.joints.theta);
   state.link_axes = linkAxes(state.link_frames);
   state.body_points = bodyPoints(state.head_position, state.link_axes, params_.link_length);
-
   return output;
 }
+
 
 }  // namespace asr

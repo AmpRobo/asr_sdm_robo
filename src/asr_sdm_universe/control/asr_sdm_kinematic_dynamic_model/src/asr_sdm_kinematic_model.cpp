@@ -1,4 +1,4 @@
-#include "asr_sdm_control_manager/asr_sdm_kinematic_model.hpp"
+#include "asr_sdm_kinematic_dynamic_model/asr_sdm_kinematic_model.hpp"
 
 #include <pinocchio/algorithm/crba.hpp>
 #include <pinocchio/algorithm/frames.hpp>
@@ -10,6 +10,8 @@
 #include <pinocchio/spatial/inertia.hpp>
 #include <pinocchio/spatial/se3.hpp>
 
+#include <algorithm>
+#include <cmath>
 #include <string>
 
 namespace asr
@@ -160,6 +162,39 @@ void AsrSdmKinematicModel::updateKinematics(const Eigen::VectorXd & q, const Eig
 {
   pinocchio::forwardKinematics(model_, data_, q, v);
   pinocchio::updateFramePlacements(model_, data_);
+}
+
+Eigen::VectorXd AsrSdmKinematicModel::integrateConfiguration(
+  const Eigen::VectorXd & q, const Eigen::VectorXd & v, double dt) const
+{
+  Eigen::VectorXd q_next = pinocchio::integrate(model_, q, dt * v);
+  const double joint_limit = std::abs(params_.joint_limit);
+  for (std::size_t joint = 0; joint < kNumJoints; ++joint) {
+    const int yaw_idx = model_.joints[yaw_joint_ids_[joint]].idx_q();
+    const int pitch_idx = model_.joints[pitch_joint_ids_[joint]].idx_q();
+    q_next[yaw_idx] = std::clamp(q_next[yaw_idx], -joint_limit, joint_limit);
+    q_next[pitch_idx] = std::clamp(q_next[pitch_idx], -joint_limit, joint_limit);
+  }
+  return q_next;
+}
+
+void AsrSdmKinematicModel::fromConfiguration(
+  const Eigen::VectorXd & q, Eigen::Vector3d & head_position,
+  Eigen::Matrix3d & head_frame, JointVector & theta) const
+{
+  const int head_idx = model_.joints[head_joint_id_].idx_q();
+  head_position = q.segment<3>(head_idx);
+  Eigen::Quaterniond orientation(
+    q[head_idx + 6], q[head_idx + 3], q[head_idx + 4], q[head_idx + 5]);
+  orientation.normalize();
+  head_frame = orientation.toRotationMatrix();
+
+  for (std::size_t joint = 0; joint < kNumJoints; ++joint) {
+    theta[static_cast<int>(yawIndex(joint))] =
+      q[model_.joints[yaw_joint_ids_[joint]].idx_q()];
+    theta[static_cast<int>(pitchIndex(joint))] =
+      q[model_.joints[pitch_joint_ids_[joint]].idx_q()];
+  }
 }
 
 std::array<Eigen::Vector3d, AsrSdmKinematicModel::kNumPoints>
