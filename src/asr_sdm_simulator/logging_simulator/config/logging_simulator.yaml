@@ -27,13 +27,9 @@ odom_visualization:
   covariance_scale: 100.0
 
 robot_model:
-  # Static TF base -> screwdrive_segment_0 (mesh length along CAD +Z).
-  # Tune yaw_rad / pitch_rad here if the RViz model heading/attitude is wrong.
-  # pitch -π/2 lays the body to match the VINS camera frustum.
+  # URDF root is base (same frame as odom world->base). No extra static TF.
   parent_frame: base
-  child_frame: screwdrive_segment_0
-  yaw_rad: 3.141592653589793
-  pitch_rad: 1.5707963267948966
+  child_frame: base
   use_sim_time: false
   model_xacro: urdf/asr_sdm_wrapper.urdf.xacro
 
@@ -46,7 +42,11 @@ kinematic_controller:
   initial_x: -5.0
   initial_y: 0.0
   initial_z: 0.0
-  initial_yaw: 0.0
+  # URDF maps robot heading to base +Z (camera look). Pitch -π/2 and yaw π
+  # lay the model in the XY plane facing world +X until VINS odometry arrives.
+  initial_roll: 0.0
+  initial_pitch: -1.5707963267948966
+  initial_yaw: 3.141592653589793
 
   # Kinematic model of the front-unit following controller.
   link_length: 0.25

@@ -197,6 +197,25 @@
       <xacro:snake_chain idx="${idx + 1}" parent="${idx}"/>
     </xacro:if>
   </xacro:macro>
-  
+
   <xacro:snake_chain/>
+
+  <!-- VINS / 里程计坐标系 base：相机光轴沿 +Z（与 camera_pose_visual 一致）。 -->
+  <!-- ROS 机器人坐标系 base_link：前进方向 +X、左侧 +Y、上方 +Z。 -->
+  <!-- rpy (0, -π/2, π) 把 base +Z 映到 base_link +X，从而对齐相机框与机器人。 -->
+  <link name="base"/>
+  <joint name="base_to_base_link" type="fixed">
+    <parent link="base"/>
+    <child link="base_link"/>
+    <origin rpy="0 -1.5707963267948966 3.141592653589793" xyz="0 0 0"/>
+  </joint>
+
+  <!-- CAD 沿节段 +Z 建模，头部朝向为 -Z。 -->
+  <!-- 绕 Y 转 -π/2，使头部朝向变为 base_link +X。 -->
+  <link name="base_link"/>
+  <joint name="base_link_to_screwdrive_segment_0" type="fixed">
+    <parent link="base_link"/>
+    <child link="screwdrive_segment_0"/>
+    <origin rpy="0 -1.5707963267948966 0" xyz="0 0 0"/>
+  </joint>
 </robot>

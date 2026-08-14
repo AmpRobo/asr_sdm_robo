@@ -65,12 +65,9 @@ odom_visualization:
   covariance_scale: 100.0
 
 robot_model:
-  # Mesh is modeled along +Z; pitch +90 deg lays the body in the XY plane.
-  # Yaw +180 deg aligns the visual heading with odom / 2D Pose Estimate.
+  # URDF root is base (same frame as odom world->base). No extra static TF.
   parent_frame: base
-  child_frame: screwdrive_segment_0
-  yaw_rad: 3.141592653589793
-  pitch_rad: 1.5707963267948966
+  child_frame: base
   use_sim_time: false
   model_xacro: urdf/asr_sdm_wrapper.urdf.xacro
 

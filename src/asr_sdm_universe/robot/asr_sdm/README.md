@@ -18,12 +18,12 @@ This directory contains the ROS 2 model, meshes, RViz configuration, and Gazebo 
 - Number of screw rotors: `8`
   - Each body link has a left and right rotor connected by continuous joints
 - Complete URDF structure:
-  - Total links: `21`
-  - Total joints: `20`
-  - Fixed joints: `6`
+  - Total links: `23`
+  - Total joints: `22`
+  - Fixed joints: `8`
   - Revolute joints: `6`
   - Continuous joints: `8`
-- Root link: `screwdrive_segment_0`
+- Root link: `base` (odometry / IMU frame; `base_link` heading along +X aligns with the camera frustum +Z)
 - RViz fixed frame: `world`
 - Model entry point: `urdf/asr_sdm_wrapper.urdf.xacro`
 - Generated plain URDF: `urdf/generated/asr_sdm_segments_4.urdf`

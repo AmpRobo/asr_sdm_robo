@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """Bring up the asr_sdm robot description.
 
-Loads the URDF/Xacro, starts robot_state_publisher, and publishes the static
-transform that orients the model under its base frame.
+Loads the URDF/Xacro and starts robot_state_publisher. If the URDF root
+differs from the odometry base frame, also publishes a static transform
+between them.
 
 Nothing here publishes joint states, so on its own the model holds its zero pose.
 asr_sdm_control_manager/launch/asr_sdm_control_manager.launch.py runs the
@@ -14,7 +15,6 @@ file with the same schema, which is how planning_simulator reuses this launch.
 
 from __future__ import annotations
 
-import math
 import os
 from pathlib import Path
 from typing import Any
@@ -59,8 +59,10 @@ def _make_description_actions(cfg: dict[str, Any], package_share: str) -> list[A
     robot_description = _load_robot_description(Path(model_xacro))
     use_sim_time = bool(model_cfg.get('use_sim_time', False))
     joint_states_topic = topics.get('joint_states', '/control/joint_states')
+    parent_frame = model_cfg.get('parent_frame', 'base')
+    child_frame = model_cfg.get('child_frame', 'base')
 
-    return [
+    actions = [
         Node(
             package='robot_state_publisher',
             executable='robot_state_publisher',
@@ -74,19 +76,22 @@ def _make_description_actions(cfg: dict[str, Any], package_share: str) -> list[A
             ],
             output='screen',
         ),
-        Node(
-            package='tf2_ros',
-            executable='static_transform_publisher',
-            name='base_to_asr_sdm',
-            condition=enabled,
-            arguments=[
-                '--frame-id', model_cfg.get('parent_frame', 'base'),
-                '--child-frame-id', model_cfg.get('child_frame', 'screwdrive_segment_0'),
-                '--yaw', str(float(model_cfg.get('yaw_rad', math.pi))),
-                '--pitch', str(float(model_cfg.get('pitch_rad', math.pi / 2.0))),
-            ],
-        ),
     ]
+    # Skip identity base->base: odom already publishes world->base onto the URDF root.
+    if parent_frame != child_frame:
+        actions.append(
+            Node(
+                package='tf2_ros',
+                executable='static_transform_publisher',
+                name='base_to_asr_sdm',
+                condition=enabled,
+                arguments=[
+                    '--frame-id', parent_frame,
+                    '--child-frame-id', child_frame,
+                ],
+            ),
+        )
+    return actions
 
 
 def launch_setup(context) -> list[Any]:

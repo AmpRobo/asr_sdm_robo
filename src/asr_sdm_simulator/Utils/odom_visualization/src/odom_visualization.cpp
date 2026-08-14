@@ -41,6 +41,8 @@ double initial_x = 0.0;
 double initial_y = 0.0;
 double initial_z = 0.0;
 double initial_yaw = 0.0;
+double initial_pitch = 0.0;
+double initial_roll = 0.0;
 double tf_publish_rate = 50.0;
 
 rclcpp::Node::SharedPtr node;
@@ -136,10 +138,14 @@ void tf_timer_callback()
     return;
   }
 
-  const double half = 0.5 * initial_yaw;
+  colvec ypr = zeros<colvec>(3);
+  ypr(0) = initial_yaw;
+  ypr(1) = initial_pitch;
+  ypr(2) = initial_roll;
+  colvec q = R_to_quaternion(ypr_to_R(ypr));
   publish_base_tf(stamp,
                   initial_x, initial_y, initial_z,
-                  std::cos(half), 0.0, 0.0, std::sin(half));
+                  q(0), q(1), q(2), q(3));
 }
 
 void odom_callback(const nav_msgs::msg::Odometry::ConstSharedPtr msg)
@@ -534,6 +540,8 @@ int main(int argc, char** argv)
   node->get_parameter_or("initial_y", initial_y, 0.0);
   node->get_parameter_or("initial_z", initial_z, 0.0);
   node->get_parameter_or("initial_yaw", initial_yaw, 0.0);
+  node->get_parameter_or("initial_pitch", initial_pitch, 0.0);
+  node->get_parameter_or("initial_roll", initial_roll, 0.0);
   node->get_parameter_or("tf_publish_rate", tf_publish_rate, 50.0);
   node->get_parameter_or("covariance_scale",    cov_scale,  100.0);
   node->get_parameter_or("covariance_position", cov_pos,    false);

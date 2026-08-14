@@ -78,8 +78,7 @@ def generate_launch_description():
         name='world_to_asr_sdm',
         arguments=[
             '--frame-id', 'world',
-            '--child-frame-id', 'screwdrive_segment_0',
-            '--pitch', '1.5707963267948966',
+            '--child-frame-id', 'base',
         ],
         parameters=[{'use_sim_time': use_sim_time}],
     )
