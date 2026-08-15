@@ -127,6 +127,7 @@ Override with `--ros-args -p name:=value` or edit the yaml.
 | `max_yaw_rate` | `0.35` |
 | `publish_control_cmd` | `false` |
 | `link_length` | `0.25` |
+| `joint_signs` | `[-1.0, -1.0, -1.0, -1.0, -1.0, -1.0]` |
 | `joint_rate_limit` | `2.0` |
 | `joint_limit` | `~π/2` |
 | `max_curvature` | `1.2` |
@@ -256,6 +257,7 @@ ros2 run asr_sdm_head_following_control front_unit_following_controller_test_3d
 | `max_yaw_rate` | `0.35` |
 | `publish_control_cmd` | `false` |
 | `link_length` | `0.25` |
+| `joint_signs` | `[-1.0, -1.0, -1.0, -1.0, -1.0, -1.0]` |
 | `joint_rate_limit` | `2.0` |
 | `joint_limit` | `约 π/2` |
 | `max_curvature` | `1.2` |
