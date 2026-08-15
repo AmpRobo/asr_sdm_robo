@@ -22,7 +22,7 @@ source install/setup.bash
 ### Launch
 
 ```bash
-ros2 launch logging_simulator logging_simulator_launch.py
+ros2 launch logging_simulator logging_simulator.launch.py
 ```
 
 By default this starts the simulator, random map, RViz, the `asr_sdm` robot model, and the kinematic controller. The model appears at `(-5, 0, 0)`. Gamepad teleop and planning are off.
@@ -30,7 +30,7 @@ By default this starts the simulator, random map, RViz, the `asr_sdm` robot mode
 List all launch arguments:
 
 ```bash
-ros2 launch logging_simulator logging_simulator_launch.py --show-args
+ros2 launch logging_simulator logging_simulator.launch.py --show-args
 ```
 
 ### Launch arguments
@@ -47,24 +47,24 @@ Common combinations:
 
 ```bash
 # Default: sim + model + controller (drive with cmd_vel)
-ros2 launch logging_simulator logging_simulator_launch.py
+ros2 launch logging_simulator logging_simulator.launch.py
 
 # Add gamepad teleop
-ros2 launch logging_simulator logging_simulator_launch.py teleop:=enable
+ros2 launch logging_simulator logging_simulator.launch.py teleop:=enable
 
 # Add planning
-ros2 launch logging_simulator logging_simulator_launch.py planning:=enable
+ros2 launch logging_simulator logging_simulator.launch.py planning:=enable
 
 # Pin the model pose to one source instead of following whoever publishes
-ros2 launch logging_simulator logging_simulator_launch.py odom_source:=vins
-ros2 launch logging_simulator logging_simulator_launch.py odom_source:=control
+ros2 launch logging_simulator logging_simulator.launch.py odom_source:=vins
+ros2 launch logging_simulator logging_simulator.launch.py odom_source:=control
 
 # Everything on
-ros2 launch logging_simulator logging_simulator_launch.py \
+ros2 launch logging_simulator logging_simulator.launch.py \
   robot_model:=asr_sdm control:=enable teleop:=enable planning:=enable
 
 # Sim only, no controller (model will not move; may be invisible in RViz if Fixed Frame is world)
-ros2 launch logging_simulator logging_simulator_launch.py control:=disable
+ros2 launch logging_simulator logging_simulator.launch.py control:=disable
 ```
 
 ### Parameters and config
@@ -136,7 +136,7 @@ ros2 launch asr_sdm_teleop asr_sdm_teleop.launch.py
 ros2 launch asr_sdm_planning_manager asr_sdm_planning_manager.launch.py
 ```
 
-The model launch alone does not publish a world-frame pose. The controller’s odom only becomes `world → base` when this package’s `odom_visualization` (`tf45`) is running. For normal use, start `logging_simulator_launch.py`.
+The model launch alone does not publish a world-frame pose. The controller’s odom only becomes `world → base` when this package’s `odom_visualization` (`tf45`) is running. For normal use, start `logging_simulator.launch.py`.
 
 ---
 
@@ -157,7 +157,7 @@ source install/setup.bash
 ### 启动
 
 ```bash
-ros2 launch logging_simulator logging_simulator_launch.py
+ros2 launch logging_simulator logging_simulator.launch.py
 ```
 
 默认会启动仿真、随机地图、RViz，并加载 `asr_sdm` 机器人模型与运动学控制器。模型会显示在 `(-5, 0, 0)`，手柄遥控和规划模块默认关闭。
@@ -165,7 +165,7 @@ ros2 launch logging_simulator logging_simulator_launch.py
 查看全部启动参数：
 
 ```bash
-ros2 launch logging_simulator logging_simulator_launch.py --show-args
+ros2 launch logging_simulator logging_simulator.launch.py --show-args
 ```
 
 ### 启动参数
@@ -182,24 +182,24 @@ ros2 launch logging_simulator logging_simulator_launch.py --show-args
 
 ```bash
 # 默认：仿真 + 模型 + 控制器（可用 cmd_vel 驱动）
-ros2 launch logging_simulator logging_simulator_launch.py
+ros2 launch logging_simulator logging_simulator.launch.py
 
 # 加手柄遥控
-ros2 launch logging_simulator logging_simulator_launch.py teleop:=enable
+ros2 launch logging_simulator logging_simulator.launch.py teleop:=enable
 
 # 加规划
-ros2 launch logging_simulator logging_simulator_launch.py planning:=enable
+ros2 launch logging_simulator logging_simulator.launch.py planning:=enable
 
 # 固定用某一路里程计驱动模型，不再自动跟随
-ros2 launch logging_simulator logging_simulator_launch.py odom_source:=vins
-ros2 launch logging_simulator logging_simulator_launch.py odom_source:=control
+ros2 launch logging_simulator logging_simulator.launch.py odom_source:=vins
+ros2 launch logging_simulator logging_simulator.launch.py odom_source:=control
 
 # 全开
-ros2 launch logging_simulator logging_simulator_launch.py \
+ros2 launch logging_simulator logging_simulator.launch.py \
   robot_model:=asr_sdm control:=enable teleop:=enable planning:=enable
 
 # 只看仿真，不启动控制器（模型不会动，RViz Fixed Frame 为 world 时可能看不见模型）
-ros2 launch logging_simulator logging_simulator_launch.py control:=disable
+ros2 launch logging_simulator logging_simulator.launch.py control:=disable
 ```
 
 ### 参数与配置
@@ -271,4 +271,4 @@ ros2 launch asr_sdm_teleop asr_sdm_teleop.launch.py
 ros2 launch asr_sdm_planning_manager asr_sdm_planning_manager.launch.py
 ```
 
-模型独立启动时没有世界坐标系下的位姿；控制器提供的 odom 需要配合本包的 `odom_visualization`（`tf45`）才会出现 `world → base`。正常使用请直接启动本包的 `logging_simulator_launch.py`。
+模型独立启动时没有世界坐标系下的位姿；控制器提供的 odom 需要配合本包的 `odom_visualization`（`tf45`）才会出现 `world → base`。正常使用请直接启动本包的 `logging_simulator.launch.py`。

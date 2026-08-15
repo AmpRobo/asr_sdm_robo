@@ -1,4 +1,4 @@
-planning_manager_node:
+/**:
   ros__parameters:
     fsm:
       flight_type: "MANUAL_TARGET"

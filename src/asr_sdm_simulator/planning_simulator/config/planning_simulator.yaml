@@ -1,112 +1,110 @@
-# Launch / simulator configuration for planning_simulator_launch.py.
-# The robot_model, kinematic_controller and matching topics entries are read by
-# asr_sdm/launch/asr_sdm_description.launch.py, which this launch includes.
+/**:
+  ros__parameters:
+    features:
+      # Start asr_sdm_map_generator (random forest map).
+      use_asr_sdm_map_generator: true
+      # Click RViz "Static Obstacle" tool (/simulator/planning_simulator/add_static_obstacle) to add pillar obstacles.
+      enable_click_map: true
+      # Load and display the asr_sdm robot model in RViz.
+      use_asr_sdm_model: true
+      # Start the kinematic controller that drives the robot model. Without it nothing
+      # publishes joint states or odometry, so the model stays invisible in RViz.
+      use_kinematic_controller: true
+      # Start RViz with the package rviz config.
+      use_rviz: true
+      # Start so3_control_node.
+      use_so3_control: false
 
-features:
-  # Start asr_sdm_map_generator (random forest map).
-  use_asr_sdm_map_generator: true
-  # Click RViz "Static Obstacle" tool (/simulator/planning_simulator/add_static_obstacle) to add pillar obstacles.
-  enable_click_map: true
-  # Load and display the asr_sdm robot model in RViz.
-  use_asr_sdm_model: true
-  # Start the kinematic controller that drives the robot model. Without it nothing
-  # publishes joint states or odometry, so the model stays invisible in RViz.
-  use_kinematic_controller: true
-  # Start RViz with the package rviz config.
-  use_rviz: true
-  # Start so3_control_node.
-  use_so3_control: false
+    rate:
+      odom: 100.0
 
-rate:
-  odom: 100.0
+    simulator:
+      init_state_x: -5.0
+      init_state_y: 0.0
+      init_state_z: 3.0
 
-simulator:
-  init_state_x: -5.0
-  init_state_y: 0.0
-  init_state_z: 3.0
+    topics:
+      sim_odom: /control/asr_sdm/odom
+      # Alternative pose source for the robot model, selected with odom_source:=vins.
+      # odom_source:=auto follows whichever of the two published last.
+      vins_odom: /localization/video_inertial_navigation_systems/odometry
+      visual_slam_odom: /visual_slam/odom
+      state_ukf_odom: /state_ukf/odom
+      visual_slam_correction: /visual_slam/correction
+      so3_cmd: so3_cmd
+      imu: sim/imu
+      force_disturbance: force_disturbance
+      moment_disturbance: moment_disturbance
+      initialpose: /control/initial_pose
+      joint_states: /control/joint_states
+      cmd_vel: /control/asr_sdm/cmd_vel
+      controller_state: /control/asr_sdm/controller_state_3d
+      control_cmd: /control/asr_sdm/control_cmd_3d
+      position_cmd: position_cmd
+      motors: motors
+      corrections: corrections
+      goal_pose: /goal_pose
+      add_static_obstacle: /simulator/planning_simulator/add_static_obstacle
 
-topics:
-  sim_odom: /control/asr_sdm/odom
-  # Alternative pose source for the robot model, selected with odom_source:=vins.
-  # odom_source:=auto follows whichever of the two published last.
-  vins_odom: /localization/video_inertial_navigation_systems/odometry
-  visual_slam_odom: /visual_slam/odom
-  state_ukf_odom: /state_ukf/odom
-  visual_slam_correction: /visual_slam/correction
-  so3_cmd: so3_cmd
-  imu: sim/imu
-  force_disturbance: force_disturbance
-  moment_disturbance: moment_disturbance
-  initialpose: /control/initial_pose
-  joint_states: /control/joint_states
-  cmd_vel: /control/asr_sdm/cmd_vel
-  controller_state: /control/asr_sdm/controller_state_3d
-  control_cmd: /control/asr_sdm/control_cmd_3d
-  position_cmd: position_cmd
-  motors: motors
-  corrections: corrections
-  goal_pose: /goal_pose
-  add_static_obstacle: /simulator/planning_simulator/add_static_obstacle
+    so3_control:
+      mass: 0.98
+      use_angle_corrections: false
+      use_external_yaw: false
+      gains:
+        rot: {x: 1.0, y: 1.0, z: 1.0}
+        ang: {x: 0.07, y: 0.07, z: 0.1}
+      corrections:
+        z: 0.0
+        r: 0.0
+        p: 0.0
 
-so3_control:
-  mass: 0.98
-  use_angle_corrections: false
-  use_external_yaw: false
-  gains:
-    rot: {x: 1.0, y: 1.0, z: 1.0}
-    ang: {x: 0.07, y: 0.07, z: 0.1}
-  corrections:
-    z: 0.0
-    r: 0.0
-    p: 0.0
+    odom_visualization:
+      color: {a: 0.8, r: 1.0, g: 0.0, b: 0.0}
+      covariance_scale: 100.0
 
-odom_visualization:
-  color: {a: 0.8, r: 1.0, g: 0.0, b: 0.0}
-  covariance_scale: 100.0
+    robot_model:
+      # URDF root is base (ROS +X forward). Same frame as odom / 2D Pose Estimate.
+      parent_frame: base
+      child_frame: base
+      use_sim_time: false
+      model_xacro: urdf/asr_sdm_wrapper.urdf.xacro
 
-robot_model:
-  # URDF root is base (ROS +X forward). Same frame as odom / 2D Pose Estimate.
-  parent_frame: base
-  child_frame: base
-  use_sim_time: false
-  model_xacro: urdf/asr_sdm_wrapper.urdf.xacro
+    # Drives the robot model: publishes joint states plus the odometry that
+    # odom_visualization turns into the world->base transform.
+    # Topic names come from the topics section above.
+    kinematic_controller:
+      world_frame: world
+      controller_base_frame: base
 
-# Drives the robot model: publishes joint states plus the odometry that
-# odom_visualization turns into the world->base transform.
-# Topic names come from the topics section above.
-kinematic_controller:
-  world_frame: world
-  controller_base_frame: base
+      initial_x: -5.0
+      initial_y: 0.0
+      initial_z: 0.0
+      # ROS convention: yaw 0 faces world +X. Matches RViz 2D Pose Estimate / Nav Goal.
+      initial_yaw: 0.0
 
-  initial_x: -5.0
-  initial_y: 0.0
-  initial_z: 0.0
-  # ROS convention: yaw 0 faces world +X. Matches RViz 2D Pose Estimate / Nav Goal.
-  initial_yaw: 0.0
+      # Kinematic model of the front-unit following controller.
+      link_length: 0.25
+      joint_rate_limit: 2.0
+      joint_limit: 1.5707963267948966
+      max_curvature: 1.2
+      curvature_velocity_epsilon: 0.001
+      damping: 0.02
 
-  # Kinematic model of the front-unit following controller.
-  link_length: 0.25
-  joint_rate_limit: 2.0
-  joint_limit: 1.5707963267948966
-  max_curvature: 1.2
-  curvature_velocity_epsilon: 0.001
-  damping: 0.02
+      # URDF joint mapping: index i is the URDF joint, the value is the controller DOF it reads.
+      joint_source_indices: [0, 1, 2, 3, 4, 5]
+      joint_signs: [1.0, 1.0, 1.0, 1.0, 1.0, 1.0]
+      joint_offsets_rad: [0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+      clip_joint_positions: true
+      joint_position_limit_rad: 1.5707963267948966
 
-  # URDF joint mapping: index i is the URDF joint, the value is the controller DOF it reads.
-  joint_source_indices: [0, 1, 2, 3, 4, 5]
-  joint_signs: [1.0, 1.0, 1.0, 1.0, 1.0, 1.0]
-  joint_offsets_rad: [0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
-  clip_joint_positions: true
-  joint_position_limit_rad: 1.5707963267948966
+      control_period_ms: 20
+      # Zero the command when no cmd_vel arrives within this window.
+      cmd_timeout_sec: 0.3
+      max_linear_velocity: 0.12
+      max_pitch_rate: 0.35
+      max_yaw_rate: 0.35
 
-  control_period_ms: 20
-  # Zero the command when no cmd_vel arrives within this window.
-  cmd_timeout_sec: 0.3
-  max_linear_velocity: 0.12
-  max_pitch_rate: 0.35
-  max_yaw_rate: 0.35
-
-  # Publish ControlCmd for the hardware units (off while running in simulation).
-  publish_control_cmd: false
-  joint_angle_scale: 1.0
-  joint_angle_limit: 2147483647
+      # Publish ControlCmd for the hardware units (off while running in simulation).
+      publish_control_cmd: false
+      joint_angle_scale: 1.0
+      joint_angle_limit: 2147483647

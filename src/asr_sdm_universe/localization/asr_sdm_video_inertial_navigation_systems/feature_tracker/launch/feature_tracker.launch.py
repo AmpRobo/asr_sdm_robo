@@ -10,7 +10,7 @@ import sys
 
 def _load_vins_launch_module():
     vins_share = get_package_share_directory('vins_estimator')
-    launch_path = os.path.join(vins_share, 'launch', 'vins_launch.py')
+    launch_path = os.path.join(vins_share, 'launch', 'vins.launch.py')
     spec = importlib.util.spec_from_file_location('vins_launch', launch_path)
     module = importlib.util.module_from_spec(spec)
     sys.modules['vins_launch'] = module

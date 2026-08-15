@@ -84,9 +84,9 @@ Optional: `config_file:=/path/to.yaml` (same schema as `config/asr_sdm_control_m
 With `planning_simulator`:
 
 ```bash
-ros2 launch planning_simulator planning_simulator_launch.py control:=enable
+ros2 launch planning_simulator planning_simulator.launch.py control:=enable
 # gamepad teleop
-ros2 launch planning_simulator planning_simulator_launch.py control:=enable teleop:=enable
+ros2 launch planning_simulator planning_simulator.launch.py control:=enable teleop:=enable
 ```
 
 `planning_simulator` includes this package’s launch and passes its own `config/planning_simulator.yaml` as `config_file`.
@@ -213,9 +213,9 @@ ros2 launch asr_sdm_control_manager asr_sdm_control_manager.launch.py
 与 `planning_simulator` 一起：
 
 ```bash
-ros2 launch planning_simulator planning_simulator_launch.py control:=enable
+ros2 launch planning_simulator planning_simulator.launch.py control:=enable
 # 手柄遥控
-ros2 launch planning_simulator planning_simulator_launch.py control:=enable teleop:=enable
+ros2 launch planning_simulator planning_simulator.launch.py control:=enable teleop:=enable
 ```
 
 `planning_simulator` 会 include 本包 launch，并用自己的 `config/planning_simulator.yaml` 作为 `config_file`。

@@ -1,19 +1,17 @@
-# Default configuration for asr_sdm_description.launch.py.
-# Callers can pass their own file with the same schema via config_file:=<path>,
-# which is what planning_simulator does with its own config.
+/**:
+  ros__parameters:
+    features:
+      # Load the URDF and publish the model transforms.
+      use_asr_sdm_model: true
 
-features:
-  # Load the URDF and publish the model transforms.
-  use_asr_sdm_model: true
+    topics:
+      # robot_state_publisher listens here for the joint angles to animate.
+      joint_states: /control/joint_states
 
-topics:
-  # robot_state_publisher listens here for the joint angles to animate.
-  joint_states: /control/joint_states
-
-robot_model:
-  # URDF root is base (ROS +X forward). Same frame as odom world->base.
-  parent_frame: base
-  child_frame: base
-  use_sim_time: false
-  # Paths are resolved against the asr_sdm share directory.
-  model_xacro: urdf/asr_sdm_wrapper.urdf.xacro
+    robot_model:
+      # URDF root is base (ROS +X forward). Same frame as odom world->base.
+      parent_frame: base
+      child_frame: base
+      use_sim_time: false
+      # Paths are resolved against the asr_sdm share directory.
+      model_xacro: urdf/asr_sdm_wrapper.urdf.xacro

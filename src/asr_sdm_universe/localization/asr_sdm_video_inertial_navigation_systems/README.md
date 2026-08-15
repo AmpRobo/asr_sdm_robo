@@ -12,7 +12,7 @@ ROS 2 port of [VINS-Mono](https://github.com/HKUST-Aerial-Robotics/VINS-Mono) fo
 
 ### Overview
 
-This stack provides monocular visual–inertial odometry and loop closure. The unified entry point is `vins_estimator/launch/vins_launch.py`, which starts:
+This stack provides monocular visual–inertial odometry and loop closure. The unified entry point is `vins_estimator/launch/vins.launch.py`, which starts:
 
 `feature_tracker` → `vins_estimator` → `pose_graph` + `rviz2`
 
@@ -77,10 +77,10 @@ Convert ROS 1 bags to ROS 2 first (e.g. with [rosbags](https://pypi.org/project/
 
 ```bash
 # Terminal 1
-ros2 launch vins_estimator vins_launch.py
+ros2 launch vins_estimator vins.launch.py
 
 # Enable sparse front end for this run
-ros2 launch vins_estimator vins_launch.py enable_sparse:=1
+ros2 launch vins_estimator vins.launch.py enable_sparse:=1
 
 # Terminal 2
 ros2 bag play /path/to/MH_01_easy
@@ -90,7 +90,7 @@ ros2 bag play /path/to/MH_01_easy
 
 ```bash
 # Terminal 1
-ros2 launch vins_estimator vins_launch.py vins_launch_config:=vins_d435i.yaml
+ros2 launch vins_estimator vins.launch.py vins_launch_config:=vins_d435i.yaml
 
 # Terminal 2
 ros2 bag play /path/to/your_d435i_bag
@@ -105,7 +105,7 @@ ros2 launch feature_tracker feature_tracker.launch.py
 ### Launch arguments
 
 ```bash
-ros2 launch vins_estimator vins_launch.py --show-args
+ros2 launch vins_estimator vins.launch.py --show-args
 ```
 
 | Argument | Default | Meaning |
@@ -120,12 +120,12 @@ Examples:
 
 ```bash
 # Explicit params + calibration
-ros2 launch vins_estimator vins_launch.py \
+ros2 launch vins_estimator vins.launch.py \
   params_file:=config/euroc/euroc_config.yaml \
   calibration_file:=config/euroc/euroc_cam_calibration.yaml
 
 # Legacy OpenCV single-file config
-ros2 launch vins_estimator vins_launch.py \
+ros2 launch vins_estimator vins.launch.py \
   config_file:=/path/to/euroc_config_opencv.yaml
 ```
 
@@ -188,7 +188,7 @@ Indicative D435i bag result (slow, textured scene): smaller KLT window/depth wit
 Set `sequence_name` in `benchmark_publisher/launch/benchmark_publisher.launch.py`, rebuild, then:
 
 ```bash
-ros2 launch vins_estimator vins_launch.py
+ros2 launch vins_estimator vins.launch.py
 ros2 launch benchmark_publisher benchmark_publisher.launch.py
 ros2 bag play /path/to/MH_01_easy
 ```
@@ -211,7 +211,7 @@ Released under [GPLv3](https://www.gnu.org/licenses/).
 
 本仓库是面向 ASR-SDM 的 [VINS-Mono](https://github.com/HKUST-Aerial-Robotics/VINS-Mono) ROS 2 移植，并可选开启 SVO 风格的稀疏图像对齐前端。
 
-统一入口为 `vins_estimator/launch/vins_launch.py`，会启动：
+统一入口为 `vins_estimator/launch/vins.launch.py`，会启动：
 
 `feature_tracker` → `vins_estimator` → `pose_graph` + `rviz2`
 
@@ -276,10 +276,10 @@ source install/setup.bash
 
 ```bash
 # 终端 1
-ros2 launch vins_estimator vins_launch.py
+ros2 launch vins_estimator vins.launch.py
 
 # 本次运行打开稀疏前端
-ros2 launch vins_estimator vins_launch.py enable_sparse:=1
+ros2 launch vins_estimator vins.launch.py enable_sparse:=1
 
 # 终端 2
 ros2 bag play /path/to/MH_01_easy
@@ -289,7 +289,7 @@ ros2 bag play /path/to/MH_01_easy
 
 ```bash
 # 终端 1
-ros2 launch vins_estimator vins_launch.py vins_launch_config:=vins_d435i.yaml
+ros2 launch vins_estimator vins.launch.py vins_launch_config:=vins_d435i.yaml
 
 # 终端 2
 ros2 bag play /path/to/your_d435i_bag
@@ -304,7 +304,7 @@ ros2 launch feature_tracker feature_tracker.launch.py
 ### 启动参数
 
 ```bash
-ros2 launch vins_estimator vins_launch.py --show-args
+ros2 launch vins_estimator vins.launch.py --show-args
 ```
 
 | 参数 | 默认 | 含义 |
@@ -319,12 +319,12 @@ ros2 launch vins_estimator vins_launch.py --show-args
 
 ```bash
 # 显式指定参数与标定
-ros2 launch vins_estimator vins_launch.py \
+ros2 launch vins_estimator vins.launch.py \
   params_file:=config/euroc/euroc_config.yaml \
   calibration_file:=config/euroc/euroc_cam_calibration.yaml
 
 # 旧版 OpenCV 单文件配置
-ros2 launch vins_estimator vins_launch.py \
+ros2 launch vins_estimator vins.launch.py \
   config_file:=/path/to/euroc_config_opencv.yaml
 ```
 
@@ -387,7 +387,7 @@ ros2 launch vins_estimator vins_launch.py \
 修改 `benchmark_publisher/launch/benchmark_publisher.launch.py` 中的 `sequence_name`，重新编译后：
 
 ```bash
-ros2 launch vins_estimator vins_launch.py
+ros2 launch vins_estimator vins.launch.py
 ros2 launch benchmark_publisher benchmark_publisher.launch.py
 ros2 bag play /path/to/MH_01_easy
 ```
