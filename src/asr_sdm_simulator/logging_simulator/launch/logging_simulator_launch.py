@@ -177,8 +177,7 @@ def launch_setup(context) -> list[Any]:
         _make_odom_visualization_node(cfg),
         _make_robot_model_action(robot_model, config_path),
         *_make_joint_state_publisher(cfg, control),
-        *_make_optional_include(
-            'control', control, 'asr_sdm_control_manager', {'config_file': config_path}),
+        *_make_optional_include('control', control, 'asr_sdm_control_manager'),
         *_make_optional_include('teleop', teleop, 'asr_sdm_teleop'),
         *_make_optional_include(
             'planning', planning, 'asr_sdm_planning_manager',

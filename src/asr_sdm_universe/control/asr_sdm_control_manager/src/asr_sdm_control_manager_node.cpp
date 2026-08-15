@@ -105,8 +105,28 @@ public:
   AsrSdmControlManagerNode()
   : Node("asr_sdm_control_manager")
   {
-    model_params_ = makeModelParameters();
-    controller_params_ = makeControllerParameters();
+    model_params_.link_length = declare_parameter<double>(
+      "kinematic_controller.link_length", 0.25);
+    model_params_.link_mass = declare_parameter<double>(
+      "kinematic_controller.link_mass", 1.5);
+    model_params_.link_radius = declare_parameter<double>(
+      "kinematic_controller.link_radius", 0.05);
+    model_params_.joint_limit = declare_parameter<double>(
+      "kinematic_controller.joint_limit", kUrdfJointLimit);
+    model_params_.joint_velocity_limit = declare_parameter<double>(
+      "kinematic_controller.joint_velocity_limit", 2.0);
+    model_params_.joint_effort_limit = declare_parameter<double>(
+      "kinematic_controller.joint_effort_limit", 50.0);
+    controller_params_.link_length = model_params_.link_length;
+    controller_params_.joint_rate_limit = declare_parameter<double>(
+      "kinematic_controller.joint_rate_limit", 2.0);
+    controller_params_.joint_limit = model_params_.joint_limit;
+    controller_params_.max_curvature = declare_parameter<double>(
+      "kinematic_controller.max_curvature", 1.2);
+    controller_params_.curvature_velocity_epsilon = declare_parameter<double>(
+      "kinematic_controller.curvature_velocity_epsilon", 1.0e-3);
+    controller_params_.damping = declare_parameter<double>(
+      "kinematic_controller.damping", 0.02);
     model_ = std::make_unique<asr::AsrSdmKinematicModel>(model_params_);
     controller_ = std::make_unique<asr::FrontUnitFollowingController3D>(controller_params_);
 
@@ -193,31 +213,6 @@ public:
   }
 
 private:
-  asr::AsrSdmKinematicModelParameters makeModelParameters()
-  {
-    asr::AsrSdmKinematicModelParameters params;
-    params.link_length = declare_parameter<double>("link_length", 0.25);
-    params.link_mass = declare_parameter<double>("link_mass", 1.5);
-    params.link_radius = declare_parameter<double>("link_radius", 0.05);
-    params.joint_limit = declare_parameter<double>("joint_limit", kUrdfJointLimit);
-    params.joint_velocity_limit = declare_parameter<double>("joint_velocity_limit", 2.0);
-    params.joint_effort_limit = declare_parameter<double>("joint_effort_limit", 50.0);
-    return params;
-  }
-
-  asr::FrontUnitController3DParameters makeControllerParameters()
-  {
-    asr::FrontUnitController3DParameters params;
-    params.link_length = model_params_.link_length;
-    params.joint_rate_limit = declare_parameter<double>("joint_rate_limit", 2.0);
-    params.joint_limit = model_params_.joint_limit;
-    params.max_curvature = declare_parameter<double>("max_curvature", 1.2);
-    params.curvature_velocity_epsilon = declare_parameter<double>(
-      "curvature_velocity_epsilon", 1.0e-3);
-    params.damping = declare_parameter<double>("damping", 0.02);
-    return params;
-  }
-
   void onTwist(const geometry_msgs::msg::Twist::SharedPtr msg)
   {
     latest_cmd_.linear_velocity = std::clamp(msg->linear.x, 0.0, std::abs(max_linear_velocity_));
