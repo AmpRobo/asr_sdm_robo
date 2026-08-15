@@ -25,6 +25,10 @@ topics:
 odom_visualization:
   color: {a: 0.8, r: 1.0, g: 0.0, b: 0.0}
   covariance_scale: 100.0
+  # VINS odom is IMU (look along +Z). Rotate onto ROS base (+X forward) for the model TF.
+  tf_roll: 0.0
+  tf_pitch: -1.5707963267948966
+  tf_yaw: 3.141592653589793
 
 robot_model:
   # URDF root is base (same frame as odom world->base). No extra static TF.
@@ -42,11 +46,9 @@ kinematic_controller:
   initial_x: -5.0
   initial_y: 0.0
   initial_z: 0.0
-  # URDF maps robot heading to base +Z (camera look). Pitch -π/2 and yaw π
-  # lay the model in the XY plane facing world +X until VINS odometry arrives.
   initial_roll: 0.0
-  initial_pitch: -1.5707963267948966
-  initial_yaw: 3.141592653589793
+  initial_pitch: 0.0
+  initial_yaw: 0.0
 
   # Kinematic model of the front-unit following controller.
   link_length: 0.25

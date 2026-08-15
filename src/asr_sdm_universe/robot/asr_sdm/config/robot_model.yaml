@@ -11,7 +11,7 @@ topics:
   joint_states: /control/joint_states
 
 robot_model:
-  # URDF root is base (same frame as odom world->base). No extra static TF.
+  # URDF root is base (ROS +X forward). Same frame as odom world->base.
   parent_frame: base
   child_frame: base
   use_sim_time: false

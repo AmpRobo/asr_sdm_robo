@@ -23,7 +23,7 @@ This directory contains the ROS 2 model, meshes, RViz configuration, and Gazebo 
   - Fixed joints: `8`
   - Revolute joints: `6`
   - Continuous joints: `8`
-- Root link: `base` (odometry / IMU frame; `base_link` heading along +X aligns with the camera frustum +Z)
+- Root link: `base` (ROS convention: +X forward, +Z up; CAD heading is mapped onto `base_link` +X)
 - RViz fixed frame: `world`
 - Model entry point: `urdf/asr_sdm_wrapper.urdf.xacro`
 - Generated plain URDF: `urdf/generated/asr_sdm_segments_4.urdf`

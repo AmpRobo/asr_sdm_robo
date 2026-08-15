@@ -65,7 +65,7 @@ odom_visualization:
   covariance_scale: 100.0
 
 robot_model:
-  # URDF root is base (same frame as odom world->base). No extra static TF.
+  # URDF root is base (ROS +X forward). Same frame as odom / 2D Pose Estimate.
   parent_frame: base
   child_frame: base
   use_sim_time: false
@@ -81,6 +81,7 @@ kinematic_controller:
   initial_x: -5.0
   initial_y: 0.0
   initial_z: 0.0
+  # ROS convention: yaw 0 faces world +X. Matches RViz 2D Pose Estimate / Nav Goal.
   initial_yaw: 0.0
 
   # Kinematic model of the front-unit following controller.

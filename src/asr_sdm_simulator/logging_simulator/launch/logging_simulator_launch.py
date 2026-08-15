@@ -79,6 +79,9 @@ def _make_odom_visualization_node(cfg: dict[str, Any]) -> Node:
             'initial_yaw': float(kc.get('initial_yaw', 0.0)),
             'initial_pitch': float(kc.get('initial_pitch', 0.0)),
             'initial_roll': float(kc.get('initial_roll', 0.0)),
+            'tf_yaw': float(viz.get('tf_yaw', 0.0)),
+            'tf_pitch': float(viz.get('tf_pitch', 0.0)),
+            'tf_roll': float(viz.get('tf_roll', 0.0)),
             'tf_publish_rate': 50.0,
         }],
     )

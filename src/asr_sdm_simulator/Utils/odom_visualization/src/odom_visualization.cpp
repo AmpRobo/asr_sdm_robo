@@ -43,6 +43,9 @@ double initial_z = 0.0;
 double initial_yaw = 0.0;
 double initial_pitch = 0.0;
 double initial_roll = 0.0;
+double tf_yaw = 0.0;
+double tf_pitch = 0.0;
+double tf_roll = 0.0;
 double tf_publish_rate = 50.0;
 
 rclcpp::Node::SharedPtr node;
@@ -67,6 +70,17 @@ visualization_msgs::msg::Marker meshROS;
 sensor_msgs::msg::Range         heightROS;
 string _frame_id;
 string active_odom_topic;
+
+colvec apply_tf_rpy(const colvec& q)
+{
+  if (tf_yaw == 0.0 && tf_pitch == 0.0 && tf_roll == 0.0)
+    return q;
+  colvec ypr = zeros<colvec>(3);
+  ypr(0) = tf_yaw;
+  ypr(1) = tf_pitch;
+  ypr(2) = tf_roll;
+  return R_to_quaternion(quaternion_to_R(q) * ypr_to_R(ypr));
+}
 
 void publish_base_tf(const rclcpp::Time& stamp, double x, double y, double z,
                      double qw, double qx, double qy, double qz)
@@ -463,9 +477,10 @@ void odom_callback(const nav_msgs::msg::Odometry::ConstSharedPtr msg)
   {
     have_odom_pose = true;
     last_tf_pose = pose;
-    last_tf_q = q;
+    last_tf_q = apply_tf_rpy(q);
     const rclcpp::Time stamp = stamp_tf_with_now ? node->now() : rclcpp::Time(msg->header.stamp);
-    publish_base_tf(stamp, pose(0), pose(1), pose(2), q(0), q(1), q(2), q(3));
+    publish_base_tf(stamp, pose(0), pose(1), pose(2),
+                    last_tf_q(0), last_tf_q(1), last_tf_q(2), last_tf_q(3));
   }
 }
 
@@ -542,6 +557,9 @@ int main(int argc, char** argv)
   node->get_parameter_or("initial_yaw", initial_yaw, 0.0);
   node->get_parameter_or("initial_pitch", initial_pitch, 0.0);
   node->get_parameter_or("initial_roll", initial_roll, 0.0);
+  node->get_parameter_or("tf_yaw", tf_yaw, 0.0);
+  node->get_parameter_or("tf_pitch", tf_pitch, 0.0);
+  node->get_parameter_or("tf_roll", tf_roll, 0.0);
   node->get_parameter_or("tf_publish_rate", tf_publish_rate, 50.0);
   node->get_parameter_or("covariance_scale",    cov_scale,  100.0);
   node->get_parameter_or("covariance_position", cov_pos,    false);
