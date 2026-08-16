@@ -37,7 +37,7 @@
       moment_disturbance: moment_disturbance
       initialpose: /control/initial_pose
       joint_states: /control/joint_states
-      cmd_vel: /control/asr_sdm/cmd_vel
+      robot_cmd: /control/asr_sdm/robot_cmd
       controller_state: /control/asr_sdm/controller_state_3d
       control_cmd: /control/asr_sdm/control_cmd_3d
       position_cmd: position_cmd
@@ -98,7 +98,7 @@
       joint_position_limit_rad: 1.5707963267948966
 
       control_period_ms: 20
-      # Zero the command when no cmd_vel arrives within this window.
+      # Zero the command when no robot_cmd arrives within this window.
       cmd_timeout_sec: 0.3
       max_linear_velocity: 0.12
       max_pitch_rate: 0.35

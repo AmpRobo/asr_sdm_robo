@@ -4,7 +4,7 @@
 features:
   # Start the joy driver (needs a joystick on the configured device).
   use_joy: true
-  # Start asr_sdm_teleop_node, which maps /joy to the cmd_vel topic below.
+  # Start asr_sdm_teleop_node, which maps /joy to the robot_cmd topic below.
   use_teleop: true
 
 joy:
@@ -13,7 +13,7 @@ joy:
   autorepeat_rate: 20.0
 
 teleop:
-  cmd_vel_topic: /control/asr_sdm/cmd_vel
+  robot_cmd_topic: /control/asr_sdm/robot_cmd
   linear_axis: 1
   angular_axis: 0
   pitch_axis: 4

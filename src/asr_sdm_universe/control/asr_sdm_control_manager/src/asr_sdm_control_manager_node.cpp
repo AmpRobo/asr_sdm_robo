@@ -115,7 +115,7 @@ public:
     last_control_time_ = node_->now();
 
     sub_cmd_vel_ = node_->create_subscription<geometry_msgs::msg::Twist>(
-      cmd_vel_topic_, rclcpp::QoS(10),
+      robot_cmd_topic_, rclcpp::QoS(10),
       std::bind(&AsrSdmControlManager::onTwist, this, std::placeholders::_1));
     sub_initialpose_ = node_->create_subscription<geometry_msgs::msg::PoseWithCovarianceStamped>(
       initialpose_topic_, rclcpp::QoS(10),
@@ -136,8 +136,8 @@ public:
 
     RCLCPP_INFO(
       node_->get_logger(),
-      "ASR SDM control manager started: model=URDF-free Pinocchio, cmd_vel=%s, state=%s",
-      cmd_vel_topic_.c_str(), controller_state_topic_.c_str());
+      "ASR SDM control manager started: model=URDF-free Pinocchio, robot_cmd=%s, state=%s",
+      robot_cmd_topic_.c_str(), controller_state_topic_.c_str());
   }
 
 private:
@@ -166,8 +166,8 @@ private:
     controller_params_.damping = node_->declare_parameter<double>(
       "kinematic_controller.damping", 0.02);
 
-    cmd_vel_topic_ = node_->declare_parameter<std::string>(
-      "cmd_vel_topic", "/control/asr_sdm/cmd_vel");
+    robot_cmd_topic_ = node_->declare_parameter<std::string>(
+      "robot_cmd_topic", "/control/asr_sdm/robot_cmd");
     controller_state_topic_ = node_->declare_parameter<std::string>(
       "controller_state_topic", "/control/asr_sdm/controller_state_3d");
     control_cmd_topic_ = node_->declare_parameter<std::string>(
@@ -507,7 +507,7 @@ private:
   asr::HeadCommand3D latest_cmd_{0.0, 0.0, 0.0};
   asr::JointVelocity3D latest_joint_velocity_{};
 
-  std::string cmd_vel_topic_;
+  std::string robot_cmd_topic_;
   std::string controller_state_topic_;
   std::string control_cmd_topic_;
   std::string initialpose_topic_;

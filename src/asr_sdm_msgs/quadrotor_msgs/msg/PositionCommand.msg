@@ -2,6 +2,8 @@ std_msgs/Header header
 geometry_msgs/Point position
 geometry_msgs/Vector3 velocity
 geometry_msgs/Vector3 acceleration
+geometry_msgs/Twist vel
+geometry_msgs/Accel acc
 float64 yaw
 float64 yaw_dot
 float64[3] kx

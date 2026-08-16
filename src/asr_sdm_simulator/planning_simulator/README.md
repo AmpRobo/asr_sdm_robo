@@ -47,7 +47,7 @@ ros2 launch planning_simulator planning_simulator.launch.py --show-args
 Common combinations:
 
 ```bash
-# Default: sim + model + controller (drive with cmd_vel)
+# Default: sim + model + controller (drive with robot_cmd)
 ros2 launch planning_simulator planning_simulator.launch.py
 
 # Add gamepad teleop
@@ -87,7 +87,7 @@ To change initial pose, topic names, or controller gains, edit that YAML and res
 
 | Topic | Description |
 |---|---|
-| `/control/asr_sdm/cmd_vel` | Input from teleop / planning; drives the kinematic controller |
+| `/control/asr_sdm/robot_cmd` | Input from teleop / planning; drives the kinematic controller |
 | `/control/asr_sdm/odom` | Odometry published by the controller; model pose source with `odom_source:=control` |
 | `/localization/video_inertial_navigation_systems/odometry` | VINS odometry; model pose source with `odom_source:=vins` |
 | `/control/joint_states` | Joint states for `robot_state_publisher` |
@@ -98,7 +98,7 @@ To change initial pose, topic names, or controller gains, edit that YAML and res
 Without a gamepad, publish Twist directly to exercise the controller:
 
 ```bash
-ros2 topic pub --rate 20 /control/asr_sdm/cmd_vel geometry_msgs/msg/Twist \
+ros2 topic pub --rate 20 /control/asr_sdm/robot_cmd geometry_msgs/msg/Twist \
   "{linear: {x: 0.10, y: 0.0, z: 0.0}, angular: {x: 0.0, y: 0.0, z: 0.20}}"
 ```
 
@@ -182,7 +182,7 @@ ros2 launch planning_simulator planning_simulator.launch.py --show-args
 常用组合：
 
 ```bash
-# 默认：仿真 + 模型 + 控制器（可用 cmd_vel 驱动）
+# 默认：仿真 + 模型 + 控制器（可用 robot_cmd 驱动）
 ros2 launch planning_simulator planning_simulator.launch.py
 
 # 加手柄遥控
@@ -222,7 +222,7 @@ config/planning_simulator.yaml
 
 | 话题 | 说明 |
 |---|---|
-| `/control/asr_sdm/cmd_vel` | 手柄 / 规划侧输入，驱动运动学控制器 |
+| `/control/asr_sdm/robot_cmd` | 手柄 / 规划侧输入，驱动运动学控制器 |
 | `/control/asr_sdm/odom` | 控制器发布的里程计；`odom_source:=control` 时作为模型位姿来源 |
 | `/localization/video_inertial_navigation_systems/odometry` | VINS 里程计；`odom_source:=vins` 时作为模型位姿来源 |
 | `/control/joint_states` | 控制器发布的关节状态，供给 `robot_state_publisher` |
@@ -233,7 +233,7 @@ config/planning_simulator.yaml
 无手柄时可用 topic 直接发速度测试控制器：
 
 ```bash
-ros2 topic pub --rate 20 /control/asr_sdm/cmd_vel geometry_msgs/msg/Twist \
+ros2 topic pub --rate 20 /control/asr_sdm/robot_cmd geometry_msgs/msg/Twist \
   "{linear: {x: 0.10, y: 0.0, z: 0.0}, angular: {x: 0.0, y: 0.0, z: 0.20}}"
 ```
 

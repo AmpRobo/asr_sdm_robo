@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Launch the joystick chain: the joy driver and asr_sdm_teleop_node.
 
-asr_sdm_teleop_node turns /joy into the cmd_vel topic that the asr_sdm kinematic
+asr_sdm_teleop_node turns /joy into the robot_cmd topic that the asr_sdm kinematic
 controller consumes.
 
 Node parameters live in config/asr_sdm_teleop.yaml.

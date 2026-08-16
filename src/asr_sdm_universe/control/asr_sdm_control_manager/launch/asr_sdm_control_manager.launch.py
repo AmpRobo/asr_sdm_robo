@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Launch the asr_sdm kinematic controller.
 
-asr_sdm_control_manager turns cmd_vel into joint states and odometry.
+asr_sdm_control_manager turns robot_cmd into joint states and odometry.
 Node parameters live in config/asr_sdm_control_manager.yaml.
 """
 

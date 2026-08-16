@@ -1,6 +1,6 @@
 # asr_sdm_control_manager
 
-Front-unit following kinematic controller: turns `cmd_vel` into joint states and odometry to drive the robot model.
+Front-unit following kinematic controller: turns `robot_cmd` into joint states and odometry to drive the robot model.
 Default node is the **control manager** `asr_sdm_control_manager` (used by this package’s launch and by `planning_simulator`).
 
 [English](#english) · [中文](#中文)
@@ -17,13 +17,13 @@ Topic names live under `topics` in `config/asr_sdm_control_manager.yaml`. Caller
 
 #### Control manager (default, `asr_sdm_control_manager`)
 
-Main link with teleop / planning: `/control/asr_sdm/cmd_vel`.
+Main link with teleop / planning: `/control/asr_sdm/robot_cmd`.
 
 **Subscribe**
 
 | Topic | Type | Role |
 |---|---|---|
-| `/control/asr_sdm/cmd_vel` | `geometry_msgs/msg/Twist` | Velocity command (teleop / planning) |
+| `/control/asr_sdm/robot_cmd` | `geometry_msgs/msg/Twist` | Velocity command (teleop / planning) |
 | `/control/initial_pose` | `geometry_msgs/msg/PoseWithCovarianceStamped` | Reset pose (e.g. RViz 2D Pose Estimate) |
 
 **Publish**
@@ -42,7 +42,7 @@ topics:
   odom: /control/asr_sdm/odom
   joint_states: /control/joint_states
   initialpose: /control/initial_pose
-  cmd_vel: /control/asr_sdm/cmd_vel
+  robot_cmd: /control/asr_sdm/robot_cmd
   controller_state: /control/asr_sdm/controller_state_3d
   control_cmd: /control/asr_sdm/control_cmd_3d
 ```
@@ -97,7 +97,7 @@ Run the manager directly:
 ros2 run asr_sdm_control_manager asr_sdm_control_manager
 ```
 
-Gamepad input comes from `asr_sdm_teleop` (+ `joy`), which publishes to `/control/asr_sdm/cmd_vel`.
+Gamepad input comes from `asr_sdm_teleop` (+ `joy`), which publishes to `/control/asr_sdm/robot_cmd`.
 
 ### Optional offline plotting demos
 
@@ -114,7 +114,7 @@ Override with `--ros-args -p name:=value` or edit the yaml.
 
 | Parameter | Default |
 |---|---|
-| `cmd_vel_topic` | `/control/asr_sdm/cmd_vel` |
+| `robot_cmd_topic` | `/control/asr_sdm/robot_cmd` |
 | `initialpose_topic` | `/control/initial_pose` |
 | `odom_topic` | `/control/asr_sdm/odom` |
 | `joint_state_topic` | `/control/joint_states` |
@@ -139,7 +139,7 @@ Override with `--ros-args -p name:=value` or edit the yaml.
 
 ## 中文
 
-前端跟随运动学控制器：将 `cmd_vel` 转为关节状态与里程计，驱动机器人模型。  
+前端跟随运动学控制器：将 `robot_cmd` 转为关节状态与里程计，驱动机器人模型。  
 默认使用 **控制管理节点** `asr_sdm_control_manager`（本包 launch 与 `planning_simulator` 均如此）。
 
 话题名集中在 `config/asr_sdm_control_manager.yaml` 的 `topics` 段；`planning_simulator` 可通过 `config_file` 传入同 schema 配置覆盖。
@@ -148,13 +148,13 @@ Override with `--ros-args -p name:=value` or edit the yaml.
 
 #### 控制管理节点（默认，`asr_sdm_control_manager`）
 
-与 teleop / planning 的主通道是 `/control/asr_sdm/cmd_vel`。
+与 teleop / planning 的主通道是 `/control/asr_sdm/robot_cmd`。
 
 **Subscribe（输入）**
 
 | Topic | 类型 | 用途 |
 |---|---|---|
-| `/control/asr_sdm/cmd_vel` | `geometry_msgs/msg/Twist` | 速度指令（teleop / planning） |
+| `/control/asr_sdm/robot_cmd` | `geometry_msgs/msg/Twist` | 速度指令（teleop / planning） |
 | `/control/initial_pose` | `geometry_msgs/msg/PoseWithCovarianceStamped` | 重置位姿（如 RViz 2D Pose Estimate） |
 
 **Publish（输出）**
@@ -173,7 +173,7 @@ topics:
   odom: /control/asr_sdm/odom
   joint_states: /control/joint_states
   initialpose: /control/initial_pose
-  cmd_vel: /control/asr_sdm/cmd_vel
+  robot_cmd: /control/asr_sdm/robot_cmd
   controller_state: /control/asr_sdm/controller_state_3d
   control_cmd: /control/asr_sdm/control_cmd_3d
 ```
@@ -227,7 +227,7 @@ ros2 launch planning_simulator planning_simulator.launch.py control:=enable tele
 ros2 run asr_sdm_control_manager asr_sdm_control_manager
 ```
 
-手柄链路由 `asr_sdm_teleop`（及 `joy`）提供，发布到 `/control/asr_sdm/cmd_vel`。
+手柄链路由 `asr_sdm_teleop`（及 `joy`）提供，发布到 `/control/asr_sdm/robot_cmd`。
 
 ### 可选离线绘图演示
 
@@ -244,7 +244,7 @@ ros2 run asr_sdm_head_following_control front_unit_following_controller_test_3d
 
 | 参数 | 默认 |
 |---|---|
-| `cmd_vel_topic` | `/control/asr_sdm/cmd_vel` |
+| `robot_cmd_topic` | `/control/asr_sdm/robot_cmd` |
 | `initialpose_topic` | `/control/initial_pose` |
 | `odom_topic` | `/control/asr_sdm/odom` |
 | `joint_state_topic` | `/control/joint_states` |
