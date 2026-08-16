@@ -17,7 +17,7 @@ set(msg_files
   msg/Corrections.msg
   msg/Gains.msg
   msg/OutputData.msg
-  msg/PositionCommand.msg
+  msg/RobotCommand.msg
   msg/PPROutputData.msg
   msg/Serial.msg
   msg/SO3Command.msg

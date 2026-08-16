@@ -4,7 +4,7 @@
 #include <string>
 #include <nav_msgs/msg/odometry.hpp>
 #include <quadrotor_msgs/msg/corrections.hpp>
-#include <quadrotor_msgs/msg/position_command.hpp>
+#include <quadrotor_msgs/msg/robot_command.hpp>
 #include <quadrotor_msgs/msg/so3_command.hpp>
 #include <rclcpp/rclcpp.hpp>
 #include <sensor_msgs/msg/imu.hpp>
@@ -59,7 +59,7 @@ public:
 
     odom_sub_ = this->create_subscription<nav_msgs::msg::Odometry>(
       "odom", 10, std::bind(&SO3ControlComponent::odom_callback, this, std::placeholders::_1));
-    position_cmd_sub_ = this->create_subscription<quadrotor_msgs::msg::PositionCommand>(
+    position_cmd_sub_ = this->create_subscription<quadrotor_msgs::msg::RobotCommand>(
       "position_cmd", 10, std::bind(&SO3ControlComponent::position_cmd_callback, this, std::placeholders::_1));
     enable_motors_sub_ = this->create_subscription<std_msgs::msg::Bool>(
       "motors", 2, std::bind(&SO3ControlComponent::enable_motors_callback, this, std::placeholders::_1));
@@ -102,7 +102,7 @@ private:
     so3_command_pub_->publish(so3_command);
   }
 
-  void position_cmd_callback(const quadrotor_msgs::msg::PositionCommand::ConstSharedPtr cmd)
+  void position_cmd_callback(const quadrotor_msgs::msg::RobotCommand::ConstSharedPtr cmd)
   {
     des_pos_ = Eigen::Vector3d(cmd->position.x, cmd->position.y, cmd->position.z);
     des_vel_ = Eigen::Vector3d(cmd->velocity.x, cmd->velocity.y, cmd->velocity.z);
@@ -169,7 +169,7 @@ private:
   SO3Control controller_;
   rclcpp::Publisher<quadrotor_msgs::msg::SO3Command>::SharedPtr so3_command_pub_;
   rclcpp::Subscription<nav_msgs::msg::Odometry>::SharedPtr odom_sub_;
-  rclcpp::Subscription<quadrotor_msgs::msg::PositionCommand>::SharedPtr position_cmd_sub_;
+  rclcpp::Subscription<quadrotor_msgs::msg::RobotCommand>::SharedPtr position_cmd_sub_;
   rclcpp::Subscription<std_msgs::msg::Bool>::SharedPtr enable_motors_sub_;
   rclcpp::Subscription<quadrotor_msgs::msg::Corrections>::SharedPtr corrections_sub_;
   rclcpp::Subscription<sensor_msgs::msg::Imu>::SharedPtr imu_sub_;

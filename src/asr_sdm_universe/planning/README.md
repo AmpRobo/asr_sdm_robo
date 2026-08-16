@@ -61,7 +61,7 @@ Subscribes to `/planning/bspline` and samples it at 100 Hz.
 
 | Topic | Type | Role |
 |---|---|---|
-| `/position_cmd` | `quadrotor_msgs/msg/PositionCommand` | Position / velocity / acceleration / yaw command. Remapped to `planning/pos_cmd` in `asr_sdm_planning_manager.launch.py` |
+| `/position_cmd` | `quadrotor_msgs/msg/RobotCommand` | Position / velocity / acceleration / yaw command. Remapped to `planning/pos_cmd` in `asr_sdm_planning_manager.launch.py` |
 | `planning/position_cmd_vis` | `visualization_msgs/msg/Marker` | Arrow at the current command pose |
 | `planning/travel_traj` | `visualization_msgs/msg/Marker` | Flown trajectory so far |
 
@@ -174,7 +174,7 @@ guidance / local modifier 的 `/planning/waypoints` 等目前只在测试节点�
 
 | Topic | 类型 | 内容 |
 |---|---|---|
-| `/position_cmd` | `quadrotor_msgs/msg/PositionCommand` | 位置/速度/加速度/yaw 指令。launch 里 remap 成 `planning/pos_cmd` |
+| `/position_cmd` | `quadrotor_msgs/msg/RobotCommand` | 位置/速度/加速度/yaw 指令。launch 里 remap 成 `planning/pos_cmd` |
 | `planning/position_cmd_vis` | `visualization_msgs/msg/Marker` | 当前指令位置的箭头可视化 |
 | `planning/travel_traj` | `visualization_msgs/msg/Marker` | 已飞过的轨迹 |
 

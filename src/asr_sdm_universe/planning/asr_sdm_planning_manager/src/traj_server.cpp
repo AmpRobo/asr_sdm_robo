@@ -8,7 +8,7 @@
 
 #include "geometry_msgs/msg/point.hpp"
 #include "nav_msgs/msg/odometry.hpp"
-#include "quadrotor_msgs/msg/position_command.hpp"
+#include "quadrotor_msgs/msg/robot_command.hpp"
 #include "std_msgs/msg/empty.hpp"
 #include "visualization_msgs/msg/marker.hpp"
 
@@ -19,11 +19,11 @@
 std::shared_ptr<rclcpp::Node> g_node;
 
 rclcpp::Publisher<visualization_msgs::msg::Marker>::SharedPtr cmd_vis_pub, traj_pub;
-rclcpp::Publisher<quadrotor_msgs::msg::PositionCommand>::SharedPtr pos_cmd_pub;
+rclcpp::Publisher<quadrotor_msgs::msg::RobotCommand>::SharedPtr pos_cmd_pub;
 
 nav_msgs::msg::Odometry odom;
 
-quadrotor_msgs::msg::PositionCommand cmd;
+quadrotor_msgs::msg::RobotCommand cmd;
 // double pos_gain[3] = {5.7, 5.7, 6.2};
 // double vel_gain[3] = {3.4, 3.4, 4.0};
 double pos_gain[3] = {5.7, 5.7, 6.2};
@@ -235,7 +235,7 @@ void cmdCallback()
 
   cmd.header.stamp = time_now;
   cmd.header.frame_id = "world";
-  cmd.trajectory_flag = quadrotor_msgs::msg::PositionCommand::TRAJECTORY_STATUS_READY;
+  cmd.trajectory_flag = quadrotor_msgs::msg::RobotCommand::TRAJECTORY_STATUS_READY;
   cmd.trajectory_id = traj_id_;
 
   cmd.position.x = pos(0);
@@ -294,7 +294,7 @@ int main(int argc, char ** argv)
 
   cmd_vis_pub =
     node->create_publisher<visualization_msgs::msg::Marker>("planning/position_cmd_vis", 10);
-  pos_cmd_pub = node->create_publisher<quadrotor_msgs::msg::PositionCommand>("/position_cmd", 50);
+  pos_cmd_pub = node->create_publisher<quadrotor_msgs::msg::RobotCommand>("/position_cmd", 50);
   traj_pub = node->create_publisher<visualization_msgs::msg::Marker>("planning/travel_traj", 10);
 
   auto cmd_timer = node->create_wall_timer(std::chrono::duration<double>(0.01), cmdCallback);
