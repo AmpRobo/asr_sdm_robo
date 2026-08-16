@@ -3,9 +3,9 @@
 #include <memory>
 #include <string>
 #include <nav_msgs/msg/odometry.hpp>
-#include <quadrotor_msgs/msg/corrections.hpp>
-#include <quadrotor_msgs/msg/robot_command.hpp>
-#include <quadrotor_msgs/msg/so3_command.hpp>
+#include <asr_sdm_control_msgs/msg/corrections.hpp>
+#include <asr_sdm_control_msgs/msg/robot_command.hpp>
+#include <asr_sdm_control_msgs/msg/so3_command.hpp>
 #include <rclcpp/rclcpp.hpp>
 #include <sensor_msgs/msg/imu.hpp>
 #include <so3_control/SO3Control.h>
@@ -55,15 +55,15 @@ public:
     corrections_[1] = this->declare_parameter("corrections.r", 0.0);
     corrections_[2] = this->declare_parameter("corrections.p", 0.0);
 
-    so3_command_pub_ = this->create_publisher<quadrotor_msgs::msg::SO3Command>("so3_cmd", 10);
+    so3_command_pub_ = this->create_publisher<asr_sdm_control_msgs::msg::SO3Command>("so3_cmd", 10);
 
     odom_sub_ = this->create_subscription<nav_msgs::msg::Odometry>(
       "odom", 10, std::bind(&SO3ControlComponent::odom_callback, this, std::placeholders::_1));
-    position_cmd_sub_ = this->create_subscription<quadrotor_msgs::msg::RobotCommand>(
+    position_cmd_sub_ = this->create_subscription<asr_sdm_control_msgs::msg::RobotCommand>(
       "position_cmd", 10, std::bind(&SO3ControlComponent::position_cmd_callback, this, std::placeholders::_1));
     enable_motors_sub_ = this->create_subscription<std_msgs::msg::Bool>(
       "motors", 2, std::bind(&SO3ControlComponent::enable_motors_callback, this, std::placeholders::_1));
-    corrections_sub_ = this->create_subscription<quadrotor_msgs::msg::Corrections>(
+    corrections_sub_ = this->create_subscription<asr_sdm_control_msgs::msg::Corrections>(
       "corrections", 10, std::bind(&SO3ControlComponent::corrections_callback, this, std::placeholders::_1));
     imu_sub_ = this->create_subscription<sensor_msgs::msg::Imu>(
       "imu", 10, std::bind(&SO3ControlComponent::imu_callback, this, std::placeholders::_1));
@@ -78,7 +78,7 @@ private:
     const Eigen::Vector3d&    force       = controller_.getComputedForce();
     const Eigen::Quaterniond& orientation = controller_.getComputedOrientation();
 
-    quadrotor_msgs::msg::SO3Command so3_command;
+    asr_sdm_control_msgs::msg::SO3Command so3_command;
     so3_command.header.stamp    = this->now();
     so3_command.header.frame_id = frame_id_;
     so3_command.force.x         = force(0);
@@ -102,7 +102,7 @@ private:
     so3_command_pub_->publish(so3_command);
   }
 
-  void position_cmd_callback(const quadrotor_msgs::msg::RobotCommand::ConstSharedPtr cmd)
+  void position_cmd_callback(const asr_sdm_control_msgs::msg::RobotCommand::ConstSharedPtr cmd)
   {
     des_pos_ = Eigen::Vector3d(cmd->position.x, cmd->position.y, cmd->position.z);
     des_vel_ = Eigen::Vector3d(cmd->velocity.x, cmd->velocity.y, cmd->velocity.z);
@@ -151,7 +151,7 @@ private:
     enable_motors_ = msg->data;
   }
 
-  void corrections_callback(const quadrotor_msgs::msg::Corrections::ConstSharedPtr msg)
+  void corrections_callback(const asr_sdm_control_msgs::msg::Corrections::ConstSharedPtr msg)
   {
     corrections_[0] = msg->kf_correction;
     corrections_[1] = msg->angle_corrections[0];
@@ -167,11 +167,11 @@ private:
   }
 
   SO3Control controller_;
-  rclcpp::Publisher<quadrotor_msgs::msg::SO3Command>::SharedPtr so3_command_pub_;
+  rclcpp::Publisher<asr_sdm_control_msgs::msg::SO3Command>::SharedPtr so3_command_pub_;
   rclcpp::Subscription<nav_msgs::msg::Odometry>::SharedPtr odom_sub_;
-  rclcpp::Subscription<quadrotor_msgs::msg::RobotCommand>::SharedPtr position_cmd_sub_;
+  rclcpp::Subscription<asr_sdm_control_msgs::msg::RobotCommand>::SharedPtr position_cmd_sub_;
   rclcpp::Subscription<std_msgs::msg::Bool>::SharedPtr enable_motors_sub_;
-  rclcpp::Subscription<quadrotor_msgs::msg::Corrections>::SharedPtr corrections_sub_;
+  rclcpp::Subscription<asr_sdm_control_msgs::msg::Corrections>::SharedPtr corrections_sub_;
   rclcpp::Subscription<sensor_msgs::msg::Imu>::SharedPtr imu_sub_;
 
   bool        position_cmd_updated_, position_cmd_init_;

@@ -30,7 +30,7 @@
 
 //#include <cloud_banchmark/cloud_banchmarkConfig.h>
 #include "depth_render.cuh"
-#include "quadrotor_msgs/msg/robot_command.hpp"
+#include "asr_sdm_control_msgs/msg/robot_command.hpp"
 using namespace cv;
 using namespace std;
 using namespace Eigen;

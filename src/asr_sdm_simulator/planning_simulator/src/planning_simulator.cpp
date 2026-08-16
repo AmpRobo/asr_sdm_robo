@@ -4,7 +4,7 @@
 #include <geometry_msgs/msg/pose_with_covariance_stamped.hpp>
 #include <geometry_msgs/msg/vector3.hpp>
 #include <nav_msgs/msg/odometry.hpp>
-#include <quadrotor_msgs/msg/so3_command.hpp>
+#include <asr_sdm_control_msgs/msg/so3_command.hpp>
 #include <planning_simulator/Quadrotor.h>
 #include <rclcpp/rclcpp.hpp>
 #include <sensor_msgs/msg/imu.hpp>
@@ -174,7 +174,7 @@ getControl(const QuadrotorSimulator::Quadrotor& quad, const Command& cmd)
 }
 
 static void
-cmd_callback(const quadrotor_msgs::msg::SO3Command::ConstSharedPtr cmd)
+cmd_callback(const asr_sdm_control_msgs::msg::SO3Command::ConstSharedPtr cmd)
 {
   command.force[0]         = cmd->force.x;
   command.force[1]         = cmd->force.y;
@@ -241,7 +241,7 @@ main(int argc, char** argv)
   auto odom_pub = n->create_publisher<nav_msgs::msg::Odometry>("odom", 100);
   auto imu_pub  = n->create_publisher<sensor_msgs::msg::Imu>("imu", 10);
   auto cmd_sub =
-    n->create_subscription<quadrotor_msgs::msg::SO3Command>("cmd", 100, &cmd_callback);
+    n->create_subscription<asr_sdm_control_msgs::msg::SO3Command>("cmd", 100, &cmd_callback);
   auto f_sub =
     n->create_subscription<geometry_msgs::msg::Vector3>("force_disturbance", 100,
                 &force_disturbance_callback);

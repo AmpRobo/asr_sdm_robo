@@ -33,7 +33,7 @@ if(ENABLE_CUDA)
   find_package(Boost REQUIRED COMPONENTS system filesystem)
   find_package(cv_bridge REQUIRED)
   find_package(image_transport REQUIRED)
-  find_package(quadrotor_msgs REQUIRED)
+  find_package(asr_sdm_control_msgs REQUIRED)
 
   cuda_add_library(depth_render_cuda
       src/depth_render.cu
@@ -48,7 +48,7 @@ if(ENABLE_CUDA)
   )
   ament_target_dependencies(pcl_render_node
     rclcpp sensor_msgs geometry_msgs nav_msgs std_msgs pcl_conversions
-    cv_bridge image_transport quadrotor_msgs)
+    cv_bridge image_transport asr_sdm_control_msgs)
   target_link_libraries(pcl_render_node
     depth_render_cuda
     ${OpenCV_LIBS}

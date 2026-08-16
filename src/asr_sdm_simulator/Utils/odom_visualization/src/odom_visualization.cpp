@@ -17,7 +17,7 @@
 #include "std_msgs/msg/color_rgba.hpp"
 #include "armadillo"
 #include "pose_utils.h"
-#include "quadrotor_msgs/msg/robot_command.hpp"
+#include "asr_sdm_control_msgs/msg/robot_command.hpp"
 
 using namespace arma;
 using namespace std;
@@ -484,7 +484,7 @@ void odom_callback(const nav_msgs::msg::Odometry::ConstSharedPtr msg)
   }
 }
 
-void cmd_callback(const quadrotor_msgs::msg::RobotCommand::ConstSharedPtr cmd)
+void cmd_callback(const asr_sdm_control_msgs::msg::RobotCommand::ConstSharedPtr cmd)
 {
   if (cmd->header.frame_id == string("null"))
     return;
@@ -597,7 +597,7 @@ int main(int argc, char** argv)
         }));
   }
 
-  auto sub_cmd  = node->create_subscription<quadrotor_msgs::msg::RobotCommand>(
+  auto sub_cmd  = node->create_subscription<asr_sdm_control_msgs::msg::RobotCommand>(
       "cmd", 100, cmd_callback);
   posePub   = node->create_publisher<geometry_msgs::msg::PoseStamped>("pose",                latched);
   pathPub   = node->create_publisher<nav_msgs::msg::Path>(            "path",                latched);

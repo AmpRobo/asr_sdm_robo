@@ -12,7 +12,7 @@ find_package(nav_msgs REQUIRED)
 find_package(geometry_msgs REQUIRED)
 find_package(visualization_msgs REQUIRED)
 find_package(std_msgs REQUIRED)
-find_package(quadrotor_msgs REQUIRED)
+find_package(asr_sdm_control_msgs REQUIRED)
 find_package(tf2 REQUIRED)
 find_package(tf2_ros REQUIRED)
 find_package(pose_utils REQUIRED)
@@ -25,7 +25,7 @@ target_include_directories(odom_visualization PRIVATE
 target_link_libraries(odom_visualization ${ARMADILLO_LIBRARIES})
 ament_target_dependencies(odom_visualization
   rclcpp sensor_msgs nav_msgs geometry_msgs visualization_msgs std_msgs
-  quadrotor_msgs tf2 tf2_ros pose_utils)
+  asr_sdm_control_msgs tf2 tf2_ros pose_utils)
 
 install(TARGETS odom_visualization
   DESTINATION lib/${PROJECT_NAME})

@@ -7,7 +7,7 @@ endif()
 
 find_package(ament_cmake REQUIRED)
 find_package(rclcpp REQUIRED)
-find_package(quadrotor_msgs REQUIRED)
+find_package(asr_sdm_control_msgs REQUIRED)
 find_package(uav_utils REQUIRED)
 find_package(nav_msgs REQUIRED)
 find_package(sensor_msgs REQUIRED)
@@ -27,7 +27,7 @@ target_include_directories(planning_simulator PRIVATE
   ${CMAKE_CURRENT_SOURCE_DIR}/include)
 target_link_libraries(planning_simulator quadrotor_dynamics Eigen3::Eigen)
 ament_target_dependencies(planning_simulator
-  rclcpp quadrotor_msgs uav_utils nav_msgs sensor_msgs geometry_msgs)
+  rclcpp asr_sdm_control_msgs uav_utils nav_msgs sensor_msgs geometry_msgs)
 
 install(TARGETS planning_simulator
   DESTINATION lib/${PROJECT_NAME})

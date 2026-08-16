@@ -30,7 +30,7 @@ find_package(builtin_interfaces REQUIRED)
 find_package(cv_bridge REQUIRED)
 find_package(rosidl_default_generators REQUIRED)
 
-find_package(quadrotor_msgs REQUIRED)
+find_package(asr_sdm_control_msgs REQUIRED)
 find_package(asr_sdm_esdf_map REQUIRED)
 find_package(asr_sdm_local_path_modifier REQUIRED)
 find_package(bspline REQUIRED)
@@ -56,7 +56,7 @@ set(asr_sdm_planning_manager_dependencies
   visualization_msgs
   builtin_interfaces
   cv_bridge
-  quadrotor_msgs
+  asr_sdm_control_msgs
   asr_sdm_local_path_modifier
   bspline
   asr_sdm_trajectory_generator

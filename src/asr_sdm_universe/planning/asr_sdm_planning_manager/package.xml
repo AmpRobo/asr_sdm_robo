@@ -22,7 +22,7 @@
   <depend>builtin_interfaces</depend>
   <depend>cv_bridge</depend>
 
-  <depend>quadrotor_msgs</depend>
+  <depend>asr_sdm_control_msgs</depend>
   <depend>asr_sdm_esdf_map</depend>
   <depend>asr_sdm_local_path_modifier</depend>
   <depend>bspline</depend>

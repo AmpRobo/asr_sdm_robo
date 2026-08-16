@@ -15,7 +15,7 @@
   <depend>nav_msgs</depend>
   <depend>sensor_msgs</depend>
   <depend>std_msgs</depend>
-  <depend>quadrotor_msgs</depend>
+  <depend>asr_sdm_control_msgs</depend>
   <depend>eigen</depend>
 
   <export>
