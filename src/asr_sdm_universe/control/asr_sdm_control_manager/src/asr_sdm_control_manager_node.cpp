@@ -152,7 +152,7 @@ public:
     joint_source_indices_ = declare_parameter<std::vector<int64_t>>(
       "joint_source_indices", {0, 1, 2, 3, 4, 5});
     joint_signs_ = declare_parameter<std::vector<double>>(
-      "joint_signs", {1.0, 1.0, 1.0, 1.0, 1.0, 1.0});
+      "joint_signs", {-1.0, -1.0, -1.0, -1.0, -1.0, -1.0});
     joint_offsets_rad_ = declare_parameter<std::vector<double>>(
       "joint_offsets_rad", {0.0, 0.0, 0.0, 0.0, 0.0, 0.0});
     clip_joint_positions_ = declare_parameter<bool>("clip_joint_positions", true);
