@@ -7,6 +7,7 @@
 #include <geometry_msgs/msg/pose_with_covariance_stamped.hpp>
 #include <geometry_msgs/msg/twist.hpp>
 #include <nav_msgs/msg/odometry.hpp>
+#include <rclcpp/executors/multi_threaded_executor.hpp>
 #include <rclcpp/rclcpp.hpp>
 #include <sensor_msgs/msg/joint_state.hpp>
 #include <std_msgs/msg/float64_multi_array.hpp>
@@ -20,8 +21,6 @@
 #include <stdexcept>
 #include <string>
 #include <vector>
-
-using namespace std::chrono_literals;
 
 namespace
 {
@@ -99,73 +98,110 @@ geometry_msgs::msg::Quaternion quaternionFromFrame(const asr::Mat3 & frame)
 
 }  // namespace
 
-class AsrSdmControlManagerNode : public rclcpp::Node
+class AsrSdmControlManager
 {
 public:
-  AsrSdmControlManagerNode()
-  : Node("asr_sdm_control_manager")
+  void init(const rclcpp::Node::SharedPtr & nh)
   {
-    model_params_.link_length = declare_parameter<double>(
-      "kinematic_controller.link_length", 0.25);
-    model_params_.link_mass = declare_parameter<double>(
-      "kinematic_controller.link_mass", 1.5);
-    model_params_.link_radius = declare_parameter<double>(
-      "kinematic_controller.link_radius", 0.05);
-    model_params_.joint_limit = declare_parameter<double>(
-      "kinematic_controller.joint_limit", kUrdfJointLimit);
-    model_params_.joint_velocity_limit = declare_parameter<double>(
-      "kinematic_controller.joint_velocity_limit", 2.0);
-    model_params_.joint_effort_limit = declare_parameter<double>(
-      "kinematic_controller.joint_effort_limit", 50.0);
-    controller_params_.link_length = model_params_.link_length;
-    controller_params_.joint_rate_limit = declare_parameter<double>(
-      "kinematic_controller.joint_rate_limit", 2.0);
-    controller_params_.joint_limit = model_params_.joint_limit;
-    controller_params_.max_curvature = declare_parameter<double>(
-      "kinematic_controller.max_curvature", 1.2);
-    controller_params_.curvature_velocity_epsilon = declare_parameter<double>(
-      "kinematic_controller.curvature_velocity_epsilon", 1.0e-3);
-    controller_params_.damping = declare_parameter<double>(
-      "kinematic_controller.damping", 0.02);
+    node_ = nh;
+    loadParameters();
+
     model_ = std::make_unique<asr::AsrSdmKinematicModel>(model_params_);
     controller_ = std::make_unique<asr::FrontUnitFollowingController3D>(controller_params_);
 
-    cmd_vel_topic_ = declare_parameter<std::string>(
-      "cmd_vel_topic", "/control/asr_sdm/cmd_vel");
-    controller_state_topic_ = declare_parameter<std::string>(
-      "controller_state_topic", "/control/asr_sdm/controller_state_3d");
-    control_cmd_topic_ = declare_parameter<std::string>(
-      "control_cmd_topic", "/control/asr_sdm/control_cmd_3d");
-    initialpose_topic_ = declare_parameter<std::string>(
-      "initialpose_topic", "/control/initial_pose");
-    odom_topic_ = declare_parameter<std::string>(
-      "odom_topic", "/control/asr_sdm/odom");
-    joint_state_topic_ = declare_parameter<std::string>(
-      "joint_state_topic", "/control/joint_states");
-    world_frame_ = declare_parameter<std::string>("world_frame", "world");
-    controller_base_frame_ = declare_parameter<std::string>("controller_base_frame", "base");
+    state_ = controller_->makeInitialState();
+    resetState(initial_x_, initial_y_, initial_z_, initial_yaw_);
+    last_cmd_time_ = node_->now();
+    last_control_time_ = node_->now();
 
-    initial_x_ = declare_parameter<double>("initial_x", -5.0);
-    initial_y_ = declare_parameter<double>("initial_y", 0.0);
-    initial_z_ = declare_parameter<double>("initial_z", 0.0);
-    initial_yaw_ = declare_parameter<double>("initial_yaw", 0.0);
-    joint_source_indices_ = declare_parameter<std::vector<int64_t>>(
+    sub_cmd_vel_ = node_->create_subscription<geometry_msgs::msg::Twist>(
+      cmd_vel_topic_, rclcpp::QoS(10),
+      std::bind(&AsrSdmControlManager::onTwist, this, std::placeholders::_1));
+    sub_initialpose_ = node_->create_subscription<geometry_msgs::msg::PoseWithCovarianceStamped>(
+      initialpose_topic_, rclcpp::QoS(10),
+      std::bind(&AsrSdmControlManager::onInitialPose, this, std::placeholders::_1));
+    pub_controller_state_ = node_->create_publisher<std_msgs::msg::Float64MultiArray>(
+      controller_state_topic_, rclcpp::QoS(10));
+    pub_joint_state_ = node_->create_publisher<sensor_msgs::msg::JointState>(
+      joint_state_topic_, rclcpp::QoS(10));
+    pub_odom_ = node_->create_publisher<nav_msgs::msg::Odometry>(odom_topic_, rclcpp::QoS(10));
+    if (publish_control_cmd_) {
+      pub_control_cmd_ = node_->create_publisher<asr_sdm_control_msgs::msg::ControlCmd>(
+        control_cmd_topic_, rclcpp::QoS(1));
+    }
+
+    timer_ = node_->create_wall_timer(
+      std::chrono::milliseconds(control_period_ms_),
+      std::bind(&AsrSdmControlManager::onControlTimer, this));
+
+    RCLCPP_INFO(
+      node_->get_logger(),
+      "ASR SDM control manager started: model=URDF-free Pinocchio, cmd_vel=%s, state=%s",
+      cmd_vel_topic_.c_str(), controller_state_topic_.c_str());
+  }
+
+private:
+  void loadParameters()
+  {
+    model_params_.link_length = node_->declare_parameter<double>(
+      "kinematic_controller.link_length", 0.25);
+    model_params_.link_mass = node_->declare_parameter<double>(
+      "kinematic_controller.link_mass", 1.5);
+    model_params_.link_radius = node_->declare_parameter<double>(
+      "kinematic_controller.link_radius", 0.05);
+    model_params_.joint_limit = node_->declare_parameter<double>(
+      "kinematic_controller.joint_limit", kUrdfJointLimit);
+    model_params_.joint_velocity_limit = node_->declare_parameter<double>(
+      "kinematic_controller.joint_velocity_limit", 2.0);
+    model_params_.joint_effort_limit = node_->declare_parameter<double>(
+      "kinematic_controller.joint_effort_limit", 50.0);
+    controller_params_.link_length = model_params_.link_length;
+    controller_params_.joint_rate_limit = node_->declare_parameter<double>(
+      "kinematic_controller.joint_rate_limit", 2.0);
+    controller_params_.joint_limit = model_params_.joint_limit;
+    controller_params_.max_curvature = node_->declare_parameter<double>(
+      "kinematic_controller.max_curvature", 1.2);
+    controller_params_.curvature_velocity_epsilon = node_->declare_parameter<double>(
+      "kinematic_controller.curvature_velocity_epsilon", 1.0e-3);
+    controller_params_.damping = node_->declare_parameter<double>(
+      "kinematic_controller.damping", 0.02);
+
+    cmd_vel_topic_ = node_->declare_parameter<std::string>(
+      "cmd_vel_topic", "/control/asr_sdm/cmd_vel");
+    controller_state_topic_ = node_->declare_parameter<std::string>(
+      "controller_state_topic", "/control/asr_sdm/controller_state_3d");
+    control_cmd_topic_ = node_->declare_parameter<std::string>(
+      "control_cmd_topic", "/control/asr_sdm/control_cmd_3d");
+    initialpose_topic_ = node_->declare_parameter<std::string>(
+      "initialpose_topic", "/control/initial_pose");
+    odom_topic_ = node_->declare_parameter<std::string>(
+      "odom_topic", "/control/asr_sdm/odom");
+    joint_state_topic_ = node_->declare_parameter<std::string>(
+      "joint_state_topic", "/control/joint_states");
+    world_frame_ = node_->declare_parameter<std::string>("world_frame", "world");
+    controller_base_frame_ = node_->declare_parameter<std::string>("controller_base_frame", "base");
+
+    initial_x_ = node_->declare_parameter<double>("initial_x", -5.0);
+    initial_y_ = node_->declare_parameter<double>("initial_y", 0.0);
+    initial_z_ = node_->declare_parameter<double>("initial_z", 0.0);
+    initial_yaw_ = node_->declare_parameter<double>("initial_yaw", 0.0);
+    joint_source_indices_ = node_->declare_parameter<std::vector<int64_t>>(
       "joint_source_indices", {0, 1, 2, 3, 4, 5});
-    joint_signs_ = declare_parameter<std::vector<double>>(
-      "joint_signs", {-1.0, -1.0, -1.0, -1.0, -1.0, -1.0});
-    joint_offsets_rad_ = declare_parameter<std::vector<double>>(
+    joint_signs_ = node_->declare_parameter<std::vector<double>>(
+      "joint_signs", {1.0, 1.0, 1.0, 1.0, 1.0, 1.0});
+    joint_offsets_rad_ = node_->declare_parameter<std::vector<double>>(
       "joint_offsets_rad", {0.0, 0.0, 0.0, 0.0, 0.0, 0.0});
-    clip_joint_positions_ = declare_parameter<bool>("clip_joint_positions", true);
-    joint_position_limit_rad_ = declare_parameter<double>(
+    clip_joint_positions_ = node_->declare_parameter<bool>("clip_joint_positions", true);
+    joint_position_limit_rad_ = node_->declare_parameter<double>(
       "joint_position_limit_rad", model_params_.joint_limit);
-    control_period_ms_ = declare_parameter<int>("control_period_ms", 20);
-    cmd_timeout_sec_ = declare_parameter<double>("cmd_timeout_sec", 0.3);
-    max_linear_velocity_ = declare_parameter<double>("max_linear_velocity", 0.12);
-    max_pitch_rate_ = declare_parameter<double>("max_pitch_rate", 0.35);
-    max_yaw_rate_ = declare_parameter<double>("max_yaw_rate", 0.35);
-    publish_control_cmd_ = declare_parameter<bool>("publish_control_cmd", false);
-    joint_angle_scale_ = declare_parameter<double>("joint_angle_scale", 1.0);
-    joint_angle_limit_ = declare_parameter<int>("joint_angle_limit", 2147483647);
+    control_period_ms_ = node_->declare_parameter<int>("control_period_ms", 20);
+    cmd_timeout_sec_ = node_->declare_parameter<double>("cmd_timeout_sec", 0.3);
+    max_linear_velocity_ = node_->declare_parameter<double>("max_linear_velocity", 0.12);
+    max_pitch_rate_ = node_->declare_parameter<double>("max_pitch_rate", 0.35);
+    max_yaw_rate_ = node_->declare_parameter<double>("max_yaw_rate", 0.35);
+    publish_control_cmd_ = node_->declare_parameter<bool>("publish_control_cmd", false);
+    joint_angle_scale_ = node_->declare_parameter<double>("joint_angle_scale", 1.0);
+    joint_angle_limit_ = node_->declare_parameter<int>("joint_angle_limit", 2147483647);
 
     if (
       joint_source_indices_.size() != kArticulationJointNames.size() ||
@@ -180,47 +216,16 @@ public:
         throw std::runtime_error("joint_source_indices values must be in [0, 5]");
       }
     }
-
-    state_ = controller_->makeInitialState();
-    resetState(initial_x_, initial_y_, initial_z_, initial_yaw_);
-    last_cmd_time_ = now();
-    last_control_time_ = now();
-
-    sub_cmd_vel_ = create_subscription<geometry_msgs::msg::Twist>(
-      cmd_vel_topic_, rclcpp::QoS(10),
-      std::bind(&AsrSdmControlManagerNode::onTwist, this, std::placeholders::_1));
-    sub_initialpose_ = create_subscription<geometry_msgs::msg::PoseWithCovarianceStamped>(
-      initialpose_topic_, rclcpp::QoS(10),
-      std::bind(&AsrSdmControlManagerNode::onInitialPose, this, std::placeholders::_1));
-    pub_controller_state_ = create_publisher<std_msgs::msg::Float64MultiArray>(
-      controller_state_topic_, rclcpp::QoS(10));
-    pub_joint_state_ = create_publisher<sensor_msgs::msg::JointState>(
-      joint_state_topic_, rclcpp::QoS(10));
-    pub_odom_ = create_publisher<nav_msgs::msg::Odometry>(odom_topic_, rclcpp::QoS(10));
-    if (publish_control_cmd_) {
-      pub_control_cmd_ = create_publisher<asr_sdm_control_msgs::msg::ControlCmd>(
-        control_cmd_topic_, rclcpp::QoS(1));
-    }
-
-    timer_ = create_wall_timer(
-      std::chrono::milliseconds(control_period_ms_),
-      std::bind(&AsrSdmControlManagerNode::onControlTimer, this));
-
-    RCLCPP_INFO(
-      get_logger(),
-      "ASR SDM control manager started: model=URDF-free Pinocchio, cmd_vel=%s, state=%s",
-      cmd_vel_topic_.c_str(), controller_state_topic_.c_str());
   }
 
-private:
   void onTwist(const geometry_msgs::msg::Twist::SharedPtr msg)
   {
     latest_cmd_.linear_velocity = std::clamp(msg->linear.x, 0.0, std::abs(max_linear_velocity_));
     latest_cmd_.pitch_rate = clampSymmetric(msg->angular.y, max_pitch_rate_);
     latest_cmd_.yaw_rate = clampSymmetric(msg->angular.z, max_yaw_rate_);
-    last_cmd_time_ = now();
+    last_cmd_time_ = node_->now();
     RCLCPP_INFO_THROTTLE(
-      get_logger(), *get_clock(), 1000,
+      node_->get_logger(), *node_->get_clock(), 1000,
       "cmd_vel limited -> v=%.3f pitch=%.3f yaw=%.3f", latest_cmd_.linear_velocity,
       latest_cmd_.pitch_rate, latest_cmd_.yaw_rate);
   }
@@ -232,7 +237,7 @@ private:
       orientation.x * orientation.x + orientation.y * orientation.y +
       orientation.z * orientation.z + orientation.w * orientation.w);
     if (norm < 1.0e-9 || !std::isfinite(norm)) {
-      RCLCPP_WARN(get_logger(), "Ignoring initial pose with an invalid quaternion");
+      RCLCPP_WARN(node_->get_logger(), "Ignoring initial pose with an invalid quaternion");
       return;
     }
 
@@ -240,8 +245,8 @@ private:
       msg->pose.pose.position.x, msg->pose.pose.position.y, msg->pose.pose.position.z,
       orientation.x / norm, orientation.y / norm,
       orientation.z / norm, orientation.w / norm);
-    last_cmd_time_ = now();
-    last_control_time_ = now();
+    last_cmd_time_ = node_->now();
+    last_control_time_ = node_->now();
     publishControllerState({0.0, 0.0, 0.0}, {});
     publishRobotState({0.0, 0.0, 0.0}, {});
   }
@@ -363,7 +368,7 @@ private:
 
   void onControlTimer()
   {
-    const rclcpp::Time current_time = now();
+    const rclcpp::Time current_time = node_->now();
     double dt = (current_time - last_control_time_).seconds();
     if (dt <= 0.0 || dt > 0.1) {
       dt = static_cast<double>(control_period_ms_) / 1000.0;
@@ -422,7 +427,7 @@ private:
   void publishRobotState(
     const asr::HeadCommand3D & cmd, const asr::JointVelocity3D & joint_velocity)
   {
-    const auto stamp = now();
+    const auto stamp = node_->now();
     const auto odom_orientation = quaternionFromFrame(state_.head_frame);
 
     sensor_msgs::msg::JointState joint_state;
@@ -473,7 +478,7 @@ private:
   void publishControlCmd()
   {
     asr_sdm_control_msgs::msg::ControlCmd msg;
-    msg.header.stamp = now();
+    msg.header.stamp = node_->now();
     msg.header.frame_id = "front_unit_following_controller_3d";
     msg.units_cmd.resize(asr::kNum3dJoints);
     for (size_t joint = 0; joint < asr::kNum3dJoints; ++joint) {
@@ -493,6 +498,7 @@ private:
     return scaleToInt32(value, joint_angle_scale_, -joint_angle_limit_, joint_angle_limit_);
   }
 
+  rclcpp::Node::SharedPtr node_;
   asr::AsrSdmKinematicModelParameters model_params_;
   asr::FrontUnitController3DParameters controller_params_;
   std::unique_ptr<asr::AsrSdmKinematicModel> model_;
@@ -527,8 +533,8 @@ private:
   double joint_angle_scale_{1.0};
   int joint_angle_limit_{2147483647};
 
-  rclcpp::Time last_cmd_time_;
-  rclcpp::Time last_control_time_;
+  rclcpp::Time last_cmd_time_{0, 0, RCL_ROS_TIME};
+  rclcpp::Time last_control_time_{0, 0, RCL_ROS_TIME};
   rclcpp::Subscription<geometry_msgs::msg::Twist>::SharedPtr sub_cmd_vel_;
   rclcpp::Subscription<geometry_msgs::msg::PoseWithCovarianceStamped>::SharedPtr sub_initialpose_;
   rclcpp::Publisher<std_msgs::msg::Float64MultiArray>::SharedPtr pub_controller_state_;
@@ -538,10 +544,18 @@ private:
   rclcpp::TimerBase::SharedPtr timer_;
 };
 
-int main(int argc, char * argv[])
+int main(int argc, char ** argv)
 {
   rclcpp::init(argc, argv);
-  rclcpp::spin(std::make_shared<AsrSdmControlManagerNode>());
+  auto nh = std::make_shared<rclcpp::Node>("control_manager_node");
+
+  AsrSdmControlManager control_manager;
+  control_manager.init(nh);
+
+  rclcpp::executors::MultiThreadedExecutor executor;
+  executor.add_node(nh);
+  executor.spin();
+
   rclcpp::shutdown();
   return 0;
 }
