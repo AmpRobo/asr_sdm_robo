@@ -2,10 +2,10 @@
 #include "asr_sdm_kinematic_dynamic_model/asr_sdm_kinematic_model.hpp"
 
 #include "asr_sdm_control_msgs/msg/control_cmd.hpp"
+#include "asr_sdm_control_msgs/msg/robot_command.hpp"
 #include "asr_sdm_control_msgs/msg/unit_cmd.hpp"
 
 #include <geometry_msgs/msg/pose_with_covariance_stamped.hpp>
-#include <geometry_msgs/msg/twist.hpp>
 #include <nav_msgs/msg/odometry.hpp>
 #include <rclcpp/executors/multi_threaded_executor.hpp>
 #include <rclcpp/rclcpp.hpp>
@@ -114,9 +114,9 @@ public:
     last_cmd_time_ = node_->now();
     last_control_time_ = node_->now();
 
-    sub_cmd_vel_ = node_->create_subscription<geometry_msgs::msg::Twist>(
+    sub_robot_cmd_ = node_->create_subscription<asr_sdm_control_msgs::msg::RobotCommand>(
       robot_cmd_topic_, rclcpp::QoS(10),
-      std::bind(&AsrSdmControlManager::onTwist, this, std::placeholders::_1));
+      std::bind(&AsrSdmControlManager::onRobotCmd, this, std::placeholders::_1));
     sub_initialpose_ = node_->create_subscription<geometry_msgs::msg::PoseWithCovarianceStamped>(
       initialpose_topic_, rclcpp::QoS(10),
       std::bind(&AsrSdmControlManager::onInitialPose, this, std::placeholders::_1));
@@ -218,15 +218,16 @@ private:
     }
   }
 
-  void onTwist(const geometry_msgs::msg::Twist::SharedPtr msg)
+  void onRobotCmd(const asr_sdm_control_msgs::msg::RobotCommand::SharedPtr msg)
   {
-    latest_cmd_.linear_velocity = std::clamp(msg->linear.x, 0.0, std::abs(max_linear_velocity_));
-    latest_cmd_.pitch_rate = clampSymmetric(msg->angular.y, max_pitch_rate_);
-    latest_cmd_.yaw_rate = clampSymmetric(msg->angular.z, max_yaw_rate_);
+    const auto & vel = msg->vel;
+    latest_cmd_.linear_velocity = std::clamp(vel.linear.x, 0.0, std::abs(max_linear_velocity_));
+    latest_cmd_.pitch_rate = clampSymmetric(vel.angular.y, max_pitch_rate_);
+    latest_cmd_.yaw_rate = clampSymmetric(vel.angular.z, max_yaw_rate_);
     last_cmd_time_ = node_->now();
     RCLCPP_INFO_THROTTLE(
       node_->get_logger(), *node_->get_clock(), 1000,
-      "cmd_vel limited -> v=%.3f pitch=%.3f yaw=%.3f", latest_cmd_.linear_velocity,
+      "robot_cmd limited -> v=%.3f pitch=%.3f yaw=%.3f", latest_cmd_.linear_velocity,
       latest_cmd_.pitch_rate, latest_cmd_.yaw_rate);
   }
 
@@ -535,7 +536,7 @@ private:
 
   rclcpp::Time last_cmd_time_{0, 0, RCL_ROS_TIME};
   rclcpp::Time last_control_time_{0, 0, RCL_ROS_TIME};
-  rclcpp::Subscription<geometry_msgs::msg::Twist>::SharedPtr sub_cmd_vel_;
+  rclcpp::Subscription<asr_sdm_control_msgs::msg::RobotCommand>::SharedPtr sub_robot_cmd_;
   rclcpp::Subscription<geometry_msgs::msg::PoseWithCovarianceStamped>::SharedPtr sub_initialpose_;
   rclcpp::Publisher<std_msgs::msg::Float64MultiArray>::SharedPtr pub_controller_state_;
   rclcpp::Publisher<sensor_msgs::msg::JointState>::SharedPtr pub_joint_state_;

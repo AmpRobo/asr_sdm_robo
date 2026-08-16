@@ -1,6 +1,6 @@
 #include "rclcpp/rclcpp.hpp"
 
-#include <geometry_msgs/msg/twist.hpp>
+#include "asr_sdm_control_msgs/msg/robot_command.hpp"
 #include <sensor_msgs/msg/joy.hpp>
 
 #include <algorithm>
@@ -35,7 +35,8 @@ public:
     joy_sub_ = this->create_subscription<sensor_msgs::msg::Joy>(
       "joy", 10, std::bind(&JoystickTeleop::joy_callback, this, std::placeholders::_1));
 
-    pub_control_cmd_ = this->create_publisher<geometry_msgs::msg::Twist>(robot_cmd_topic, 10);
+    pub_robot_cmd_ = this->create_publisher<asr_sdm_control_msgs::msg::RobotCommand>(
+      robot_cmd_topic, 10);
 
     RCLCPP_INFO(
       this->get_logger(), "Joystick Teleop Node started. robot_cmd=%s", robot_cmd_topic.c_str());
@@ -44,7 +45,9 @@ public:
 private:
   void joy_callback(const sensor_msgs::msg::Joy::SharedPtr msg)
   {
-    auto twist = geometry_msgs::msg::Twist();
+    asr_sdm_control_msgs::msg::RobotCommand cmd;
+    cmd.header.stamp = this->now();
+    cmd.header.frame_id = "teleop";
 
     const int linear_axis = this->get_parameter("linear_axis").as_int();
     const int angular_axis = this->get_parameter("angular_axis").as_int();
@@ -56,26 +59,28 @@ private:
     const double deadzone = this->get_parameter("deadzone").as_double();
 
     if (use_trigger_linear) {
-      twist.linear.x = triggerLinearVelocity(*msg, linear_scale, deadzone);
+      cmd.vel.linear.x = triggerLinearVelocity(*msg, linear_scale, deadzone);
     } else {
-      twist.linear.x = std::max(0.0, readAxis(*msg, linear_axis)) * linear_scale;
+      cmd.vel.linear.x = std::max(0.0, readAxis(*msg, linear_axis)) * linear_scale;
     }
 
-    twist.angular.y = applyDeadzone(readAxis(*msg, pitch_axis), deadzone) * pitch_scale;
+    cmd.vel.angular.y = applyDeadzone(readAxis(*msg, pitch_axis), deadzone) * pitch_scale;
     const double yaw_axis_value = readAxis(*msg, angular_axis);
-    twist.angular.z = (use_trigger_linear ? applyDeadzone(yaw_axis_value, deadzone) : yaw_axis_value) * angular_scale;
+    cmd.vel.angular.z =
+      (use_trigger_linear ? applyDeadzone(yaw_axis_value, deadzone) : yaw_axis_value) *
+      angular_scale;
 
     if (this->get_parameter("invert_linear").as_bool()) {
-      twist.linear.x = -twist.linear.x;
+      cmd.vel.linear.x = -cmd.vel.linear.x;
     }
     if (this->get_parameter("invert_pitch").as_bool()) {
-      twist.angular.y = -twist.angular.y;
+      cmd.vel.angular.y = -cmd.vel.angular.y;
     }
     if (this->get_parameter("invert_yaw").as_bool()) {
-      twist.angular.z = -twist.angular.z;
+      cmd.vel.angular.z = -cmd.vel.angular.z;
     }
 
-    pub_control_cmd_->publish(twist);
+    pub_robot_cmd_->publish(cmd);
   }
 
   double readAxis(const sensor_msgs::msg::Joy & joy, int axis) const
@@ -137,7 +142,7 @@ private:
   }
 
   rclcpp::Subscription<sensor_msgs::msg::Joy>::SharedPtr joy_sub_;
-  rclcpp::Publisher<geometry_msgs::msg::Twist>::SharedPtr pub_control_cmd_;
+  rclcpp::Publisher<asr_sdm_control_msgs::msg::RobotCommand>::SharedPtr pub_robot_cmd_;
 };
 
 int main(int argc, char * argv[])

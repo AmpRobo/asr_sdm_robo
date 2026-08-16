@@ -95,11 +95,11 @@ To change initial pose, topic names, or controller gains, edit that YAML and res
 | `/visual_slam/odom` | Simulator dynamics odometry |
 | `/simulator/planning_simulator/add_static_obstacle` | Click-to-add pillar obstacles (RViz Static Obstacle tool) |
 
-Without a gamepad, publish Twist directly to exercise the controller:
+Without a gamepad, publish a RobotCommand (using `vel`) to exercise the controller:
 
 ```bash
-ros2 topic pub --rate 20 /control/asr_sdm/robot_cmd geometry_msgs/msg/Twist \
-  "{linear: {x: 0.10, y: 0.0, z: 0.0}, angular: {x: 0.0, y: 0.0, z: 0.20}}"
+ros2 topic pub --rate 20 /control/asr_sdm/robot_cmd asr_sdm_control_msgs/msg/RobotCommand \
+  "{vel: {linear: {x: 0.50, y: 0.0, z: 0.0}, angular: {x: 0.0, y: 0.0, z: 0.20}}}"
 ```
 
 ### Package conventions
@@ -233,8 +233,8 @@ config/planning_simulator.yaml
 无手柄时可用 topic 直接发速度测试控制器：
 
 ```bash
-ros2 topic pub --rate 20 /control/asr_sdm/robot_cmd geometry_msgs/msg/Twist \
-  "{linear: {x: 0.10, y: 0.0, z: 0.0}, angular: {x: 0.0, y: 0.0, z: 0.20}}"
+ros2 topic pub --rate 20 /control/asr_sdm/robot_cmd asr_sdm_control_msgs/msg/RobotCommand \
+  "{vel: {linear: {x: 0.50, y: 0.0, z: 0.0}, angular: {x: 0.0, y: 0.0, z: 0.20}}}"
 ```
 
 ### 模块约定
