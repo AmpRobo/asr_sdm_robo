@@ -35,7 +35,7 @@ print_help() {
     echo "  --help                  Display this help message"
     echo "  -h                      Display this help message"
     echo "  --list                  List all installable components"
-    echo "  --common                Install common development packages (toolchain, git, python3, CLI tools)"
+    echo "  --common                Install common development packages (toolchain, git, python3, CLI tools, Coral GUI)"
     echo "  --ros                   Install ROS 2 Jazzy (Ubuntu 24.04)"
     echo "  --pinocchio             Install Pinocchio from robotpkg apt packages"
     echo "  --nvidia                Install the NVIDIA stack (driver ${nvidia_driver_branch}, CUDA ${cuda_version},"
@@ -57,7 +57,7 @@ print_list() {
     echo ""
     echo "  Flag          Component    Description"
     echo "  ----          ---------    -----------"
-    echo "  --common      Common       Install build toolchain, git, python3 and everyday CLI tools"
+    echo "  --common      Common       Install build toolchain, git, python3, CLI tools and Coral GUI libraries"
     echo "  --ros         ROS 2        Install ROS 2 Jazzy desktop + rosdep/colcon (Ubuntu 24.04)"
     echo "  --pinocchio   Pinocchio    Install Pinocchio and Python bindings via robotpkg apt"
     echo "  --nvidia      NVIDIA       Install the GPU stack below (Ubuntu 24.04, x86_64)"
@@ -151,6 +151,14 @@ install_common() {
         qml6-module-qtquick-layouts
         qml6-module-qtquick-templates
         qml6-module-qtquick-window
+        # Coral GUI (OpenSceneGraph / osgOcean and VulkanSceneGraph)
+        libopenscenegraph-dev
+        libfftw3-dev
+        libvulkan-dev
+        libassimp-dev
+        glslang-dev
+        glslang-tools
+        libxcb1-dev
         # Everyday CLI tools
         vim
         tmux

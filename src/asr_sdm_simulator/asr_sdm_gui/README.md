@@ -4,6 +4,37 @@ This ROS 2 package allows displaying simulated scenes with osgOcean. It is inspi
 
 Contrary to UWSim, Coral is not a simulator at all and only renders available models found on the TF tree. It is compatible with Gazebo simulation, if the poses of the objects are published and bridged to ROS.
 
+## Dependencies
+
+System packages (Ubuntu 24.04). The same set is installed by `./setup-dev-env.sh --common` at the workspace root:
+
+```bash
+sudo apt install \
+  libopenscenegraph-dev \
+  libfftw3-dev \
+  libvulkan-dev \
+  libassimp-dev \
+  glslang-dev \
+  glslang-tools \
+  libxcb1-dev
+```
+
+| Package | Used for |
+|---|---|
+| `libopenscenegraph-dev` | OpenSceneGraph for `coral_gui` |
+| `libfftw3-dev` | FFTW, required by the bundled osgOcean sea surface |
+| `libvulkan-dev` | Vulkan headers and loader for `coral_gui_vsg` |
+| `libassimp-dev` | Mesh loading (DAE / STL / OBJ / glTF) in the VSG backend |
+| `glslang-dev` | GLSL→SPIR-V library linked by VulkanSceneGraph |
+| `glslang-tools` | `/usr/bin/glslang`; required by Ubuntu's `glslang-dev` CMake package |
+| `libxcb1-dev` | XCB windowing used by VSG on Linux |
+
+ROS message / client libraries (`rclcpp`, `tf2_ros`, …) are pulled in through `package.xml` / rosdep. Optional helpers for the tracking launch file:
+
+```bash
+sudo apt install ros-${ROS_DISTRO}-slider-publisher ros-${ROS_DISTRO}-simple-launch
+```
+
 ![](images/floatgen-bluerov.png)
 
  - Coral can detect `robot_description` topics and will then monitor the poses of the discovered frames through `/tf`
@@ -40,11 +71,7 @@ When run without parameters, will have Coral spawn all available `robot_descript
 
 ## Controlling the point of view
 
-A helper launch file is `track_launch.py` and simply publishes a static transform between the given `link` and the `coral_cam_node` link, in order to automatically track the corresponding link inside Coral. The `simple_launch` and `slider_publisher` packages are required to tune the view point:
-
-```
-sudo apt install ros-${ROS_DISTRO}-slider-publisher ros-${ROS_DISTRO}-simple-launch
-```
+A helper launch file is `track_launch.py` and simply publishes a static transform between the given `link` and the `coral_cam_node` link, in order to automatically track the corresponding link inside Coral. The `simple_launch` and `slider_publisher` packages are required to tune the view point (see [Dependencies](#dependencies)).
 
 ## Spawning a marker
 
