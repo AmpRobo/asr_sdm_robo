@@ -15,6 +15,13 @@ option_runtime=false
 option_yes=false
 option_list=false
 
+# The only ROS 2 distribution supported on Ubuntu 24.04 by this workspace
+ros_distro="jazzy"
+# Keeps DDS traffic of this workspace separate from other ROS 2 machines on the LAN
+ros_domain_id="100"
+# Used when the ros-apt-source release cannot be queried from GitHub
+ros_apt_source_fallback_version="1.2.0"
+
 # Versions of the NVIDIA stack (see src/asr_sdm_universe/common/tensorrt_common/README.md)
 nvidia_driver_branch="595"
 cuda_version="13.2"
@@ -36,7 +43,7 @@ print_help() {
     echo "  -h                      Display this help message"
     echo "  --list                  List all installable components"
     echo "  --common                Install common development packages (toolchain, git, python3, CLI tools, Coral GUI)"
-    echo "  --ros                   Install ROS 2 Jazzy (Ubuntu 24.04)"
+    echo "  --ros                   Install ROS 2 ${ros_distro} desktop + rosdep/colcon (Ubuntu 24.04)"
     echo "  --pinocchio             Install Pinocchio from robotpkg apt packages"
     echo "  --nvidia                Install the NVIDIA stack (driver ${nvidia_driver_branch}, CUDA ${cuda_version},"
     echo "                          cuBLAS, NPP, cuDNN, TensorRT ${tensorrt_version}, OpenCV ${opencv_version} + CUDA)"
@@ -48,7 +55,7 @@ print_help() {
     echo "  --data-dir              Set data directory (default: $HOME/asr_sdm_data)"
     echo "  --download-artifacts    Download artifacts"
     echo "  --module                Specify the module (default: all)"
-    echo "  --ros-distro            Specify ROS distribution (rolling or jazzy, default: jazzy)"
+    echo "  --ros-distro            ROS distribution to install (only '${ros_distro}' is supported)"
     echo ""
 }
 
@@ -58,7 +65,8 @@ print_list() {
     echo "  Flag          Component    Description"
     echo "  ----          ---------    -----------"
     echo "  --common      Common       Install build toolchain, git, python3, CLI tools and Coral GUI libraries"
-    echo "  --ros         ROS 2        Install ROS 2 Jazzy desktop + rosdep/colcon (Ubuntu 24.04)"
+    echo "  --ros         ROS 2        Install ROS 2 ${ros_distro} desktop + rosdep/colcon (Ubuntu 24.04),"
+    echo "                             and set ROS_DOMAIN_ID=${ros_domain_id} in ~/.bashrc"
     echo "  --pinocchio   Pinocchio    Install Pinocchio and Python bindings via robotpkg apt"
     echo "  --nvidia      NVIDIA       Install the GPU stack below (Ubuntu 24.04, x86_64)"
     echo ""
@@ -188,9 +196,138 @@ install_common() {
     echo -e "\e[32mDone.\e[0m Common packages installed."
 }
 
+ubuntu_codename() {
+    # /etc/os-release works before lsb-release is installed, lsb_release is the fallback
+    local codename=""
+
+    if [[ -r /etc/os-release ]]; then
+        codename="$(. /etc/os-release && echo "${UBUNTU_CODENAME:-${VERSION_CODENAME:-}}")"
+    fi
+
+    if [[ -z "${codename}" ]] && command -v lsb_release >/dev/null 2>&1; then
+        codename="$(lsb_release -sc 2>/dev/null || true)"
+    fi
+
+    printf '%s' "${codename:-unknown}"
+}
+
+run_as_invoking_user() {
+    # rosdep refuses to run as root, so drop back to the user behind sudo
+    if [[ "${EUID}" -eq 0 && -n "${SUDO_USER:-}" && "${SUDO_USER}" != "root" ]]; then
+        sudo -u "${SUDO_USER}" -H "$@"
+    else
+        "$@"
+    fi
+}
+
+enable_ubuntu_universe() {
+    # Matches both the classic sources.list format and the deb822 format used since 24.04
+    if grep -Rqs -E '^(deb .*[[:space:]]universe([[:space:]]|$)|Components:.*[[:space:]]universe([[:space:]]|$))' \
+        /etc/apt/sources.list /etc/apt/sources.list.d/ 2>/dev/null; then
+        echo "Ubuntu 'universe' component already enabled, skipping."
+        return 0
+    fi
+
+    apt_install install software-properties-common
+    run_cmd sudo add-apt-repository -y universe
+}
+
+configure_utf8_locale() {
+    if [[ "$(locale charmap 2>/dev/null || true)" == "UTF-8" ]]; then
+        export LANG="${LANG:-en_US.UTF-8}"
+        return 0
+    fi
+
+    apt_install install locales
+    run_cmd sudo locale-gen en_US en_US.UTF-8
+    run_cmd sudo update-locale LC_ALL=en_US.UTF-8 LANG=en_US.UTF-8
+    export LANG=en_US.UTF-8
+    export LC_ALL=en_US.UTF-8
+}
+
+setup_ros_apt_repo() {
+    local codename="$1"
+    local source_version=""
+    local deb_url
+    local tmp_deb
+
+    if [[ "$(dpkg-query -W -f='${Status}' ros2-apt-source 2>/dev/null || true)" == "install ok installed" ]]; then
+        echo "ros2-apt-source already installed, skipping."
+        apt_install update
+        return 0
+    fi
+
+    echo -e "\e[36mAdding the ROS 2 apt repository...\e[m"
+    apt_install install ca-certificates curl gnupg
+
+    source_version="$(curl -fsSL --retry 3 --retry-delay 2 \
+        https://api.github.com/repos/ros-infrastructure/ros-apt-source/releases/latest 2>/dev/null |
+        awk -F'"' '/"tag_name"/ { print $4; exit }' || true)"
+
+    if [[ -z "${source_version}" ]]; then
+        source_version="${ros_apt_source_fallback_version}"
+        echo -e "\e[33mCould not query the latest ros-apt-source release; falling back to ${source_version}.\e[m"
+    fi
+
+    deb_url="https://github.com/ros-infrastructure/ros-apt-source/releases/download/${source_version}/ros2-apt-source_${source_version}.${codename}_all.deb"
+    tmp_deb="$(mktemp -t ros2-apt-source.XXXXXXXX.deb)"
+
+    if ! run_cmd curl -fsSL --retry 3 --retry-delay 2 -o "${tmp_deb}" "${deb_url}"; then
+        rm -f "${tmp_deb}"
+        echo -e "\e[31mFailed to download ${deb_url}\e[m" >&2
+        return 1
+    fi
+
+    if ! sudo dpkg -i "${tmp_deb}"; then
+        apt_install install -f
+    fi
+    rm -f "${tmp_deb}"
+
+    apt_install update
+}
+
+setup_rosdep() {
+    if [[ ! -f /etc/ros/rosdep/sources.list.d/20-default.list ]]; then
+        run_cmd sudo rosdep init
+    else
+        echo "rosdep already initialized, skipping 'rosdep init'."
+    fi
+
+    if ! run_as_invoking_user rosdep update --rosdistro "${ros_distro}"; then
+        echo -e "\e[33m'rosdep update' failed (network?); re-run it manually before building.\e[m"
+    fi
+}
+
+remove_legacy_ros_bashrc_lines() {
+    # Drops the plain ROS block written by earlier versions of this script so that
+    # write_bashrc_block stays the single source of truth
+    local bashrc_path="${HOME}/.bashrc"
+    local tmp_file
+
+    [[ -f "${bashrc_path}" ]] || return 0
+    grep -qE '^# ROS 2 [a-z]+ environment$' "${bashrc_path}" || return 0
+
+    tmp_file="$(mktemp)"
+    awk '
+        /^# ROS 2 [a-z]+ environment$/ { skipping = 1; next }
+        skipping == 1 && /^(source \/opt\/ros\/|source \/usr\/share\/colcon_cd\/|export _colcon_cd_root=)/ { next }
+        { skipping = 0; print }
+    ' "${bashrc_path}" > "${tmp_file}"
+    cat "${tmp_file}" > "${bashrc_path}"
+    rm -f "${tmp_file}"
+    echo "Removed the legacy ROS 2 environment lines from ~/.bashrc."
+}
+
 install_ros() {
-    local ubuntu_version
-    local ros_version=""
+    local codename
+
+    codename="$(ubuntu_codename)"
+    if [[ "${codename}" != "noble" ]]; then
+        echo -e "\e[33mSkipping ROS 2: unsupported Ubuntu (${codename}). Supported: noble (24.04).\e[m"
+        return 0
+    fi
+
+    echo -e "\e[36mInstalling ROS 2 ${ros_distro}...\e[m"
 
     if ! command -v sudo >/dev/null 2>&1; then
         apt-get -y update
@@ -199,67 +336,52 @@ install_ros() {
 
     apt_install update
     apt_install install \
-        git \
-        curl \
         ca-certificates \
+        curl \
+        gnupg \
+        git \
         build-essential \
-        pkg-config \
         cmake \
+        pkg-config \
         python3 \
         python3-pip \
         python3-venv
 
-    ubuntu_version="$(lsb_release -sc)"
-    case "${ubuntu_version}" in
-        noble)
-            ros_version="jazzy"
-            ;;
-        *)
-            echo -e "\e[33mSkipping ROS 2: unsupported Ubuntu (${ubuntu_version}). Supported: noble (24.04).\e[m"
-            return 0
-            ;;
-    esac
+    configure_utf8_locale
+    enable_ubuntu_universe
 
-    echo -e "\e[36mInstalling ROS 2 ${ros_version}...\e[m"
+    if ! setup_ros_apt_repo "${codename}"; then
+        echo -e "\e[31mSkipping ROS 2: the apt repository could not be set up.\e[m" >&2
+        return 1
+    fi
 
-    apt_install install locales
-    sudo locale-gen en_US en_US.UTF-8
-    sudo update-locale LC_ALL=en_US.UTF-8 LANG=en_US.UTF-8
-    export LANG=en_US.UTF-8
+    if ! apt-cache show "ros-${ros_distro}-desktop" >/dev/null 2>&1; then
+        echo -e "\e[33mSkipping ROS 2: 'ros-${ros_distro}-desktop' is not available for ${codename}.\e[m"
+        return 0
+    fi
 
-    apt_install install software-properties-common
-    sudo add-apt-repository -y universe
-    apt_install update
-
-    local ros_apt_source_version
-    ros_apt_source_version="$(curl -s https://api.github.com/repos/ros-infrastructure/ros-apt-source/releases/latest | grep -F "tag_name" | awk -F\" '{print $4}')"
-    curl -fsSL -o /tmp/ros2-apt-source.deb \
-        "https://github.com/ros-infrastructure/ros-apt-source/releases/download/${ros_apt_source_version}/ros2-apt-source_${ros_apt_source_version}.$(. /etc/os-release && echo "${UBUNTU_CODENAME:-${VERSION_CODENAME}}")_all.deb"
-    sudo dpkg -i /tmp/ros2-apt-source.deb
-
-    apt_install update
-    apt_install install ros-dev-tools
-    apt_install update
+    # ROS packages are built against the current Ubuntu updates, so refresh them first
     apt_install upgrade
-    apt_install install "ros-${ros_version}-desktop"
+    apt_install install \
+        "ros-${ros_distro}-desktop" \
+        ros-dev-tools \
+        python3-rosdep \
+        python3-colcon-common-extensions
 
-    apt_install install python3-rosdep python3-colcon-common-extensions
-    if [[ ! -f /etc/ros/rosdep/sources.list.d/20-default.list ]]; then
-        sudo rosdep init
-    fi
-    rosdep update
+    setup_rosdep
 
-    if ! grep -q "ROS 2 ${ros_version}" ~/.bashrc 2>/dev/null; then
-        {
-            echo ""
-            echo "# ROS 2 ${ros_version} environment"
-            echo "source /opt/ros/${ros_version}/setup.bash"
-            echo "source /usr/share/colcon_cd/function/colcon_cd.sh"
-            echo "export _colcon_cd_root=/opt/ros/${ros_version}/"
-        } >> ~/.bashrc
-    fi
+    remove_legacy_ros_bashrc_lines
+    write_bashrc_block "asr_sdm ros2 env" "source /opt/ros/${ros_distro}/setup.bash
+export ROS_DOMAIN_ID=${ros_domain_id}
+if [ -f /usr/share/colcon_cd/function/colcon_cd.sh ]; then
+    . /usr/share/colcon_cd/function/colcon_cd.sh
+    export _colcon_cd_root=/opt/ros/${ros_distro}/
+fi
+if [ -f /usr/share/colcon_argcomplete/hook/colcon-argcomplete.bash ]; then
+    . /usr/share/colcon_argcomplete/hook/colcon-argcomplete.bash
+fi"
 
-    echo -e "\e[32mDone.\e[0m ROS 2 ${ros_version} installed."
+    echo -e "\e[32mDone.\e[0m ROS 2 ${ros_distro} installed (ROS_DOMAIN_ID=${ros_domain_id})."
     echo "Reload: source ~/.bashrc  |  Verify: ros2 run demo_nodes_cpp talker"
 }
 
@@ -398,14 +520,14 @@ apt_candidate_version() {
 }
 
 check_nvidia_prerequisites() {
-    local ubuntu_codename
+    local codename
     local arch
 
-    ubuntu_codename="$(lsb_release -sc 2>/dev/null || echo unknown)"
+    codename="$(ubuntu_codename)"
     arch="$(dpkg --print-architecture 2>/dev/null || echo unknown)"
 
-    if [[ "${ubuntu_codename}" != "noble" ]]; then
-        echo -e "\e[33mSkipping NVIDIA stack: unsupported Ubuntu (${ubuntu_codename}). Supported: noble (24.04).\e[m"
+    if [[ "${codename}" != "noble" ]]; then
+        echo -e "\e[33mSkipping NVIDIA stack: unsupported Ubuntu (${codename}). Supported: noble (24.04).\e[m"
         return 1
     fi
 
@@ -923,7 +1045,19 @@ parse_args() {
                 echo "Warning: option '$1' is not implemented yet, ignoring."
                 shift
                 ;;
-            --data-dir | --module | --ros-distro)
+            --ros-distro)
+                if [[ $# -lt 2 ]]; then
+                    echo "Error: option '$1' requires an argument."
+                    print_help
+                    exit 1
+                fi
+                if [[ "$2" != "${ros_distro}" ]]; then
+                    echo "Error: unsupported ROS distribution '$2'. Only '${ros_distro}' is supported."
+                    exit 1
+                fi
+                shift 2
+                ;;
+            --data-dir | --module)
                 if [[ $# -lt 2 ]]; then
                     echo "Error: option '$1' requires an argument."
                     print_help
