@@ -364,6 +364,17 @@ private:
     return {cmd.vel.linear.x, cmd.vel.angular.y, cmd.vel.angular.z};
   }
 
+  asr_sdm_control_msgs::msg::RobotCommand limitRobotCommand(
+    const asr_sdm_control_msgs::msg::RobotCommand & cmd) const
+  {
+    const asr::HeadCommand3D limited = controller_->limitCommand(toHeadCommand(cmd));
+    asr_sdm_control_msgs::msg::RobotCommand limited_cmd = cmd;
+    limited_cmd.vel.linear.x = limited.linear_velocity;
+    limited_cmd.vel.angular.y = limited.pitch_rate;
+    limited_cmd.vel.angular.z = limited.yaw_rate;
+    return limited_cmd;
+  }
+
   bool isZeroCommand(const asr_sdm_control_msgs::msg::RobotCommand & cmd) const
   {
     return std::abs(cmd.vel.linear.x) < 1.0e-6 &&
@@ -384,19 +395,16 @@ private:
     if ((current_time - last_cmd_time_).seconds() > cmd_timeout_sec_) {
       robot_cmd = asr_sdm_control_msgs::msg::RobotCommand();
     }
-    asr::HeadCommand3D cmd = toHeadCommand(robot_cmd);
-    cmd = controller_->limitCommand(cmd);
-    robot_cmd.vel.linear.x = cmd.linear_velocity;
-    robot_cmd.vel.angular.y = cmd.pitch_rate;
-    robot_cmd.vel.angular.z = cmd.yaw_rate;
+    robot_cmd = limitRobotCommand(robot_cmd);
 
-    latest_joint_velocity_ = controller_->computeJointVelocity(cmd, state_);
+    latest_joint_velocity_ = controller_->computeJointVelocity(
+      toHeadCommand(robot_cmd), state_);
     if (isZeroCommand(robot_cmd)) {
       latest_joint_velocity_ = {};
     }
     advanceModelState(robot_cmd, latest_joint_velocity_, dt);
-    publishControllerState(cmd, latest_joint_velocity_);
-    publishRobotState(cmd, latest_joint_velocity_);
+    publishControllerState(toHeadCommand(robot_cmd), latest_joint_velocity_);
+    publishRobotState(toHeadCommand(robot_cmd), latest_joint_velocity_);
     if (publish_control_cmd_ && pub_control_cmd_) {
       publishControlCmd();
     }
