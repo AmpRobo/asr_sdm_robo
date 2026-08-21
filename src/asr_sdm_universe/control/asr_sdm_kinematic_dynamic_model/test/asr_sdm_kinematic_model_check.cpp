@@ -22,6 +22,16 @@ static_assert(BodyModel::kNumPoints == asr::kNum3dPoints, "body point count mism
 constexpr double kTolerance = 1.0e-9;
 constexpr double kVelocityTolerance = 1.0e-5;
 
+asr_sdm_control_msgs::msg::RobotCommand makeRobotCommand(
+  double linear_velocity, double pitch_rate, double yaw_rate)
+{
+  asr_sdm_control_msgs::msg::RobotCommand cmd;
+  cmd.vel.linear.x = linear_velocity;
+  cmd.vel.angular.y = pitch_rate;
+  cmd.vel.angular.z = yaw_rate;
+  return cmd;
+}
+
 Eigen::Vector3d toEigen(const asr::Vec3 & v)
 {
   return Eigen::Vector3d(v.x, v.y, v.z);
@@ -185,7 +195,7 @@ bool checkControllerRollout(BodyModel & body_model)
 
   for (int step = 0; step < 3000; ++step) {
     const double t = step * dt;
-    const asr::HeadCommand3D cmd{0.12, 0.30 * std::sin(0.7 * t), 0.30 * std::cos(0.4 * t)};
+    const auto cmd = makeRobotCommand(0.12, 0.30 * std::sin(0.7 * t), 0.30 * std::cos(0.4 * t));
     controller.step(cmd, dt, state);
 
     body_model.updateKinematics(configurationFor(body_model, state));
@@ -214,13 +224,13 @@ bool checkVelocityMapping(BodyModel & body_model)
 
   for (int step = 0; step < 200; ++step) {
     const double t = step * dt;
-    const asr::HeadCommand3D cmd{0.12, 0.25 * std::sin(0.9 * t), 0.25 * std::cos(0.5 * t)};
+    const auto cmd = makeRobotCommand(0.12, 0.25 * std::sin(0.9 * t), 0.25 * std::cos(0.5 * t));
     const asr::JointVelocity3D joint_velocity = controller.step(cmd, dt, state);
-    const asr::HeadCommand3D limited_cmd = controller.limitCommand(cmd);
+    const auto limited_cmd = controller.limitCommand(cmd);
 
     const Eigen::VectorXd q = configurationFor(body_model, state);
     const Eigen::VectorXd v = body_model.toVelocity(
-      limited_cmd.linear_velocity, limited_cmd.pitch_rate, limited_cmd.yaw_rate,
+      limited_cmd.vel.linear.x, limited_cmd.vel.angular.y, limited_cmd.vel.angular.z,
       toEigen(joint_velocity.theta_dot));
 
     body_model.updateKinematics(q);

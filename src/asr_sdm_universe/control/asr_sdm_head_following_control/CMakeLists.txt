@@ -6,6 +6,7 @@ if(CMAKE_COMPILER_IS_GNUCXX OR CMAKE_CXX_COMPILER_ID MATCHES "Clang")
 endif()
 
 find_package(ament_cmake REQUIRED)
+find_package(asr_sdm_control_msgs REQUIRED)
 
 option(BUILD_CONTROLLER_DEMOS "Build the controller plotting demos" OFF)
 
@@ -24,6 +25,9 @@ target_include_directories(front_unit_following_controller_3d_core PUBLIC
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
   $<INSTALL_INTERFACE:include>
 )
+target_link_libraries(front_unit_following_controller_3d_core PUBLIC
+  ${asr_sdm_control_msgs_TARGETS}
+)
 
 install(TARGETS front_unit_following_controller_2d_core front_unit_following_controller_3d_core
   EXPORT asr_sdm_head_following_control_targets
@@ -37,6 +41,7 @@ install(DIRECTORY include/
 )
 
 ament_export_targets(asr_sdm_head_following_control_targets HAS_LIBRARY_TARGET)
+ament_export_dependencies(asr_sdm_control_msgs)
 
 if(BUILD_CONTROLLER_DEMOS)
   find_package(Python3 REQUIRED COMPONENTS Interpreter Development NumPy)

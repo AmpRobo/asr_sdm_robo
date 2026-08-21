@@ -49,6 +49,16 @@ std::vector<OfflineHeadCommand3D> make_commands()
     {0.10, -0.12, -0.30, 160}, {0.12, 0.00, 0.00, 100}};
 }
 
+asr_sdm_control_msgs::msg::RobotCommand makeRobotCommand(
+  double linear_velocity, double pitch_rate, double yaw_rate)
+{
+  asr_sdm_control_msgs::msg::RobotCommand cmd;
+  cmd.vel.linear.x = linear_velocity;
+  cmd.vel.angular.y = pitch_rate;
+  cmd.vel.angular.z = yaw_rate;
+  return cmd;
+}
+
 bool has_nonzero_pitch_command(const std::vector<OfflineHeadCommand3D> & commands)
 {
   return std::any_of(commands.begin(), commands.end(), [](const auto & cmd) {
@@ -595,13 +605,13 @@ int main()
   };
 
   auto step_simulation = [&](const OfflineHeadCommand3D & cmd) {
-    const asr::HeadCommand3D requested_cmd{cmd.linear_velocity, cmd.pitch_rate, cmd.yaw_rate};
-    const asr::HeadCommand3D limited_cmd = controller.limitCommand(requested_cmd);
+    const auto requested_cmd = makeRobotCommand(cmd.linear_velocity, cmd.pitch_rate, cmd.yaw_rate);
+    const auto limited_cmd = controller.limitCommand(requested_cmd);
     joint_velocity = controller.step(limited_cmd, dt, state);
-    append_sample(limited_cmd.linear_velocity, limited_cmd.pitch_rate, limited_cmd.yaw_rate);
-    const double speed = std::max(std::abs(limited_cmd.linear_velocity), curvature_velocity_epsilon);
+    append_sample(limited_cmd.vel.linear.x, limited_cmd.vel.angular.y, limited_cmd.vel.angular.z);
+    const double speed = std::max(std::abs(limited_cmd.vel.linear.x), curvature_velocity_epsilon);
     max_observed_curvature = std::max(
-      max_observed_curvature, std::hypot(limited_cmd.pitch_rate, limited_cmd.yaw_rate) / speed);
+      max_observed_curvature, std::hypot(limited_cmd.vel.angular.y, limited_cmd.vel.angular.z) / speed);
   };
 
   const std::vector<OfflineHeadCommand3D> commands = make_commands();
@@ -631,7 +641,7 @@ int main()
     constexpr size_t steady_start = arc_steps / 2;
     const double arc_radius = arc_v / arc_yaw_rate;
     const double arc_lag = 2.0 * arc_radius * std::asin(link_length / (2.0 * arc_radius));
-    const asr::HeadCommand3D arc_cmd{arc_v, 0.0, arc_yaw_rate};
+    const auto arc_cmd = makeRobotCommand(arc_v, 0.0, arc_yaw_rate);
     std::vector<std::array<asr::Vec3, asr::kNum3dPoints>> arc_samples;
     arc_samples.reserve(arc_steps);
 
@@ -659,7 +669,7 @@ int main()
     constexpr double straight_v = 0.5;
     constexpr double straight_dt = 0.02;
     constexpr size_t straight_steps = 100;
-    const asr::HeadCommand3D straight_cmd{straight_v, 0.0, 0.0};
+    const auto straight_cmd = makeRobotCommand(straight_v, 0.0, 0.0);
 
     for (size_t k = 0; k < straight_steps; ++k) {
       controller.step(straight_cmd, straight_dt, straight_state);
@@ -685,7 +695,7 @@ int main()
     constexpr double yaw_yaw_rate = 0.4;
     constexpr double yaw_dt = 0.02;
     constexpr size_t yaw_steps = 100;
-    const asr::HeadCommand3D yaw_cmd{yaw_v, 0.0, yaw_yaw_rate};
+    const auto yaw_cmd = makeRobotCommand(yaw_v, 0.0, yaw_yaw_rate);
     double max_pitch_dot = 0.0;
     for (size_t k = 0; k < yaw_steps; ++k) {
       const auto vel = controller.step(yaw_cmd, yaw_dt, yaw_state);
@@ -705,7 +715,7 @@ int main()
     asr::SimulationState3D pitch_state = controller.makeInitialState();
     constexpr double pitch_v = 0.3;
     constexpr double pitch_pitch_rate = 0.3;
-    const asr::HeadCommand3D pitch_cmd{pitch_v, pitch_pitch_rate, 0.0};
+    const auto pitch_cmd = makeRobotCommand(pitch_v, pitch_pitch_rate, 0.0);
     double max_yaw_dot = 0.0;
     for (size_t k = 0; k < yaw_steps; ++k) {
       const auto vel = controller.step(pitch_cmd, yaw_dt, pitch_state);
@@ -731,7 +741,7 @@ int main()
     constexpr size_t steady_start = arc_steps / 2;
     const double arc_radius = arc_v / arc_yaw_rate;
     const double arc_lag = 2.0 * arc_radius * std::asin(link_length / (2.0 * arc_radius));
-    const asr::HeadCommand3D arc_cmd{arc_v, 0.0, arc_yaw_rate};
+    const auto arc_cmd = makeRobotCommand(arc_v, 0.0, arc_yaw_rate);
 
     auto run_with_damping = [&](double lam) {
       asr::FrontUnitController3DParameters p = params;
@@ -775,7 +785,7 @@ int main()
       asr::SimulationState3D st = ctrl.makeInitialState();
       std::vector<std::array<asr::Vec3, asr::kNum3dPoints>> samples;
       samples.reserve(arc_steps);
-      const asr::HeadCommand3D cmd{velocity, 0.0, arc_yaw_rate};
+      const auto cmd = makeRobotCommand(velocity, 0.0, arc_yaw_rate);
       const double radius = std::abs(velocity / arc_yaw_rate);
       const double lag = 2.0 * radius * std::asin(link_length / (2.0 * radius));
       for (size_t k = 0; k < arc_steps; ++k) {
@@ -802,7 +812,7 @@ int main()
     asr::SimulationState3D chain_state = controller.makeInitialState();
     constexpr double chain_dt = 0.02;
     constexpr size_t chain_steps = 500;
-    const asr::HeadCommand3D chain_cmd{0.10, 0.08, 0.10};
+    const auto chain_cmd = makeRobotCommand(0.10, 0.08, 0.10);
 
     for (size_t k = 0; k < chain_steps; ++k) {
       controller.step(chain_cmd, chain_dt, chain_state);
@@ -831,7 +841,7 @@ int main()
     constexpr double high_yaw = 0.35;
     constexpr double limit_dt = 0.02;
     constexpr size_t limit_steps = 500;
-    const asr::HeadCommand3D limit_cmd{high_v, high_pitch, high_yaw};
+    const auto limit_cmd = makeRobotCommand(high_v, high_pitch, high_yaw);
 
     bool stable = true;
     for (size_t k = 0; k < limit_steps; ++k) {
@@ -882,7 +892,7 @@ int main()
     for (size_t k = 0; k < table_steps; ++k) {
       const double t = k * table_dt;
       const double yaw_rate = -table_omega_0 * std::cos(table_curvature_lambda * pi_value * t / 60.0);
-      const asr::HeadCommand3D table_cmd{table_v, 0.0, yaw_rate};
+      const auto table_cmd = makeRobotCommand(table_v, 0.0, yaw_rate);
       table_ctrl.step(table_cmd, table_dt, table_hist_state);
       table_samples.push_back(table_hist_state.body_points);
     }

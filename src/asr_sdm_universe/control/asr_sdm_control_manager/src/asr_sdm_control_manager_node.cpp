@@ -251,8 +251,8 @@ private:
       orientation.z / norm, orientation.w / norm);
     last_cmd_time_ = node_->now();
     last_control_time_ = node_->now();
-    publishControllerState({0.0, 0.0, 0.0}, {});
-    publishRobotState({0.0, 0.0, 0.0}, {});
+    publishControllerState(asr_sdm_control_msgs::msg::RobotCommand{}, {});
+    publishRobotState(asr_sdm_control_msgs::msg::RobotCommand{}, {});
   }
 
   void resetState(double x, double y, double z, double yaw)
@@ -359,22 +359,6 @@ private:
     copyModelGeometryToState();
   }
 
-  asr::HeadCommand3D toHeadCommand(const asr_sdm_control_msgs::msg::RobotCommand & cmd) const
-  {
-    return {cmd.vel.linear.x, cmd.vel.angular.y, cmd.vel.angular.z};
-  }
-
-  asr_sdm_control_msgs::msg::RobotCommand limitRobotCommand(
-    const asr_sdm_control_msgs::msg::RobotCommand & cmd) const
-  {
-    const asr::HeadCommand3D limited = controller_->limitCommand(toHeadCommand(cmd));
-    asr_sdm_control_msgs::msg::RobotCommand limited_cmd = cmd;
-    limited_cmd.vel.linear.x = limited.linear_velocity;
-    limited_cmd.vel.angular.y = limited.pitch_rate;
-    limited_cmd.vel.angular.z = limited.yaw_rate;
-    return limited_cmd;
-  }
-
   bool isZeroCommand(const asr_sdm_control_msgs::msg::RobotCommand & cmd) const
   {
     return std::abs(cmd.vel.linear.x) < 1.0e-6 &&
@@ -395,23 +379,22 @@ private:
     if ((current_time - last_cmd_time_).seconds() > cmd_timeout_sec_) {
       robot_cmd = asr_sdm_control_msgs::msg::RobotCommand();
     }
-    robot_cmd = limitRobotCommand(robot_cmd);
+    robot_cmd = controller_->limitCommand(robot_cmd);
 
-    latest_joint_velocity_ = controller_->computeJointVelocity(
-      toHeadCommand(robot_cmd), state_);
+    latest_joint_velocity_ = controller_->computeJointVelocity(robot_cmd, state_);
     if (isZeroCommand(robot_cmd)) {
       latest_joint_velocity_ = {};
     }
     advanceModelState(robot_cmd, latest_joint_velocity_, dt);
-    publishControllerState(toHeadCommand(robot_cmd), latest_joint_velocity_);
-    publishRobotState(toHeadCommand(robot_cmd), latest_joint_velocity_);
+    publishControllerState(robot_cmd, latest_joint_velocity_);
+    publishRobotState(robot_cmd, latest_joint_velocity_);
     if (publish_control_cmd_ && pub_control_cmd_) {
       publishControlCmd();
     }
   }
 
   void publishControllerState(
-    const asr::HeadCommand3D & cmd, const asr::JointVelocity3D & joint_velocity)
+    const asr_sdm_control_msgs::msg::RobotCommand & cmd, const asr::JointVelocity3D & joint_velocity)
   {
     std_msgs::msg::Float64MultiArray msg;
     msg.data.resize(kStateSize3D, 0.0);
@@ -426,9 +409,9 @@ private:
         msg.data[index++] = state_.head_frame.v[row][col];
       }
     }
-    msg.data[13] = cmd.linear_velocity;
-    msg.data[14] = cmd.pitch_rate;
-    msg.data[15] = cmd.yaw_rate;
+    msg.data[13] = cmd.vel.linear.x;
+    msg.data[14] = cmd.vel.angular.y;
+    msg.data[15] = cmd.vel.angular.z;
     for (size_t i = 0; i < asr::kNum3dJointDofs; ++i) {
       msg.data[16 + i] = state_.joints.theta[i];
       msg.data[22 + i] = joint_velocity.theta_dot[i];
@@ -442,7 +425,7 @@ private:
   }
 
   void publishRobotState(
-    const asr::HeadCommand3D & cmd, const asr::JointVelocity3D & joint_velocity)
+    const asr_sdm_control_msgs::msg::RobotCommand & cmd, const asr::JointVelocity3D & joint_velocity)
   {
     const auto stamp = node_->now();
     const auto odom_orientation = quaternionFromFrame(state_.head_frame);
@@ -483,12 +466,15 @@ private:
     const auto forward = asr::column(state_.head_frame, 0);
     const auto pitch_axis = asr::column(state_.head_frame, 1);
     const auto yaw_axis = asr::column(state_.head_frame, 2);
-    odometry.twist.twist.linear.x = cmd.linear_velocity * forward.x;
-    odometry.twist.twist.linear.y = cmd.linear_velocity * forward.y;
-    odometry.twist.twist.linear.z = cmd.linear_velocity * forward.z;
-    odometry.twist.twist.angular.x = cmd.pitch_rate * pitch_axis.x + cmd.yaw_rate * yaw_axis.x;
-    odometry.twist.twist.angular.y = cmd.pitch_rate * pitch_axis.y + cmd.yaw_rate * yaw_axis.y;
-    odometry.twist.twist.angular.z = cmd.pitch_rate * pitch_axis.z + cmd.yaw_rate * yaw_axis.z;
+    odometry.twist.twist.linear.x = cmd.vel.linear.x * forward.x;
+    odometry.twist.twist.linear.y = cmd.vel.linear.x * forward.y;
+    odometry.twist.twist.linear.z = cmd.vel.linear.x * forward.z;
+    odometry.twist.twist.angular.x =
+      cmd.vel.angular.y * pitch_axis.x + cmd.vel.angular.z * yaw_axis.x;
+    odometry.twist.twist.angular.y =
+      cmd.vel.angular.y * pitch_axis.y + cmd.vel.angular.z * yaw_axis.y;
+    odometry.twist.twist.angular.z =
+      cmd.vel.angular.y * pitch_axis.z + cmd.vel.angular.z * yaw_axis.z;
     pub_odom_->publish(odometry);
   }
 

@@ -1,6 +1,8 @@
 #ifndef FRONT_UNIT_FOLLOWING_CONTROLLER_3D_HPP_
 #define FRONT_UNIT_FOLLOWING_CONTROLLER_3D_HPP_
 
+#include "asr_sdm_control_msgs/msg/robot_command.hpp"
+
 #include <array>
 #include <cstddef>
 
@@ -39,13 +41,6 @@ struct Vec2
 struct Mat3
 {
   double v[3][3];
-};
-
-struct HeadCommand3D
-{
-  double linear_velocity;
-  double pitch_rate;
-  double yaw_rate;
 };
 
 struct JointState3D
@@ -116,10 +111,12 @@ public:
   explicit FrontUnitFollowingController3D(const FrontUnitController3DParameters & params);
 
   SimulationState3D makeInitialState() const;
-  HeadCommand3D limitCommand(const HeadCommand3D & cmd) const;
+  asr_sdm_control_msgs::msg::RobotCommand limitCommand(
+    const asr_sdm_control_msgs::msg::RobotCommand & cmd) const;
   JointVelocity3D computeJointVelocity(
-    const HeadCommand3D & cmd, const SimulationState3D & state) const;
-  JointVelocity3D step(const HeadCommand3D & cmd, double dt, SimulationState3D & state) const;
+    const asr_sdm_control_msgs::msg::RobotCommand & cmd, const SimulationState3D & state) const;
+  JointVelocity3D step(
+    const asr_sdm_control_msgs::msg::RobotCommand & cmd, double dt, SimulationState3D & state) const;
 
 private:
   static void pitchYawJacobianColumns(

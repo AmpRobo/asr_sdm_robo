@@ -1,8 +1,9 @@
 # ASR-SDM head-following control
 
-This package contains the ROS-independent 2D and 3D head-following control
-algorithms. The libraries are consumed by `asr_sdm_control_manager`; ROS nodes
-are intentionally kept out of this package.
+This package contains the 2D and 3D head-following control algorithms. The 3D
+controller uses `asr_sdm_control_msgs/msg/RobotCommand`. The libraries are
+consumed by `asr_sdm_control_manager`; ROS nodes are intentionally kept out of
+this package.
 
 ## Libraries
 

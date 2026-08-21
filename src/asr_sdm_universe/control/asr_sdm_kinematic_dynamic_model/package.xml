@@ -26,6 +26,7 @@
   <exec_depend>launch_ros</exec_depend>
 
   <test_depend>asr_sdm_head_following_control</test_depend>
+  <test_depend>asr_sdm_control_msgs</test_depend>
   <test_depend>ament_lint_auto</test_depend>
   <test_depend>ament_lint_common</test_depend>
 

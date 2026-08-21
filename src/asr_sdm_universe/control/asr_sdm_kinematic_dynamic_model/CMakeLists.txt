@@ -88,6 +88,7 @@ set(AMENT_LINT_AUTO_EXCLUDE "ament_cmake_pep257")
 
 if(BUILD_TESTING)
   find_package(asr_sdm_head_following_control REQUIRED)
+  find_package(asr_sdm_control_msgs REQUIRED)
 
   add_executable(asr_sdm_kinematic_model_check
     test/asr_sdm_kinematic_model_check.cpp
@@ -95,6 +96,7 @@ if(BUILD_TESTING)
   target_link_libraries(asr_sdm_kinematic_model_check PUBLIC
     asr_sdm_kinematic_model
     asr_sdm_head_following_control::front_unit_following_controller_3d_core
+    ${asr_sdm_control_msgs_TARGETS}
   )
 
   add_test(
