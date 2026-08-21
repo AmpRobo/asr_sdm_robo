@@ -220,17 +220,18 @@ private:
 
   void onRobotCmd(const asr_sdm_control_msgs::msg::RobotCommand::SharedPtr msg)
   {
-    const auto & vel = msg->vel;
-    latest_cmd_.linear_velocity = std::clamp(vel.linear.x, 0.0, std::abs(max_linear_velocity_));
-    latest_cmd_.pitch_rate =
-      std::clamp(vel.angular.y, -std::abs(max_pitch_rate_), std::abs(max_pitch_rate_));
-    latest_cmd_.yaw_rate =
-      std::clamp(vel.angular.z, -std::abs(max_yaw_rate_), std::abs(max_yaw_rate_));
+    latest_cmd_ = *msg;
+    latest_cmd_.vel.linear.x =
+      std::clamp(msg->vel.linear.x, 0.0, std::abs(max_linear_velocity_));
+    latest_cmd_.vel.angular.y =
+      std::clamp(msg->vel.angular.y, -std::abs(max_pitch_rate_), std::abs(max_pitch_rate_));
+    latest_cmd_.vel.angular.z =
+      std::clamp(msg->vel.angular.z, -std::abs(max_yaw_rate_), std::abs(max_yaw_rate_));
     last_cmd_time_ = node_->now();
     RCLCPP_INFO_THROTTLE(
       node_->get_logger(), *node_->get_clock(), 1000,
-      "robot_cmd limited -> v=%.3f pitch=%.3f yaw=%.3f", latest_cmd_.linear_velocity,
-      latest_cmd_.pitch_rate, latest_cmd_.yaw_rate);
+      "robot_cmd limited -> v=%.3f pitch=%.3f yaw=%.3f", latest_cmd_.vel.linear.x,
+      latest_cmd_.vel.angular.y, latest_cmd_.vel.angular.z);
   }
 
   void onInitialPose(const geometry_msgs::msg::PoseWithCovarianceStamped::SharedPtr msg)
@@ -270,7 +271,7 @@ private:
         2.0 * (qy * qz - qx * qw)},
       {2.0 * (qx * qz - qy * qw), 2.0 * (qy * qz + qx * qw),
         1.0 - 2.0 * (qx * qx + qy * qy)}}};
-    latest_cmd_ = {0.0, 0.0, 0.0};
+    latest_cmd_ = asr_sdm_control_msgs::msg::RobotCommand();
     latest_joint_velocity_ = {};
     refreshModelState(latest_cmd_, latest_joint_velocity_);
   }
@@ -323,10 +324,10 @@ private:
   }
 
   void refreshModelState(
-    const asr::HeadCommand3D & cmd, const asr::JointVelocity3D & joint_velocity)
+    const asr_sdm_control_msgs::msg::RobotCommand & cmd, const asr::JointVelocity3D & joint_velocity)
   {
     const Eigen::VectorXd q = configurationFromState();
-    const Eigen::VectorXd v = velocityFromState(cmd, joint_velocity);
+    const Eigen::VectorXd v = velocityFromState(toHeadCommand(cmd), joint_velocity);
     model_->updateKinematics(q, v);
     copyModelGeometryToState();
   }
@@ -356,11 +357,16 @@ private:
     copyModelGeometryToState();
   }
 
-  bool isZeroCommand(const asr::HeadCommand3D & cmd) const
+  asr::HeadCommand3D toHeadCommand(const asr_sdm_control_msgs::msg::RobotCommand & cmd) const
   {
-    return std::abs(cmd.linear_velocity) < 1.0e-9 &&
-           std::abs(cmd.pitch_rate) < 1.0e-9 &&
-           std::abs(cmd.yaw_rate) < 1.0e-9;
+    return {cmd.vel.linear.x, cmd.vel.angular.y, cmd.vel.angular.z};
+  }
+
+  bool isZeroCommand(const asr_sdm_control_msgs::msg::RobotCommand & cmd) const
+  {
+    return std::abs(cmd.vel.linear.x) < 1.0e-6 &&
+           std::abs(cmd.vel.angular.y) < 1.0e-6 &&
+           std::abs(cmd.vel.angular.z) < 1.0e-6;
   }
 
   void onControlTimer()
@@ -372,14 +378,18 @@ private:
     }
     last_control_time_ = current_time;
 
-    asr::HeadCommand3D cmd = latest_cmd_;
+    asr_sdm_control_msgs::msg::RobotCommand robot_cmd = latest_cmd_;
     if ((current_time - last_cmd_time_).seconds() > cmd_timeout_sec_) {
-      cmd = {0.0, 0.0, 0.0};
+      robot_cmd = asr_sdm_control_msgs::msg::RobotCommand();
     }
+    asr::HeadCommand3D cmd = toHeadCommand(robot_cmd);
     cmd = controller_->limitCommand(cmd);
+    robot_cmd.vel.linear.x = cmd.linear_velocity;
+    robot_cmd.vel.angular.y = cmd.pitch_rate;
+    robot_cmd.vel.angular.z = cmd.yaw_rate;
 
     latest_joint_velocity_ = controller_->computeJointVelocity(cmd, state_);
-    if (isZeroCommand(cmd)) {
+    if (isZeroCommand(robot_cmd)) {
       latest_joint_velocity_ = {};
     }
     advanceModelState(cmd, latest_joint_velocity_, dt);
@@ -501,7 +511,7 @@ private:
   std::unique_ptr<asr::AsrSdmKinematicModel> model_;
   std::unique_ptr<asr::FrontUnitFollowingController3D> controller_;
   asr::SimulationState3D state_;
-  asr::HeadCommand3D latest_cmd_{0.0, 0.0, 0.0};
+  asr_sdm_control_msgs::msg::RobotCommand latest_cmd_{};
   asr::JointVelocity3D latest_joint_velocity_{};
 
   std::string robot_cmd_topic_;
