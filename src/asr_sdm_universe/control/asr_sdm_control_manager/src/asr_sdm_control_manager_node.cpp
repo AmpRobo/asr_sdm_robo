@@ -222,8 +222,10 @@ private:
   {
     const auto & vel = msg->vel;
     latest_cmd_.linear_velocity = std::clamp(vel.linear.x, 0.0, std::abs(max_linear_velocity_));
-    latest_cmd_.pitch_rate = clampSymmetric(vel.angular.y, max_pitch_rate_);
-    latest_cmd_.yaw_rate = clampSymmetric(vel.angular.z, max_yaw_rate_);
+    latest_cmd_.pitch_rate =
+      std::clamp(vel.angular.y, -std::abs(max_pitch_rate_), std::abs(max_pitch_rate_));
+    latest_cmd_.yaw_rate =
+      std::clamp(vel.angular.z, -std::abs(max_yaw_rate_), std::abs(max_yaw_rate_));
     last_cmd_time_ = node_->now();
     RCLCPP_INFO_THROTTLE(
       node_->get_logger(), *node_->get_clock(), 1000,
@@ -352,12 +354,6 @@ private:
     state_.time += dt;
     model_->updateKinematics(q_next, v);
     copyModelGeometryToState();
-  }
-
-  double clampSymmetric(double value, double limit) const
-  {
-    const double abs_limit = std::abs(limit);
-    return std::clamp(value, -abs_limit, abs_limit);
   }
 
   bool isZeroCommand(const asr::HeadCommand3D & cmd) const
