@@ -295,14 +295,15 @@ private:
   }
 
   Eigen::VectorXd velocityFromState(
-    const asr::HeadCommand3D & cmd, const asr::JointVelocity3D & joint_velocity) const
+    const asr_sdm_control_msgs::msg::RobotCommand & cmd,
+    const asr::JointVelocity3D & joint_velocity) const
   {
     asr::AsrSdmKinematicModel::JointVector theta_dot;
     for (size_t i = 0; i < asr::kNum3dJointDofs; ++i) {
       theta_dot[static_cast<int>(i)] = joint_velocity.theta_dot[i];
     }
     return model_->toVelocity(
-      cmd.linear_velocity, cmd.pitch_rate, cmd.yaw_rate, theta_dot);
+      cmd.vel.linear.x, cmd.vel.angular.y, cmd.vel.angular.z, theta_dot);
   }
 
   void copyModelGeometryToState()
@@ -327,13 +328,14 @@ private:
     const asr_sdm_control_msgs::msg::RobotCommand & cmd, const asr::JointVelocity3D & joint_velocity)
   {
     const Eigen::VectorXd q = configurationFromState();
-    const Eigen::VectorXd v = velocityFromState(toHeadCommand(cmd), joint_velocity);
+    const Eigen::VectorXd v = velocityFromState(cmd, joint_velocity);
     model_->updateKinematics(q, v);
     copyModelGeometryToState();
   }
 
   void advanceModelState(
-    const asr::HeadCommand3D & cmd, const asr::JointVelocity3D & joint_velocity, double dt)
+    const asr_sdm_control_msgs::msg::RobotCommand & cmd, const asr::JointVelocity3D & joint_velocity,
+    double dt)
   {
     const Eigen::VectorXd q = configurationFromState();
     const Eigen::VectorXd v = velocityFromState(cmd, joint_velocity);
@@ -392,7 +394,7 @@ private:
     if (isZeroCommand(robot_cmd)) {
       latest_joint_velocity_ = {};
     }
-    advanceModelState(cmd, latest_joint_velocity_, dt);
+    advanceModelState(robot_cmd, latest_joint_velocity_, dt);
     publishControllerState(cmd, latest_joint_velocity_);
     publishRobotState(cmd, latest_joint_velocity_);
     if (publish_control_cmd_ && pub_control_cmd_) {
