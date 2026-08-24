@@ -1,0 +1,80 @@
+/**:
+  ros__parameters:
+
+    # Records below this level are discarded before they reach any file. Raise it
+    # to thin out a noisy run without rebuilding the senders.
+    # trace | debug | info | warning | error | critical
+    minimum_level: trace
+
+    # Name used when a sender does not identify itself.
+    unknown_node_name: unknown
+
+    # Period of the "collected from N nodes" summary. 0.0 disables it.
+    statistics_period_sec: 30.0
+
+    # Applies to every datagram transport below.
+    max_datagram_bytes: 65536
+    receive_buffer_bytes: 4194304
+
+    unix_socket:
+      # Preferred transport for senders on this host: unlike UDP it does not drop
+      # records silently, it costs less than the network stack, and who may log is
+      # decided by file permissions.
+      enabled: true
+      # Accepts `~` and `$VAR`. The parent directory is created at start-up. Kept
+      # under the home directory so the shipped defaults need no root; a deployment
+      # that wants a system path such as /run/vehicle/log.sock has to pre-create
+      # the directory, since /run is not writable by an ordinary user.
+      socket_path: "~/log/vehicle/log.sock"
+      # Octal, as a string: YAML's treatment of a leading zero is not portable.
+      # Only matters once the socket lives somewhere other users can reach, which
+      # a home directory normally is not.
+      permissions: "0666"
+
+    udp:
+      # For senders on another machine. Harmless to leave on alongside the socket;
+      # a sender only ever uses one transport, so records are not duplicated.
+      enabled: true
+      # 0.0.0.0 also accepts datagrams from other machines on the robot network;
+      # use 127.0.0.1 to restrict collection to this host.
+      bind_address: 0.0.0.0
+      port: 9110
+
+    rosout:
+      # Covers every node still logging through RCLCPP_*, with no change to it.
+      enabled: true
+      topic: /rosout
+      queue_depth: 1000
+      # Without this the collector's own status lines would come straight back in.
+      ignore_own_logs: true
+
+    sink:
+      # Accepts `~` and `$VAR`; parameter files are plain YAML, so the expansion
+      # is done by this node rather than a shell. The socket above lives in this
+      # same directory, alongside the per-run subdirectories. If the path turns out
+      # not to be writable the node warns and falls back rather than refusing to
+      # start; empty selects that fallback directly, which is ROS_LOG_DIR, then
+      # ROS_HOME, then $HOME/.ros/log, all suffixed with asr_sdm_log_collector.
+      log_directory: "~/log/vehicle"
+      # Give each run its own timestamped subdirectory with a `latest` symlink.
+      use_run_subdirectory: true
+      # The file that interleaves every node, next to the per-node ones.
+      log_filename: "all.log"
+      # One extra file per originating node, alongside the merged one.
+      per_node_files: true
+      # Mirror everything to the collector's stdout. Useful while bringing a
+      # robot up, noisy in normal operation.
+      echo_to_console: false
+      # Rotation bounds apply per file, so the disk ceiling is
+      # max_file_size_mb * max_files * (1 + number of nodes when per_node_files).
+      max_file_size_mb: 100
+      max_files: 10
+      max_tracked_nodes: 256
+      # Levels at or above this are flushed immediately so a crash keeps them.
+      flush_level: warning
+      # Everything else is flushed on this period. 0.0 disables it.
+      flush_period_sec: 2.0
+      # `%*` is the originating process id and `%_` the source location; both are
+      # specific to this package. All other spdlog pattern flags work as usual.
+      file_pattern: "[%Y-%m-%d %H:%M:%S.%e] [%-8l] [%n] [%*:%t] %v%_"
+      console_pattern: "[%H:%M:%S.%e] [%^%-8l%$] [%n] %v%_"
