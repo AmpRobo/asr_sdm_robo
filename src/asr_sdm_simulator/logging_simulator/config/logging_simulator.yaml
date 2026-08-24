@@ -70,7 +70,7 @@
       max_pitch_rate: 0.35
       max_yaw_rate: 0.35
 
-      # Publish ControlCmd for the hardware units (off while running in simulation).
+      # Publish ActuatorCmd for the hardware units (off while running in simulation).
       publish_control_cmd: false
       joint_angle_scale: 1.0
       joint_angle_limit: 2147483647

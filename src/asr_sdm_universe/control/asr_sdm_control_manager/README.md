@@ -33,7 +33,7 @@ Main link with teleop / planning: `/control/asr_sdm/robot_cmd`.
 | `/control/asr_sdm/odom` | `nav_msgs/msg/Odometry` | Controller odometry |
 | `/control/joint_states` | `sensor_msgs/msg/JointState` | Joint states for `robot_state_publisher` |
 | `/control/asr_sdm/controller_state_3d` | `std_msgs/msg/Float64MultiArray` | Internal controller state |
-| `/control/asr_sdm/control_cmd_3d` | `asr_sdm_control_msgs/msg/ControlCmd` | Hardware command; **off by default** (`publish_control_cmd: false`) |
+| `/control/asr_sdm/control_cmd_3d` | `asr_sdm_control_msgs/msg/ActuatorCmd` | Hardware command; **off by default** (`publish_control_cmd: false`) |
 
 YAML keys:
 
@@ -164,7 +164,7 @@ Override with `--ros-args -p name:=value` or edit the yaml.
 | `/control/asr_sdm/odom` | `nav_msgs/msg/Odometry` | 控制器里程计 |
 | `/control/joint_states` | `sensor_msgs/msg/JointState` | 关节状态（供给 `robot_state_publisher`） |
 | `/control/asr_sdm/controller_state_3d` | `std_msgs/msg/Float64MultiArray` | 内部控制状态 |
-| `/control/asr_sdm/control_cmd_3d` | `asr_sdm_control_msgs/msg/ControlCmd` | 硬件指令；**默认不发布**（`publish_control_cmd: false`） |
+| `/control/asr_sdm/control_cmd_3d` | `asr_sdm_control_msgs/msg/ActuatorCmd` | 硬件指令；**默认不发布**（`publish_control_cmd: false`） |
 
 对应 yaml 键：
 

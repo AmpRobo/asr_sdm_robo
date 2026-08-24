@@ -1,7 +1,7 @@
 #include "asr_sdm_head_following_control/front_unit_following_controller_3d.hpp"
 #include "asr_sdm_kinematic_dynamic_model/asr_sdm_kinematic_model.hpp"
 
-#include "asr_sdm_control_msgs/msg/control_cmd.hpp"
+#include "asr_sdm_control_msgs/msg/actuator_cmd.hpp"
 #include "asr_sdm_control_msgs/msg/robot_command.hpp"
 #include "asr_sdm_control_msgs/msg/unit_cmd.hpp"
 
@@ -127,7 +127,7 @@ public:
       joint_state_topic_, rclcpp::QoS(10));
     pub_odom_ = node_->create_publisher<nav_msgs::msg::Odometry>(odom_topic_, rclcpp::QoS(10));
     if (publish_control_cmd_) {
-      pub_control_cmd_ = node_->create_publisher<asr_sdm_control_msgs::msg::ControlCmd>(
+      pub_control_cmd_ = node_->create_publisher<asr_sdm_control_msgs::msg::ActuatorCmd>(
         control_cmd_topic_, rclcpp::QoS(1));
     }
 
@@ -394,7 +394,7 @@ private:
     publishControllerState(robot_cmd, latest_joint_velocity_);
     publishRobotState(robot_cmd, latest_joint_velocity_, dt);
     if (publish_control_cmd_ && pub_control_cmd_) {
-      publishControlCmd(robot_cmd);
+      publishActuatorCmd(robot_cmd);
     }
   }
 
@@ -487,9 +487,9 @@ private:
     pub_odom_->publish(odometry);
   }
 
-  void publishControlCmd(const asr_sdm_control_msgs::msg::RobotCommand & cmd)
+  void publishActuatorCmd(const asr_sdm_control_msgs::msg::RobotCommand & cmd)
   {
-    asr_sdm_control_msgs::msg::ControlCmd msg;
+    asr_sdm_control_msgs::msg::ActuatorCmd msg;
     msg.header.stamp = node_->now();
     msg.header.frame_id = "front_unit_following_controller_3d";
     const int32_t screw_vel = scaleToInt32(
@@ -556,7 +556,7 @@ private:
   rclcpp::Publisher<std_msgs::msg::Float64MultiArray>::SharedPtr pub_controller_state_;
   rclcpp::Publisher<sensor_msgs::msg::JointState>::SharedPtr pub_joint_state_;
   rclcpp::Publisher<nav_msgs::msg::Odometry>::SharedPtr pub_odom_;
-  rclcpp::Publisher<asr_sdm_control_msgs::msg::ControlCmd>::SharedPtr pub_control_cmd_;
+  rclcpp::Publisher<asr_sdm_control_msgs::msg::ActuatorCmd>::SharedPtr pub_control_cmd_;
   rclcpp::TimerBase::SharedPtr timer_;
 };
 

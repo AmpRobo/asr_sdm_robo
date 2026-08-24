@@ -24,7 +24,7 @@ find_package(Eigen3 REQUIRED)
 rosidl_generate_interfaces(${PROJECT_NAME}
   "msg/UnitCmd.msg"
   "msg/UnitStatus.msg"
-  "msg/ControlCmd.msg"
+  "msg/ActuatorCmd.msg"
   "msg/RobotStatus.msg"
   "msg/AuxCommand.msg"
   "msg/Corrections.msg"

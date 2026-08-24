@@ -17,7 +17,7 @@
 
 #include <rclcpp/rclcpp.hpp>
 
-#include "asr_sdm_control_msgs/msg/control_cmd.hpp"
+#include "asr_sdm_control_msgs/msg/actuator_cmd.hpp"
 #include "asr_sdm_hardware_msgs/msg/can_frame.hpp"
 #include "asr_sdm_hardware_msgs/msg/hardware_cmd.hpp"
 #include <sensor_msgs/msg/imu.hpp>
@@ -92,7 +92,7 @@ public:
     // Initialize publishers and subscribers
     pub_heartbeat_ = this->create_publisher<std_msgs::msg::String>("~/hardware/heartbeat", 1);
     pub_imu_ = this->create_publisher<sensor_msgs::msg::Imu>("~/hardware/imu", 1);
-    sub_control_cmd_ = this->create_subscription<asr_sdm_control_msgs::msg::ControlCmd>(
+    sub_control_cmd_ = this->create_subscription<asr_sdm_control_msgs::msg::ActuatorCmd>(
       topic_asr_sdm_cmd, rclcpp::SensorDataQoS{}.keep_last(1),
       std::bind(&AsrSdmHardwareNode::hardware_control, this, std::placeholders::_1));
 
@@ -114,7 +114,7 @@ public:
   }
 
 private:
-  void hardware_control(const asr_sdm_control_msgs::msg::ControlCmd::SharedPtr msg)
+  void hardware_control(const asr_sdm_control_msgs::msg::ActuatorCmd::SharedPtr msg)
   {
     auto msg_control_cmd = *msg;
     control_cmd_received_status_ = true;
@@ -184,13 +184,13 @@ private:
   rclcpp::TimerBase::SharedPtr timer_hardware_ctrl_;
   rclcpp::Publisher<std_msgs::msg::String>::SharedPtr pub_heartbeat_;
   rclcpp::Publisher<sensor_msgs::msg::Imu>::SharedPtr pub_imu_;
-  rclcpp::Subscription<asr_sdm_control_msgs::msg::ControlCmd>::SharedPtr sub_control_cmd_;
+  rclcpp::Subscription<asr_sdm_control_msgs::msg::ActuatorCmd>::SharedPtr sub_control_cmd_;
 
   amp::UART2CAN::Ptr uart2can_;
   std::unique_ptr<amp::CommProtocol> comm_protocol_;
   std::unique_ptr<amp::ImuHiWonder10Axis> imu_hiwonder_10axis_;
 
-  // asr_sdm_control_msgs::msg::ControlCmd msg_robot_cmd_;
+  // asr_sdm_control_msgs::msg::ActuatorCmd msg_robot_cmd_;
   std::vector<std::vector<int32_t>> proceed_control_cmd_;
   // asr_sdm_hardware_msgs::msg::HardwareCmd msg_hardware_cmd_;
   bool control_cmd_received_status_;

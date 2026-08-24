@@ -61,7 +61,7 @@ Launch name: `asr_sdm_kinematic_controller`. Topic names come from
 | `/control/asr_sdm/odom` | `nav_msgs/msg/Odometry` | Integrated controller odometry (`world` → `base`) |
 | `/control/joint_states` | `sensor_msgs/msg/JointState` | 6 articulation joints + 8 screw rotors for `robot_state_publisher` |
 | `/control/asr_sdm/controller_state_3d` | `std_msgs/msg/Float64MultiArray` | 43-D internal controller state |
-| `/control/asr_sdm/control_cmd_3d` | `asr_sdm_control_msgs/msg/ControlCmd` | Hardware joint-angle command; **off by default** (`publish_control_cmd: false`) |
+| `/control/asr_sdm/control_cmd_3d` | `asr_sdm_control_msgs/msg/ActuatorCmd` | Hardware joint-angle command; **off by default** (`publish_control_cmd: false`) |
 
 Control period defaults to 20 ms. If no `robot_cmd` arrives within
 `cmd_timeout_sec` (0.3 s), the command is zeroed.
@@ -153,7 +153,7 @@ robot_cmd
 | `/control/asr_sdm/odom` | `nav_msgs/msg/Odometry` | 控制器积分得到的里程计（`world` → `base`） |
 | `/control/joint_states` | `sensor_msgs/msg/JointState` | 6 个关节 + 8 个螺旋桨关节，供给 `robot_state_publisher` |
 | `/control/asr_sdm/controller_state_3d` | `std_msgs/msg/Float64MultiArray` | 43 维内部控制状态 |
-| `/control/asr_sdm/control_cmd_3d` | `asr_sdm_control_msgs/msg/ControlCmd` | 硬件关节角指令；**默认不发布**（`publish_control_cmd: false`） |
+| `/control/asr_sdm/control_cmd_3d` | `asr_sdm_control_msgs/msg/ActuatorCmd` | 硬件关节角指令；**默认不发布**（`publish_control_cmd: false`） |
 
 控制周期默认 20 ms。`robot_cmd` 超过 `cmd_timeout_sec`（0.3 s）无新消息会清零指令。
 
