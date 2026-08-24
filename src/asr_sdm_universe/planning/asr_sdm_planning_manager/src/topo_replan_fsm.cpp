@@ -2,7 +2,7 @@
 // Topological replanning FSM implementation.
 
 #include <asr_sdm_planning_manager/topo_replan_fsm.h>
-#include <spdlog/spdlog.h>
+#include <asr_sdm_log_collector/log_client.hpp>
 
 #include <chrono>
 #include <functional>
@@ -67,7 +67,7 @@ void TopoReplanFSM::init(const std::shared_ptr<rclcpp::Node> & nh)
 void TopoReplanFSM::waypointCallback(const nav_msgs::msg::Path::SharedPtr msg)
 {
   if (msg->poses[0].pose.position.z < -0.1) return;
-  RCLCPP_INFO(node_->get_logger(), "Triggered!");
+  SPDLOG_INFO("Triggered!");
 
   vector<Eigen::Vector3d> global_wp;
   if (flight_type_ == "REFERENCE_PATH") {
@@ -83,7 +83,7 @@ void TopoReplanFSM::waypointCallback(const nav_msgs::msg::Path::SharedPtr msg)
       target_point_(0) = msg->poses[0].pose.position.x;
       target_point_(1) = msg->poses[0].pose.position.y;
       target_point_(2) = 1.0;
-      RCLCPP_INFO_STREAM(node_->get_logger(), "manual: " << target_point_.transpose());
+      SPDLOG_INFO("manual: {} {} {}", target_point_(0), target_point_(1), target_point_(2));
 
     } else if (flight_type_ == "PRESET_TARGET") {
       target_point_(0) = waypoints_[current_wp_][0];
@@ -91,7 +91,7 @@ void TopoReplanFSM::waypointCallback(const nav_msgs::msg::Path::SharedPtr msg)
       target_point_(2) = waypoints_[current_wp_][2];
 
       current_wp_ = (current_wp_ + 1) % waypoint_num_;
-      RCLCPP_INFO_STREAM(node_->get_logger(), "preset: " << target_point_.transpose());
+      SPDLOG_INFO("preset: {} {} {}", target_point_(0), target_point_(1), target_point_(2));
     }
 
     global_wp.push_back(target_point_);
@@ -146,9 +146,7 @@ void TopoReplanFSM::changeFSMExecState(FSM_EXEC_STATE new_state, string pos_call
     "NEW"};
   int pre_s = int(exec_state_);
   exec_state_ = new_state;
-  RCLCPP_INFO_STREAM(
-    node_->get_logger(),
-    "[" + pos_call + "]: from " + state_str[pre_s] + " to " + state_str[int(new_state)]);
+  SPDLOG_INFO("[{}]: from {} to {}", pos_call, state_str[pre_s], state_str[int(new_state)]);
 }
 
 void TopoReplanFSM::printFSMExecState()
@@ -161,7 +159,7 @@ void TopoReplanFSM::printFSMExecState()
     "EXEC_TRAJ",
     "REPLAN_"
     "NEW"};
-  RCLCPP_INFO_STREAM(node_->get_logger(), "state: " + state_str[int(exec_state_)]);
+  SPDLOG_INFO("state: {}", state_str[int(exec_state_)]);
 }
 
 void TopoReplanFSM::execFSMCallback()
@@ -170,8 +168,8 @@ void TopoReplanFSM::execFSMCallback()
   fsm_num++;
   if (fsm_num == 100) {
     printFSMExecState();
-    if (!have_odom_) RCLCPP_WARN(node_->get_logger(), "no odom.");
-    if (!trigger_) RCLCPP_WARN(node_->get_logger(), "no trigger_.");
+    if (!have_odom_) SPDLOG_WARN("no odom.");
+    if (!trigger_) SPDLOG_WARN("no trigger_.");
     fsm_num = 0;
   }
 
@@ -265,7 +263,7 @@ void TopoReplanFSM::execFSMCallback()
       if (success) {
         changeFSMExecState(EXEC_TRAJ, "FSM");
       } else {
-        RCLCPP_WARN(node_->get_logger(), "Replan fail, retrying...");
+        SPDLOG_WARN("Replan fail, retrying...");
       }
 
       break;
@@ -342,7 +340,7 @@ void TopoReplanFSM::checkCollisionCallback()
       }
 
       if (max_dist > 0.3) {
-        RCLCPP_INFO(node_->get_logger(), "change goal, replan.");
+        SPDLOG_INFO("change goal, replan.");
         target_point_ = goal;
         have_target_ = true;
         end_vel_.setZero();
@@ -356,7 +354,7 @@ void TopoReplanFSM::checkCollisionCallback()
         // have_target_ = false;
         // cout << "Goal near collision, stop." << endl;
         // changeFSMExecState(WAIT_TARGET, "SAFETY");
-        RCLCPP_INFO(node_->get_logger(), "goal near collision, keep retry");
+        SPDLOG_INFO("goal near collision, keep retry");
         changeFSMExecState(REPLAN_TRAJ, "FSM");
       }
     }
@@ -368,11 +366,11 @@ void TopoReplanFSM::checkCollisionCallback()
     bool safe = planning_manager_->checkTrajCollision(dist);
     if (!safe) {
       if (dist > 0.5) {
-        RCLCPP_WARN(node_->get_logger(), "current traj %lf m to collision", dist);
+        SPDLOG_WARN("current traj {} m to collision", dist);
         collide_ = true;
         changeFSMExecState(REPLAN_TRAJ, "SAFETY");
       } else {
-        RCLCPP_ERROR(node_->get_logger(), "current traj %lf m to collision, emergency stop!", dist);
+        SPDLOG_ERROR("current traj {} m to collision, emergency stop!", dist);
         replan_pub_->publish(std_msgs::msg::Empty());
         have_target_ = false;
         changeFSMExecState(WAIT_TARGET, "SAFETY");

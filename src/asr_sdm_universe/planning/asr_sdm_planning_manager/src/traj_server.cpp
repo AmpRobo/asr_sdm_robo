@@ -4,6 +4,7 @@
 #include "asr_sdm_planning_manager/msg/bspline.hpp"
 #include "bspline/non_uniform_bspline.h"
 
+#include <asr_sdm_log_collector/log_client.hpp>
 #include <rclcpp/rclcpp.hpp>
 
 #include "geometry_msgs/msg/point.hpp"
@@ -230,7 +231,7 @@ void cmdCallback()
     pos_f = pos;
 
   } else {
-    RCLCPP_WARN(g_node->get_logger(), "[Traj server]: invalid time.");
+    SPDLOG_WARN("[Traj server]: invalid time.");
   }
 
   cmd.header.stamp = time_now;
@@ -283,6 +284,7 @@ int main(int argc, char ** argv)
   rclcpp::init(argc, argv);
   auto node = std::make_shared<rclcpp::Node>("traj_server");
   g_node = node;
+  asr_sdm::log::initialize("asr_sdm_planning_manager");
 
   auto bspline_sub = node->create_subscription<asr_sdm_planning_manager::msg::Bspline>(
     "planning/bspline", 10, bsplineCallback);
@@ -315,9 +317,10 @@ int main(int argc, char ** argv)
 
   std::this_thread::sleep_for(std::chrono::seconds(1));
 
-  RCLCPP_WARN(node->get_logger(), "[Traj server]: ready.");
+  SPDLOG_WARN("[Traj server]: ready.");
 
   rclcpp::spin(node);
+  asr_sdm::log::shutdown();
   rclcpp::shutdown();
 
   return 0;

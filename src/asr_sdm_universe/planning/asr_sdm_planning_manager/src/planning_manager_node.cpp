@@ -2,6 +2,7 @@
 // ROS 2 planning manager node.
 
 #include <asr_sdm_planning_manager/backward.hpp>
+#include <asr_sdm_log_collector/log_client.hpp>
 #include <rclcpp/executors/multi_threaded_executor.hpp>
 #include <rclcpp/rclcpp.hpp>
 
@@ -30,7 +31,7 @@ PlanningManager::PlanningManager()
 
 PlanningManager::~PlanningManager()
 {
-  RCLCPP_INFO(rclcpp::get_logger("PlanningManager"), "des manager");
+  SPDLOG_INFO("des manager");
 }
 
 void PlanningManager::initPlanModules(const std::shared_ptr<rclcpp::Node> & nh)
@@ -146,7 +147,7 @@ vector<Eigen::Vector3d> PlanningManager::buildGlobalWaypoints(const Eigen::Vecto
 {
   // Start from configured global waypoints and prepend the current start position.
   vector<Eigen::Vector3d> points = plan_data_.global_waypoints_;
-  if (points.size() == 0) RCLCPP_WARN(node_->get_logger(), "no global waypoints!");
+  if (points.size() == 0) SPDLOG_WARN("no global waypoints!");
 
   points.insert(points.begin(), start_pos);
 
@@ -210,7 +211,7 @@ void PlanningManager::initLocalTrajFromGlobal(const rclcpp::Time & time_now)
   global_data_.setLocalTraj(bspline, 0.0, duration, 0.0);
   local_data_.position_traj_ = bspline;
   local_data_.start_time_ = time_now;
-  RCLCPP_INFO(node_->get_logger(), "global trajectory generated.");
+  SPDLOG_INFO("global trajectory generated.");
 }
 
 bool PlanningManager::topoReplan(bool collide)
@@ -238,7 +239,7 @@ bool PlanningManager::topoReplan(bool collide)
     findCollisionRange(colli_start, colli_end, start_pts, end_pts);
 
     if (colli_start.size() == 1 && colli_end.size() == 0) {
-      RCLCPP_WARN(node_->get_logger(), "Init traj ends in obstacle, no replanning.");
+      SPDLOG_WARN("Init traj ends in obstacle, no replanning.");
       local_data_.position_traj_ = init_traj;
       global_data_.setLocalTraj(init_traj, t_now, local_traj_duration + t_now, 0.0);
 
@@ -247,7 +248,7 @@ bool PlanningManager::topoReplan(bool collide)
 
       // local segment is in collision, call topological replanning
       /* search topological distinctive paths */
-      RCLCPP_INFO(node_->get_logger(), "[Topo]: ---------");
+      SPDLOG_INFO("[Topo]: ---------");
       plan_data_.clearTopoPaths();
       list<GraphNode::Ptr> graph;
       vector<vector<Eigen::Vector3d>> raw_paths, filtered_paths, select_paths;
@@ -256,13 +257,13 @@ bool PlanningManager::topoReplan(bool collide)
         select_paths);
 
       if (select_paths.size() == 0) {
-        RCLCPP_WARN(node_->get_logger(), "No path.");
+        SPDLOG_WARN("No path.");
         return false;
       }
       plan_data_.addTopoPaths(graph, raw_paths, filtered_paths, select_paths);
 
       /* optimize trajectory using different topo paths */
-      RCLCPP_INFO(node_->get_logger(), "[Optimize]: ---------");
+      SPDLOG_INFO("[Optimize]: ---------");
       t1 = node_->now();
 
       plan_data_.topo_traj_pos1_.resize(select_paths.size());
@@ -278,7 +279,7 @@ bool PlanningManager::topoReplan(bool collide)
       for (size_t i = 0; i < select_paths.size(); ++i) optimize_threads[i].join();
 
       double t_opt = (node_->now() - t1).seconds();
-      RCLCPP_INFO_STREAM(node_->get_logger(), "[planner]: optimization time: " << t_opt);
+      SPDLOG_INFO("[planner]: optimization time: {}", t_opt);
       selectBestTraj(best_traj);
       refineTraj(best_traj, time_inc);
 
@@ -315,15 +316,14 @@ void PlanningManager::refineTraj(fast_planner::NonUniformBspline & best_traj, do
 
   best_traj.setPhysicalLimits(pp_.max_vel_, pp_.max_acc_);
   double ratio = best_traj.checkRatio();
-  RCLCPP_INFO_STREAM(node_->get_logger(), "ratio: " << ratio);
+  SPDLOG_INFO("ratio: {}", ratio);
   reparamBspline(best_traj, ratio, ctrl_pts, dt, t_inc);
   time_inc += t_inc;
 
   ctrl_pts = bspline_optimizers_[0]->BsplineOptimizeTraj(ctrl_pts, dt, cost_function, 1, 1);
   best_traj = fast_planner::NonUniformBspline(ctrl_pts, 3, dt);
-  RCLCPP_WARN_STREAM(
-    node_->get_logger(),
-    "[Refine]: cost " << (node_->now() - t1).seconds() << " seconds, time change is: " << time_inc);
+  SPDLOG_WARN(
+    "[Refine]: cost {} seconds, time change is: {}", (node_->now() - t1).seconds(), time_inc);
 }
 
 void PlanningManager::updateTrajInfo()
@@ -385,7 +385,7 @@ void PlanningManager::optimizeTopoBspline(
 
   // std::cout << "guide pt num: " << guide_pt.size() << std::endl;
   if (int(guide_pt.size()) != int(ctrl_pts.rows()) - 6) {
-    RCLCPP_WARN(node_->get_logger(), "what guide");
+    SPDLOG_WARN("what guide");
   }
 
   tm1 = (node_->now() - t1).seconds();
@@ -410,8 +410,7 @@ void PlanningManager::optimizeTopoBspline(
   plan_data_.topo_traj_pos2_[traj_id] = fast_planner::NonUniformBspline(opt_ctrl_pts2, 3, dt);
 
   tm3 = (node_->now() - t1).seconds();
-  RCLCPP_INFO(
-    node_->get_logger(), "optimization %d cost %lf, %lf, %lf seconds.", traj_id, tm1, tm2, tm3);
+  SPDLOG_INFO("optimization {} cost {}, {}, {} seconds.", traj_id, tm1, tm2, tm3);
 }
 
 Eigen::MatrixXd PlanningManager::reparamLocalTraj(double start_t, double & dt, double & duration)
@@ -515,7 +514,7 @@ void PlanningManager::findCollisionRange(
 
 void PlanningManager::planYaw(const Eigen::Vector3d & start_yaw)
 {
-  RCLCPP_INFO(node_->get_logger(), "plan yaw");
+  SPDLOG_INFO("plan yaw");
   auto t1 = node_->now();
   // calculate waypoints of heading
 
@@ -583,7 +582,7 @@ void PlanningManager::planYaw(const Eigen::Vector3d & start_yaw)
   plan_data_.dt_yaw_ = dt_yaw;
   plan_data_.dt_yaw_path_ = dt_yaw;
 
-  RCLCPP_INFO_STREAM(node_->get_logger(), "plan heading: " << (node_->now() - t1).seconds());
+  SPDLOG_INFO("plan heading: {}", (node_->now() - t1).seconds());
 }
 
 void PlanningManager::calcNextYaw(const double & last_yaw, double & yaw)
@@ -616,18 +615,22 @@ int main(int argc, char ** argv)
 {
   rclcpp::init(argc, argv);
   auto nh = std::make_shared<rclcpp::Node>("planning_manager_node");
+  asr_sdm::log::initialize("asr_sdm_planning_manager");
 
-  amprobo::TopoReplanFSM topo_replan;
-  topo_replan.init(nh);
+  {
+    amprobo::TopoReplanFSM topo_replan;
+    topo_replan.init(nh);
 
-  std::this_thread::sleep_for(std::chrono::seconds(1));
+    std::this_thread::sleep_for(std::chrono::seconds(1));
 
-  // Use a multi-threaded executor so the FSM timers and subscription callbacks
-  // can run concurrently across multiple threads.
-  rclcpp::executors::MultiThreadedExecutor executor;
-  executor.add_node(nh);
-  executor.spin();
+    // Use a multi-threaded executor so the FSM timers and subscription callbacks
+    // can run concurrently across multiple threads.
+    rclcpp::executors::MultiThreadedExecutor executor;
+    executor.add_node(nh);
+    executor.spin();
+  }
 
+  asr_sdm::log::shutdown();
   rclcpp::shutdown();
 
   return 0;

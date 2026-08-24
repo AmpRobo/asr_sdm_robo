@@ -41,6 +41,7 @@ find_package(asr_sdm_trajectory_visualizer REQUIRED)
 find_package(Eigen3 REQUIRED)
 find_package(PCL REQUIRED)
 find_package(spdlog REQUIRED)
+find_package(asr_sdm_log_collector REQUIRED)
 
 # Generate the Bspline message
 rosidl_generate_interfaces(${PROJECT_NAME}
@@ -76,11 +77,18 @@ add_executable(planning_manager_node
   src/topo_replan_fsm.cpp
 )
 ament_target_dependencies(planning_manager_node ${asr_sdm_planning_manager_dependencies})
-target_link_libraries(planning_manager_node spdlog::spdlog)
+target_link_libraries(planning_manager_node
+  spdlog::spdlog
+  asr_sdm_log_collector::asr_sdm_log_client
+)
 
 # Trajectory server
 add_executable(traj_server src/traj_server.cpp)
 ament_target_dependencies(traj_server ${asr_sdm_planning_manager_dependencies})
+target_link_libraries(traj_server
+  spdlog::spdlog
+  asr_sdm_log_collector::asr_sdm_log_client
+)
 
 # NOTE:
 # asr_sdm_esdf_map currently exports a broken imported target

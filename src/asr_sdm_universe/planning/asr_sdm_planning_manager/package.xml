@@ -30,6 +30,7 @@
   <depend>asr_sdm_trajectory_optimizer</depend>
   <depend>asr_sdm_trajectory_visualizer</depend>
   <depend>spdlog</depend>
+  <depend>asr_sdm_log_collector</depend>
 
   <export>
     <build_type>ament_cmake</build_type>
