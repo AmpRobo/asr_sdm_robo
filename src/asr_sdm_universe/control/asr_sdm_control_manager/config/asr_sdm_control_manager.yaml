@@ -38,6 +38,8 @@
     max_linear_velocity: 0.12
     max_pitch_rate: 0.35
     max_yaw_rate: 0.35
+    # Maps vel.linear.x (m/s) to screw angular velocity (rad/s). Full speed ≈ 200 rpm.
+    screw_velocity_scale: 174.533
 
     publish_control_cmd: false
     joint_angle_scale: 1.0

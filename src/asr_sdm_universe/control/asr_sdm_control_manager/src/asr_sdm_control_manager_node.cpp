@@ -26,6 +26,7 @@ namespace
 {
 
 constexpr double kUrdfJointLimit = 1.5707963267948966;
+constexpr double kUrdfRotorVelocity = 20.9439510239;
 constexpr size_t kStateSize3D = 43;
 
 const std::array<std::string, 6> kArticulationJointNames = {
@@ -199,6 +200,9 @@ private:
     max_linear_velocity_ = node_->declare_parameter<double>("max_linear_velocity", 0.12);
     max_pitch_rate_ = node_->declare_parameter<double>("max_pitch_rate", 0.35);
     max_yaw_rate_ = node_->declare_parameter<double>("max_yaw_rate", 0.35);
+    screw_velocity_scale_ = node_->declare_parameter<double>(
+      "screw_velocity_scale",
+      kUrdfRotorVelocity / std::max(std::abs(max_linear_velocity_), 1.0e-6));
     publish_control_cmd_ = node_->declare_parameter<bool>("publish_control_cmd", false);
     joint_angle_scale_ = node_->declare_parameter<double>("joint_angle_scale", 1.0);
     joint_angle_limit_ = node_->declare_parameter<int>("joint_angle_limit", 2147483647);
@@ -273,6 +277,7 @@ private:
         1.0 - 2.0 * (qx * qx + qy * qy)}}};
     latest_cmd_ = asr_sdm_control_msgs::msg::RobotCommand();
     latest_joint_velocity_ = {};
+    rotor_positions_.fill(0.0);
     refreshModelState(latest_cmd_, latest_joint_velocity_);
   }
 
@@ -387,9 +392,9 @@ private:
     }
     advanceModelState(robot_cmd, latest_joint_velocity_, dt);
     publishControllerState(robot_cmd, latest_joint_velocity_);
-    publishRobotState(robot_cmd, latest_joint_velocity_);
+    publishRobotState(robot_cmd, latest_joint_velocity_, dt);
     if (publish_control_cmd_ && pub_control_cmd_) {
-      publishControlCmd();
+      publishControlCmd(robot_cmd);
     }
   }
 
@@ -425,7 +430,8 @@ private:
   }
 
   void publishRobotState(
-    const asr_sdm_control_msgs::msg::RobotCommand & cmd, const asr::JointVelocity3D & joint_velocity)
+    const asr_sdm_control_msgs::msg::RobotCommand & cmd, const asr::JointVelocity3D & joint_velocity,
+    double dt = 0.0)
   {
     const auto stamp = node_->now();
     const auto odom_orientation = quaternionFromFrame(state_.head_frame);
@@ -448,10 +454,13 @@ private:
       joint_state.velocity.push_back(
         joint_signs_[urdf_index] * joint_velocity.theta_dot[source_index]);
     }
-    for (const auto & name : kRotorJointNames) {
-      joint_state.name.push_back(name);
-      joint_state.position.push_back(0.0);
-      joint_state.velocity.push_back(0.0);
+    const double omega = cmd.vel.linear.x * screw_velocity_scale_;
+    for (size_t i = 0; i < kRotorJointNames.size(); ++i) {
+      const double rotor_omega = ((i % 2) == 0 ? 1.0 : -1.0) * omega;
+      rotor_positions_[i] += rotor_omega * dt;
+      joint_state.name.push_back(kRotorJointNames[i]);
+      joint_state.position.push_back(rotor_positions_[i]);
+      joint_state.velocity.push_back(rotor_omega);
     }
     pub_joint_state_->publish(joint_state);
 
@@ -478,17 +487,19 @@ private:
     pub_odom_->publish(odometry);
   }
 
-  void publishControlCmd()
+  void publishControlCmd(const asr_sdm_control_msgs::msg::RobotCommand & cmd)
   {
     asr_sdm_control_msgs::msg::ControlCmd msg;
     msg.header.stamp = node_->now();
     msg.header.frame_id = "front_unit_following_controller_3d";
+    const int32_t screw_vel = scaleToInt32(
+      cmd.vel.linear.x * screw_velocity_scale_, 1.0, -joint_angle_limit_, joint_angle_limit_);
     msg.units_cmd.resize(asr::kNum3dJoints);
     for (size_t joint = 0; joint < asr::kNum3dJoints; ++joint) {
       auto & unit = msg.units_cmd[joint];
       unit.unit_id = static_cast<int32_t>(joint);
-      unit.screw1_vel = 0;
-      unit.screw2_vel = 0;
+      unit.screw1_vel = screw_vel;
+      unit.screw2_vel = -screw_vel;
       unit.joint1_angle = scaledJointAngle(asr::yawIndex(joint));
       unit.joint2_angle = scaledJointAngle(asr::pitchIndex(joint));
     }
@@ -509,6 +520,7 @@ private:
   asr::SimulationState3D state_;
   asr_sdm_control_msgs::msg::RobotCommand latest_cmd_{};
   asr::JointVelocity3D latest_joint_velocity_{};
+  std::array<double, kRotorJointNames.size()> rotor_positions_{};
 
   std::string robot_cmd_topic_;
   std::string controller_state_topic_;
@@ -532,6 +544,7 @@ private:
   double max_linear_velocity_{0.12};
   double max_pitch_rate_{0.35};
   double max_yaw_rate_{0.35};
+  double screw_velocity_scale_{kUrdfRotorVelocity / 0.12};
   bool publish_control_cmd_{false};
   double joint_angle_scale_{1.0};
   int joint_angle_limit_{2147483647};
