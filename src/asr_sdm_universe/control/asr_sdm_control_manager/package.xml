@@ -20,6 +20,7 @@
   <depend>pinocchio</depend>
   <depend>asr_sdm_kinematic_dynamic_model</depend>
   <depend>asr_sdm_head_following_control</depend>
+  <depend>asr_sdm_log_collector</depend>
 
   <exec_depend>launch</exec_depend>
   <exec_depend>launch_ros</exec_depend>

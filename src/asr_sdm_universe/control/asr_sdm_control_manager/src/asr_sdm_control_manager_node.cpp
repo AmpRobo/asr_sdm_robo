@@ -5,6 +5,7 @@
 #include "asr_sdm_control_msgs/msg/robot_command.hpp"
 #include "asr_sdm_control_msgs/msg/unit_cmd.hpp"
 
+#include <asr_sdm_log_collector/log_client.hpp>
 #include <geometry_msgs/msg/pose_with_covariance_stamped.hpp>
 #include <nav_msgs/msg/odometry.hpp>
 #include <rclcpp/executors/multi_threaded_executor.hpp>
@@ -135,10 +136,9 @@ public:
       std::chrono::milliseconds(control_period_ms_),
       std::bind(&AsrSdmControlManager::onControlTimer, this));
 
-    RCLCPP_INFO(
-      node_->get_logger(),
-      "ASR SDM control manager started: model=URDF-free Pinocchio, robot_cmd=%s, state=%s",
-      robot_cmd_topic_.c_str(), controller_state_topic_.c_str());
+    SPDLOG_INFO(
+      "ASR SDM control manager started: model=URDF-free Pinocchio, robot_cmd={}, state={}",
+      robot_cmd_topic_, controller_state_topic_);
   }
 
 private:
@@ -232,10 +232,13 @@ private:
     latest_cmd_.vel.angular.z =
       std::clamp(msg->vel.angular.z, -std::abs(max_yaw_rate_), std::abs(max_yaw_rate_));
     last_cmd_time_ = node_->now();
-    RCLCPP_INFO_THROTTLE(
-      node_->get_logger(), *node_->get_clock(), 1000,
-      "robot_cmd limited -> v=%.3f pitch=%.3f yaw=%.3f", latest_cmd_.vel.linear.x,
-      latest_cmd_.vel.angular.y, latest_cmd_.vel.angular.z);
+    const auto now = std::chrono::steady_clock::now();
+    if (now - last_robot_cmd_log_ >= std::chrono::seconds(1)) {
+      last_robot_cmd_log_ = now;
+      SPDLOG_INFO(
+        "robot_cmd limited -> v={:.3f} pitch={:.3f} yaw={:.3f}", latest_cmd_.vel.linear.x,
+        latest_cmd_.vel.angular.y, latest_cmd_.vel.angular.z);
+    }
   }
 
   void onInitialPose(const geometry_msgs::msg::PoseWithCovarianceStamped::SharedPtr msg)
@@ -245,7 +248,7 @@ private:
       orientation.x * orientation.x + orientation.y * orientation.y +
       orientation.z * orientation.z + orientation.w * orientation.w);
     if (norm < 1.0e-9 || !std::isfinite(norm)) {
-      RCLCPP_WARN(node_->get_logger(), "Ignoring initial pose with an invalid quaternion");
+      SPDLOG_WARN("Ignoring initial pose with an invalid quaternion");
       return;
     }
 
@@ -551,6 +554,7 @@ private:
 
   rclcpp::Time last_cmd_time_{0, 0, RCL_ROS_TIME};
   rclcpp::Time last_control_time_{0, 0, RCL_ROS_TIME};
+  std::chrono::steady_clock::time_point last_robot_cmd_log_{};
   rclcpp::Subscription<asr_sdm_control_msgs::msg::RobotCommand>::SharedPtr sub_robot_cmd_;
   rclcpp::Subscription<geometry_msgs::msg::PoseWithCovarianceStamped>::SharedPtr sub_initialpose_;
   rclcpp::Publisher<std_msgs::msg::Float64MultiArray>::SharedPtr pub_controller_state_;
@@ -564,6 +568,7 @@ int main(int argc, char ** argv)
 {
   rclcpp::init(argc, argv);
   auto nh = std::make_shared<rclcpp::Node>("control_manager_node");
+  asr_sdm::log::initialize("asr_sdm_control_manager");
 
   AsrSdmControlManager control_manager;
   control_manager.init(nh);
@@ -572,6 +577,7 @@ int main(int argc, char ** argv)
   executor.add_node(nh);
   executor.spin();
 
+  asr_sdm::log::shutdown();
   rclcpp::shutdown();
   return 0;
 }
