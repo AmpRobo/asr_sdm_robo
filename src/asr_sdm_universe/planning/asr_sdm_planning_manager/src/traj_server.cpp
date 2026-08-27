@@ -14,6 +14,7 @@
 #include "visualization_msgs/msg/marker.hpp"
 
 #include <chrono>
+#include <cmath>
 #include <memory>
 #include <thread>
 
@@ -33,7 +34,7 @@ double vel_gain[3] = {3.4, 3.4, 4.0};
 using fast_planner::NonUniformBspline;
 
 bool receive_traj_ = false;
-vector<fast_planner::NonUniformBspline> traj_;
+std::vector<fast_planner::NonUniformBspline> traj_;
 double traj_duration_;
 rclcpp::Time start_time_;
 int traj_id_;
@@ -207,8 +208,12 @@ void cmdCallback()
   rclcpp::Time time_now = g_node->now();
   double t_cur = (time_now - start_time_).seconds();
 
-  Eigen::Vector3d pos, vel, acc, pos_f;
-  double yaw, yawdot;
+  Eigen::Vector3d pos = Eigen::Vector3d::Zero();
+  Eigen::Vector3d vel = Eigen::Vector3d::Zero();
+  Eigen::Vector3d acc = Eigen::Vector3d::Zero();
+  Eigen::Vector3d pos_f = Eigen::Vector3d::Zero();
+  double yaw = last_yaw_;
+  double yawdot = 0.0;
 
   if (t_cur < traj_duration_ && t_cur >= 0.0) {
     pos = traj_[0].evaluateDeBoorT(t_cur);
@@ -253,6 +258,32 @@ void cmdCallback()
 
   cmd.yaw = yaw;
   cmd.yaw_dot = yawdot;
+
+  // Head-frame twist: forward along x, pitch about y, yaw about z.
+  // Axes match R = Rz(yaw) * Ry(pitch) used by asr_sdm_control_manager.
+  constexpr double kMinSpeed = 1.0e-3;
+  constexpr double kMinSpeedXy = 1.0e-4;
+  const double speed = vel.norm();
+  const double speed_xy = std::hypot(vel(0), vel(1));
+  const double yaw_heading = (speed_xy > kMinSpeedXy) ? std::atan2(vel(1), vel(0)) : yaw;
+  const double pitch = std::atan2(-vel(2), speed_xy);
+  cmd.vel.linear.x = speed;
+  cmd.vel.linear.y = 0.0;
+  cmd.vel.linear.z = 0.0;
+  cmd.vel.angular.x = 0.0;
+  if (speed < kMinSpeed) {
+    cmd.vel.angular.y = 0.0;
+    cmd.vel.angular.z = 0.0;
+  } else {
+    const double s_yaw = std::sin(yaw_heading);
+    const double c_yaw = std::cos(yaw_heading);
+    const double s_pitch = std::sin(pitch);
+    const Eigen::Vector3d e_y(-s_yaw, c_yaw, 0.0);
+    const Eigen::Vector3d e_z(c_yaw * s_pitch, s_yaw * s_pitch, std::cos(pitch));
+    const Eigen::Vector3d omega = vel.cross(acc) / vel.squaredNorm();
+    cmd.vel.angular.y = omega.dot(e_y);
+    cmd.vel.angular.z = omega.dot(e_z);
+  }
 
   auto pos_err = pos_f - pos;
   // if (pos_err.norm() > 1e-3) {
