@@ -51,8 +51,8 @@ void BsplineOptimizer::setParam(const std::shared_ptr<rclcpp::Node> & nh)
   lambda8_ = declareGetDouble(nh, "optimization.lambda8", -1.0);
 
   dist0_ = declareGetDouble(nh, "optimization.dist0", -1.0);
-  max_vel_ = declareGetDouble(nh, "optimization.max_vel", -1.0);
-  max_acc_ = declareGetDouble(nh, "optimization.max_acc", -1.0);
+  max_vel_ = declareGetDouble(nh, "manager.max_vel", -1.0);
+  max_acc_ = declareGetDouble(nh, "manager.max_acc", -1.0);
   visib_min_ = declareGetDouble(nh, "optimization.visib_min", -1.0);
   dlmin_ = declareGetDouble(nh, "optimization.dlmin", -1.0);
   wnl_ = declareGetDouble(nh, "optimization.wnl", -1.0);
