@@ -20,7 +20,7 @@ constexpr double kPi = 3.14159265358979323846;
 Eigen::Vector3d normalizedOr(const Eigen::Vector3d & v, const Eigen::Vector3d & fallback)
 {
   const double n = v.norm();
-  if (n > 1.0e-9) {
+  if (n > 1.0e-6) {
     return v / n;
   }
   return fallback;
@@ -34,7 +34,7 @@ void buildOrthonormalBasis(
                              ? Eigen::Vector3d::UnitZ()
                              : Eigen::Vector3d::UnitY();
   e2 = e1.cross(helper);
-  if (e2.norm() < 1.0e-9) {
+  if (e2.norm() < 1.0e-6) {
     helper = Eigen::Vector3d::UnitY();
     e2 = e1.cross(helper);
   }
@@ -74,7 +74,7 @@ double SphereCorridorGenerator::overlapVolume(const CorridorSphere & a, const Co
     return sphereVolume(std::min(r1, r2));
   }
 
-  if (d < 1.0e-9) {
+  if (d < 1.0e-6) {
     return sphereVolume(std::min(r1, r2));
   }
 
@@ -196,7 +196,7 @@ Eigen::Vector3d SphereCorridorGenerator::overlapCenter(
 {
   const Eigen::Vector3d ab = b.center - a.center;
   const double d = ab.norm();
-  if (d < 1.0e-9) {
+  if (d < 1.0e-6) {
     return 0.5 * (a.center + b.center);
   }
 

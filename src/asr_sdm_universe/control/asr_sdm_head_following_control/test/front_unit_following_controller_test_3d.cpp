@@ -62,14 +62,14 @@ asr_sdm_control_msgs::msg::RobotCommand makeRobotCommand(
 bool has_nonzero_pitch_command(const std::vector<OfflineHeadCommand3D> & commands)
 {
   return std::any_of(commands.begin(), commands.end(), [](const auto & cmd) {
-    return std::abs(cmd.pitch_rate) > 1.0e-12;
+    return std::abs(cmd.pitch_rate) > 1.0e-6;
   });
 }
 
 bool has_nonzero_yaw_command(const std::vector<OfflineHeadCommand3D> & commands)
 {
   return std::any_of(commands.begin(), commands.end(), [](const auto & cmd) {
-    return std::abs(cmd.yaw_rate) > 1.0e-12;
+    return std::abs(cmd.yaw_rate) > 1.0e-6;
   });
 }
 
@@ -261,7 +261,7 @@ asr::Vec3 interpolate_point_at_distance(
   }
   const size_t lo = hi > 0 ? hi - 1 : 0;
   const double span = distances[hi] - distances[lo];
-  if (span < 1.0e-12) {
+  if (span < 1.0e-6) {
     return samples[hi][point];
   }
 
@@ -340,7 +340,7 @@ int main()
   constexpr double joint_limit = 0.85 * pi_value;
   constexpr double damping = 0.02;
   constexpr double max_curvature = 1.2;
-  constexpr double curvature_velocity_epsilon = 1.0e-3;
+  constexpr double curvature_velocity_epsilon = 1.0e-6;
   constexpr size_t draw_stride = 12;
   constexpr size_t trail_samples = 360;
   constexpr size_t body_snapshot_stride = 80;

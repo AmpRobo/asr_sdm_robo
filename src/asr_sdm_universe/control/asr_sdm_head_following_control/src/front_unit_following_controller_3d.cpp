@@ -52,7 +52,7 @@ double norm(const Vec3 & a)
 Vec3 normalize(const Vec3 & a)
 {
   const double n = norm(a);
-  if (n < 1.0e-12) {
+  if (n < 1.0e-6) {
     return {1.0, 0.0, 0.0};
   }
   return a / n;
@@ -127,7 +127,7 @@ Mat3 orthonormalize(const Mat3 & frame)
 {
   const Vec3 ex = normalize(column(frame, 0));
   Vec3 ey = projectPerpendicular(column(frame, 1), ex);
-  if (norm(ey) < 1.0e-9) {
+  if (norm(ey) < 1.0e-6) {
     return frameFromAxis(ex);
   }
 
@@ -197,12 +197,12 @@ asr_sdm_control_msgs::msg::RobotCommand FrontUnitFollowingController3D::limitCom
 {
   asr_sdm_control_msgs::msg::RobotCommand limited_cmd = cmd;
   const double omega = std::hypot(cmd.vel.angular.y, cmd.vel.angular.z);
-  if (omega < 1.0e-12) {
+  if (omega < 1.0e-6) {
     return limited_cmd;
   }
 
   const double max_curvature = std::max(0.0, params_.max_curvature);
-  const double velocity_epsilon = std::max(std::abs(params_.curvature_velocity_epsilon), 1.0e-12);
+  const double velocity_epsilon = std::max(std::abs(params_.curvature_velocity_epsilon), 1.0e-6);
   const double omega_limit =
     max_curvature * std::max(std::abs(cmd.vel.linear.x), velocity_epsilon);
   if (omega <= omega_limit) {

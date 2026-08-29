@@ -19,8 +19,8 @@ static_assert(BodyModel::kNumJoints == asr::kNum3dJoints, "joint count mismatch"
 static_assert(BodyModel::kNumLinks == asr::kNum3dLinks, "link count mismatch");
 static_assert(BodyModel::kNumPoints == asr::kNum3dPoints, "body point count mismatch");
 
-constexpr double kTolerance = 1.0e-9;
-constexpr double kVelocityTolerance = 1.0e-5;
+constexpr double kTolerance = 1.0e-6;
+constexpr double kVelocityTolerance = 1.0e-6;
 
 asr_sdm_control_msgs::msg::RobotCommand makeRobotCommand(
   double linear_velocity, double pitch_rate, double yaw_rate)
@@ -75,7 +75,7 @@ asr::FrontUnitController3DParameters makeControllerParameters(double link_length
   params.joint_rate_limit = 2.0;
   params.joint_limit = 1.5707963267948966;
   params.max_curvature = 1.2;
-  params.curvature_velocity_epsilon = 1.0e-3;
+  params.curvature_velocity_epsilon = 1.0e-6;
   params.damping = 0.02;
   return params;
 }

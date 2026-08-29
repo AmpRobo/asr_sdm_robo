@@ -19,7 +19,7 @@ namespace amprobo
 {
 namespace
 {
-constexpr double kEpsilon = 1.0e-9;
+constexpr double kEpsilon = 1.0e-6;
 
 Eigen::Vector3d safeNormalized(const Eigen::Vector3d & v, const Eigen::Vector3d & fallback)
 {
@@ -923,7 +923,7 @@ double TopoPathModifier::shortestGraphDistance(
   while (!open.empty()) {
     const auto [cost, u] = open.top();
     open.pop();
-    if (cost > dist[static_cast<std::size_t>(u)] + 1.0e-9) {
+    if (cost > dist[static_cast<std::size_t>(u)] + 1.0e-6) {
       continue;
     }
     if (u == 1) {
@@ -931,7 +931,7 @@ double TopoPathModifier::shortestGraphDistance(
     }
     for (const auto & edge : graph[static_cast<std::size_t>(u)]) {
       const double next_cost = cost + edge.cost;
-      if (next_cost + 1.0e-9 < dist[static_cast<std::size_t>(edge.to)]) {
+      if (next_cost + 1.0e-6 < dist[static_cast<std::size_t>(edge.to)]) {
         dist[static_cast<std::size_t>(edge.to)] = next_cost;
         open.push({next_cost, edge.to});
       }
@@ -958,7 +958,7 @@ std::vector<Eigen::Vector3d> TopoPathModifier::shortestGraphPath(
   while (!open.empty()) {
     const auto [cost, u] = open.top();
     open.pop();
-    if (cost > dist[static_cast<std::size_t>(u)] + 1.0e-9) {
+    if (cost > dist[static_cast<std::size_t>(u)] + 1.0e-6) {
       continue;
     }
     if (u == 1) {
@@ -966,7 +966,7 @@ std::vector<Eigen::Vector3d> TopoPathModifier::shortestGraphPath(
     }
     for (const auto & edge : graph[static_cast<std::size_t>(u)]) {
       const double next_cost = cost + edge.cost;
-      if (next_cost + 1.0e-9 < dist[static_cast<std::size_t>(edge.to)]) {
+      if (next_cost + 1.0e-6 < dist[static_cast<std::size_t>(edge.to)]) {
         dist[static_cast<std::size_t>(edge.to)] = next_cost;
         parent[static_cast<std::size_t>(edge.to)] = u;
         open.push({next_cost, edge.to});

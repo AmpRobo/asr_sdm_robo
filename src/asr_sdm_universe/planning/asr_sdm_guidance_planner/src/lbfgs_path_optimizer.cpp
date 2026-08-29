@@ -185,7 +185,7 @@ OptimizerResult LbfgsPathOptimizer::optimize(
             return;
           }
           fx += corridor_w * violation * violation;
-          if (norm > 1.0e-9) {
+          if (norm > 1.0e-6) {
             grad_points[point_index] += 2.0 * corridor_w * violation * diff / norm;
           }
         };

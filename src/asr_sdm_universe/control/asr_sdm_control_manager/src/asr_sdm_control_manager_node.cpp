@@ -163,7 +163,7 @@ private:
     controller_params_.max_curvature = node_->declare_parameter<double>(
       "kinematic_controller.max_curvature", 1.2);
     controller_params_.curvature_velocity_epsilon = node_->declare_parameter<double>(
-      "kinematic_controller.curvature_velocity_epsilon", 1.0e-3);
+      "kinematic_controller.curvature_velocity_epsilon", 1.0e-6);
     controller_params_.damping = node_->declare_parameter<double>(
       "kinematic_controller.damping", 0.02);
 
@@ -247,7 +247,7 @@ private:
     const double norm = std::sqrt(
       orientation.x * orientation.x + orientation.y * orientation.y +
       orientation.z * orientation.z + orientation.w * orientation.w);
-    if (norm < 1.0e-9 || !std::isfinite(norm)) {
+    if (norm < 1.0e-6 || !std::isfinite(norm)) {
       SPDLOG_WARN("Ignoring initial pose with an invalid quaternion");
       return;
     }
