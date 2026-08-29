@@ -3,7 +3,7 @@
     features:
       # Load and display the asr_sdm robot model in RViz.
       use_asr_sdm_model: true
-      # Read by asr_sdm_control_manager when control:=enable.
+      # Start asr_sdm_control_manager when control:=enable.
       use_kinematic_controller: true
       # Start RViz with the package rviz config.
       use_rviz: true
@@ -34,43 +34,3 @@
       child_frame: base
       use_sim_time: false
       model_xacro: urdf/asr_sdm_wrapper.urdf.xacro
-
-    # Initial pose used by odom_visualization (world->base) until the first VINS
-    # odometry message arrives. Also used by asr_sdm_control_manager when control:=enable.
-    kinematic_controller:
-      world_frame: world
-      controller_base_frame: base
-
-      initial_x: -5.0
-      initial_y: 0.0
-      initial_z: 0.0
-      initial_roll: 0.0
-      initial_pitch: 0.0
-      initial_yaw: 0.0
-
-      # Kinematic model of the front-unit following controller.
-      link_length: 0.25
-      joint_rate_limit: 2.0
-      joint_limit: 1.5707963267948966
-      max_curvature: 1.2
-      curvature_velocity_epsilon: 0.001
-      damping: 0.02
-
-      # URDF joint mapping: index i is the URDF joint, the value is the controller DOF it reads.
-      joint_source_indices: [0, 1, 2, 3, 4, 5]
-      joint_signs: [1.0, 1.0, 1.0, 1.0, 1.0, 1.0]
-      joint_offsets_rad: [0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
-      clip_joint_positions: true
-      joint_position_limit_rad: 1.5707963267948966
-
-      control_period_ms: 20
-      # Zero the command when no robot_cmd arrives within this window.
-      cmd_timeout_sec: 0.3
-      max_linear_velocity: 0.12
-      max_pitch_rate: 0.35
-      max_yaw_rate: 0.35
-
-      # Publish ActuatorCmd for the hardware units (off while running in simulation).
-      publish_control_cmd: false
-      joint_angle_scale: 1.0
-      joint_angle_limit: 2147483647

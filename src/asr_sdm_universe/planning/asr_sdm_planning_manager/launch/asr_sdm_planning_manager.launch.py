@@ -25,7 +25,11 @@ def generate_launch_description():
     odom_topic_arg = DeclareLaunchArgument(
         "odom_topic", default_value="/visual_slam/odom",
         description="Topic of your odometry such as VIO or LIO")
+    cmd_topic_arg = DeclareLaunchArgument(
+        "cmd_topic", default_value="/control/asr_sdm/robot_cmd",
+        description="Trajectory command topic consumed by asr_sdm_control_manager")
     odom_topic = LaunchConfiguration("odom_topic")
+    cmd_topic = LaunchConfiguration("cmd_topic")
 
     planning_manager_node = Node(
         package="asr_sdm_planning_manager",
@@ -49,13 +53,14 @@ def generate_launch_description():
         output="screen",
         parameters=[config],
         remappings=[
-            ("/position_cmd", "planning/pos_cmd"),
+            ("/position_cmd", cmd_topic),
             ("odom", odom_topic),
         ],
     )
 
     return LaunchDescription([
         odom_topic_arg,
+        cmd_topic_arg,
         planning_manager_node,
         traj_server,
     ])

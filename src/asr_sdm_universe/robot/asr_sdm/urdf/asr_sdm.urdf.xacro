@@ -80,9 +80,6 @@
             <origin rpy="0 0 0" xyz="0.0 0.0 0.0825" />
             <axis xyz="0 0 1" />
             <limit effort="${ROTOR_EFFORT}" velocity="${ROTOR_VELOCITY}" />
-            <!-- 右转子位置、速度和加速度均与左转子反向。 -->
-            <mimic joint="joint_screwdrive_segment_0__screw_rotor_left_0__${idx}"
-                   multiplier="-1.0" offset="0.0" />
           </joint>
 
     <!-- A / Cross / B 关节单元，末节跳过。 -->

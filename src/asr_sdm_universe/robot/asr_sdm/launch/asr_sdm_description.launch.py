@@ -26,6 +26,10 @@ def generate_launch_description():
         parameters=[{
             "robot_description": robot_description,
             "use_sim_time": False,
+            # Joint states arrive at 50 Hz. Default 20 Hz + timestamp gating
+            # can hold screw TFs still in RViz.
+            "publish_frequency": 50.0,
+            "ignore_timestamp": True,
         }],
         remappings=[
             ("joint_states", "/control/joint_states"),

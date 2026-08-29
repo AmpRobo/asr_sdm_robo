@@ -29,6 +29,8 @@ def launch_setup(context):
         parameters=[{
             'robot_description': robot_description,
             'use_sim_time': LaunchConfiguration('use_sim_time'),
+            'publish_frequency': 50.0,
+            'ignore_timestamp': True,
         }],
         remappings=[
             ('joint_states', LaunchConfiguration('joint_states_topic')),

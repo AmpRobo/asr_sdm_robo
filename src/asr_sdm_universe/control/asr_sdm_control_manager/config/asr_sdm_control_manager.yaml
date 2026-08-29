@@ -35,11 +35,15 @@
 
     control_period_ms: 20
     cmd_timeout_sec: 0.3
-    max_linear_velocity: 0.12
+    min_linear_velocity: 0.0
+    max_linear_velocity: 0.3
+    min_pitch_rate: -0.35
     max_pitch_rate: 0.35
+    min_yaw_rate: -0.35
     max_yaw_rate: 0.35
-    # Maps vel.linear.x (m/s) to screw angular velocity (rad/s). Full speed ≈ 200 rpm.
-    screw_velocity_scale: 174.533
+    # Maps vel.linear.x (m/s) to screw angular velocity (rad/s): omega = v / r.
+    # r ≈ 0.047 m (rotor visual radius). At 0.2 m/s ≈ 41 rpm.
+    screw_velocity_scale: 21.277
 
     publish_control_cmd: false
     joint_angle_scale: 1.0
