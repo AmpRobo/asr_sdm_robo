@@ -39,8 +39,9 @@ double traj_duration_;
 rclcpp::Time start_time_;
 int traj_id_;
 
-// yaw control
+// heading control
 double last_yaw_;
+double last_pitch_;
 double time_forward_;
 
 vector<Eigen::Vector3d> traj_cmd_, traj_real_;
@@ -156,6 +157,17 @@ void bsplineCallback(const asr_sdm_planning_manager::msg::Bspline::SharedPtr msg
   traj_.push_back(yaw_traj);
   traj_.push_back(yaw_traj.getDerivative());
 
+  // parse pitch traj, planned jointly with the position for a nonholonomic head
+
+  Eigen::MatrixXd pitch_pts(msg->pitch_pts.size(), 1);
+  for (size_t i = 0; i < msg->pitch_pts.size(); ++i) {
+    pitch_pts(i, 0) = msg->pitch_pts[i];
+  }
+
+  fast_planner::NonUniformBspline pitch_traj(pitch_pts, msg->order, msg->pitch_dt);
+  traj_.push_back(pitch_traj);
+  traj_.push_back(pitch_traj.getDerivative());
+
   traj_duration_ = traj_[0].getTimeSum();
 
   receive_traj_ = true;
@@ -214,6 +226,8 @@ void cmdCallback()
   Eigen::Vector3d pos_f = Eigen::Vector3d::Zero();
   double yaw = last_yaw_;
   double yawdot = 0.0;
+  double pitch = last_pitch_;
+  double pitchdot = 0.0;
 
   if (t_cur < traj_duration_ && t_cur >= 0.0) {
     pos = traj_[0].evaluateDeBoorT(t_cur);
@@ -221,6 +235,8 @@ void cmdCallback()
     acc = traj_[2].evaluateDeBoorT(t_cur);
     yaw = traj_[3].evaluateDeBoorT(t_cur)[0];
     yawdot = traj_[4].evaluateDeBoorT(t_cur)[0];
+    pitch = traj_[5].evaluateDeBoorT(t_cur)[0];
+    pitchdot = traj_[6].evaluateDeBoorT(t_cur)[0];
 
     double tf = min(traj_duration_, t_cur + 2.0);
     pos_f = traj_[0].evaluateDeBoorT(tf);
@@ -232,6 +248,8 @@ void cmdCallback()
     acc.setZero();
     yaw = traj_[3].evaluateDeBoorT(traj_duration_)[0];
     yawdot = traj_[4].evaluateDeBoorT(traj_duration_)[0];
+    pitch = traj_[5].evaluateDeBoorT(traj_duration_)[0];
+    pitchdot = traj_[6].evaluateDeBoorT(traj_duration_)[0];
 
     pos_f = pos;
 
@@ -260,30 +278,15 @@ void cmdCallback()
   cmd.yaw_dot = yawdot;
 
   // Head-frame twist: forward along x, pitch about y, yaw about z.
-  // Axes match R = Rz(yaw) * Ry(pitch) used by asr_sdm_control_manager.
-  constexpr double kMinSpeed = 1.0e-3;
-  constexpr double kMinSpeedXy = 1.0e-4;
-  const double speed = vel.norm();
-  const double speed_xy = std::hypot(vel(0), vel(1));
-  const double yaw_heading = (speed_xy > kMinSpeedXy) ? std::atan2(vel(1), vel(0)) : yaw;
-  const double pitch = std::atan2(-vel(2), speed_xy);
-  cmd.vel.linear.x = speed;
+  // Axes match R = Rz(yaw) * Ry(pitch) used by asr_sdm_control_manager, so the
+  // body rates follow from the planned heading rates. The planner already keeps
+  // both within the limits the controller enforces.
+  cmd.vel.linear.x = vel.norm();
   cmd.vel.linear.y = 0.0;
   cmd.vel.linear.z = 0.0;
-  cmd.vel.angular.x = 0.0;
-  if (speed < kMinSpeed) {
-    cmd.vel.angular.y = 0.0;
-    cmd.vel.angular.z = 0.0;
-  } else {
-    const double s_yaw = std::sin(yaw_heading);
-    const double c_yaw = std::cos(yaw_heading);
-    const double s_pitch = std::sin(pitch);
-    const Eigen::Vector3d e_y(-s_yaw, c_yaw, 0.0);
-    const Eigen::Vector3d e_z(c_yaw * s_pitch, s_yaw * s_pitch, std::cos(pitch));
-    const Eigen::Vector3d omega = vel.cross(acc) / vel.squaredNorm();
-    cmd.vel.angular.y = omega.dot(e_y);
-    cmd.vel.angular.z = omega.dot(e_z);
-  }
+  cmd.vel.angular.x = -yawdot * std::sin(pitch);
+  cmd.vel.angular.y = pitchdot;
+  cmd.vel.angular.z = yawdot * std::cos(pitch);
 
   auto pos_err = pos_f - pos;
   // if (pos_err.norm() > 1e-3) {
@@ -294,6 +297,7 @@ void cmdCallback()
   // cmd.yaw_dot = 1.0;
 
   last_yaw_ = cmd.yaw;
+  last_pitch_ = pitch;
 
   pos_cmd_pub->publish(cmd);
 
@@ -302,7 +306,7 @@ void cmdCallback()
   // drawCmd(pos, vel, 0, Eigen::Vector4d(0, 1, 0, 1));
   // drawCmd(pos, acc, 1, Eigen::Vector4d(0, 0, 1, 1));
 
-  Eigen::Vector3d dir(cos(yaw), sin(yaw), 0.0);
+  Eigen::Vector3d dir(cos(pitch) * cos(yaw), cos(pitch) * sin(yaw), -sin(pitch));
   drawCmd(pos, 2 * dir, 2, Eigen::Vector4d(1, 1, 0, 0.7));
   // drawCmd(pos, pos_err, 3, Eigen::Vector4d(1, 1, 0, 0.7));
 
@@ -345,6 +349,7 @@ int main(int argc, char ** argv)
   node->declare_parameter("traj_server.time_forward", -1.0);
   time_forward_ = node->get_parameter("traj_server.time_forward").as_double();
   last_yaw_ = 0.0;
+  last_pitch_ = 0.0;
 
   std::this_thread::sleep_for(std::chrono::seconds(1));
 

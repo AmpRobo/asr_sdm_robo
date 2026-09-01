@@ -56,8 +56,9 @@ private:
   Eigen::Vector3d odom_pos_, odom_vel_;  // odometry state
   Eigen::Quaterniond odom_orient_;
 
-  Eigen::Vector3d start_pt_, start_vel_, start_acc_, start_yaw_;  // start state
-  Eigen::Vector3d target_point_, end_vel_;                        // target state
+  Eigen::Vector3d start_pt_, start_vel_, start_acc_;  // start state
+  Eigen::Vector3d start_yaw_, start_pitch_;           // heading state (angle, rate, acc)
+  Eigen::Vector3d target_point_, end_vel_;            // target state
   int current_wp_;
 
   /* ROS utils */
@@ -75,6 +76,8 @@ private:
                                        // optimization; 1: new, 2: replan
   void changeFSMExecState(FSM_EXEC_STATE new_state, string pos_call);
   void printFSMExecState();
+  void setHeadingStateFromOdom();
+  void setHeadingStateFromTraj(double t_cur);
 
   /* ROS functions */
   void execFSMCallback();

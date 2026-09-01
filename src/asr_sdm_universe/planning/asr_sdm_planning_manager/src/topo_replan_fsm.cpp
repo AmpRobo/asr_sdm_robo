@@ -17,6 +17,8 @@ void TopoReplanFSM::init(const std::shared_ptr<rclcpp::Node> & nh)
   exec_state_ = FSM_EXEC_STATE::INIT;
   have_target_ = false;
   collide_ = false;
+  start_yaw_.setZero();
+  start_pitch_.setZero();
 
   /*  fsm param  */
   node_->declare_parameter("fsm.flight_type", std::string(""));
@@ -149,6 +151,32 @@ void TopoReplanFSM::changeFSMExecState(FSM_EXEC_STATE new_state, string pos_call
   SPDLOG_INFO("[{}]: from {} to {}", pos_call, state_str[pre_s], state_str[int(new_state)]);
 }
 
+// Heading convention R = Rz(yaw) * Ry(pitch): a positive pitch points the body
+// axis downwards, matching the tangent-derived heading used by the planner.
+void TopoReplanFSM::setHeadingStateFromOdom()
+{
+  Eigen::Vector3d rot_x = odom_orient_.toRotationMatrix().block(0, 0, 3, 1);
+
+  start_yaw_(0) = atan2(rot_x(1), rot_x(0));
+  start_yaw_(1) = start_yaw_(2) = 0.0;
+
+  start_pitch_(0) = atan2(-rot_x(2), rot_x.head<2>().norm());
+  start_pitch_(1) = start_pitch_(2) = 0.0;
+}
+
+void TopoReplanFSM::setHeadingStateFromTraj(double t_cur)
+{
+  LocalTrajData * info = &planning_manager_->local_data_;
+
+  start_yaw_(0) = info->yaw_traj_.evaluateDeBoorT(t_cur)[0];
+  start_yaw_(1) = info->yawdot_traj_.evaluateDeBoorT(t_cur)[0];
+  start_yaw_(2) = info->yawdotdot_traj_.evaluateDeBoorT(t_cur)[0];
+
+  start_pitch_(0) = info->pitch_traj_.evaluateDeBoorT(t_cur)[0];
+  start_pitch_(1) = info->pitchdot_traj_.evaluateDeBoorT(t_cur)[0];
+  start_pitch_(2) = info->pitchdotdot_traj_.evaluateDeBoorT(t_cur)[0];
+}
+
 void TopoReplanFSM::printFSMExecState()
 {
   string state_str[6] = {
@@ -200,10 +228,7 @@ void TopoReplanFSM::execFSMCallback()
       start_pt_ = odom_pos_;
       start_vel_ = odom_vel_;
       start_acc_.setZero();
-
-      Eigen::Vector3d rot_x = odom_orient_.toRotationMatrix().block(0, 0, 3, 1);
-      start_yaw_(0) = atan2(rot_x(1), rot_x(0));
-      start_yaw_(1) = start_yaw_(2) = 0.0;
+      setHeadingStateFromOdom();
 
       new_pub_->publish(std_msgs::msg::Empty());
       /* topo path finding and optimization */
@@ -254,10 +279,7 @@ void TopoReplanFSM::execFSMCallback()
       start_pt_ = info->position_traj_.evaluateDeBoorT(t_cur);
       start_vel_ = info->velocity_traj_.evaluateDeBoorT(t_cur);
       start_acc_ = info->acceleration_traj_.evaluateDeBoorT(t_cur);
-
-      start_yaw_(0) = info->yaw_traj_.evaluateDeBoorT(t_cur)[0];
-      start_yaw_(1) = info->yawdot_traj_.evaluateDeBoorT(t_cur)[0];
-      start_yaw_(2) = info->yawdotdot_traj_.evaluateDeBoorT(t_cur)[0];
+      setHeadingStateFromTraj(t_cur);
 
       bool success = callTopologicalTraj(2);
       if (success) {
@@ -276,6 +298,7 @@ void TopoReplanFSM::execFSMCallback()
       start_pt_ = info->position_traj_.evaluateDeBoorT(t_cur);
       start_vel_ = info->velocity_traj_.evaluateDeBoorT(t_cur);
       start_acc_ = info->acceleration_traj_.evaluateDeBoorT(t_cur);
+      setHeadingStateFromTraj(t_cur);
 
       /* inform server */
       new_pub_->publish(std_msgs::msg::Empty());
@@ -390,6 +413,8 @@ bool TopoReplanFSM::callTopologicalTraj(int step)
 {
   bool plan_success;
 
+  planning_manager_->setStartMotion(start_vel_, start_acc_, start_yaw_, start_pitch_);
+
   if (step == 1) {
     plan_success = planning_manager_->planGlobalTraj(start_pt_);
   } else {
@@ -397,7 +422,7 @@ bool TopoReplanFSM::callTopologicalTraj(int step)
   }
 
   if (plan_success) {
-    planning_manager_->planYaw(start_yaw_);
+    planning_manager_->planHeading(start_yaw_, start_pitch_);
 
     LocalTrajData * locdat = &planning_manager_->local_data_;
 
@@ -431,6 +456,13 @@ bool TopoReplanFSM::callTopologicalTraj(int step)
     }
     bspline.yaw_dt = locdat->yaw_traj_.getInterval();
 
+    Eigen::MatrixXd pitch_pts = locdat->pitch_traj_.getControlPoint();
+    for (int i = 0; i < pitch_pts.rows(); ++i) {
+      double pitch = pitch_pts(i, 0);
+      bspline.pitch_pts.push_back(pitch);
+    }
+    bspline.pitch_dt = locdat->pitch_traj_.getInterval();
+
     bspline_pub_->publish(bspline);
 
     /* visualize new trajectories */
@@ -451,7 +483,8 @@ bool TopoReplanFSM::callTopologicalTraj(int step)
       visualization_->drawTopoPathsPhase2(empty_paths, 0.075);
     }
 
-    visualization_->drawYawTraj(locdat->position_traj_, locdat->yaw_traj_, plan_data->dt_yaw_);
+    visualization_->drawHeadingTraj(
+      locdat->position_traj_, locdat->yaw_traj_, locdat->pitch_traj_, plan_data->dt_yaw_);
 
     return true;
   } else {

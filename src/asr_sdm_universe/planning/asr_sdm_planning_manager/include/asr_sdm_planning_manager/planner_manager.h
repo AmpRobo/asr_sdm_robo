@@ -30,7 +30,10 @@ public:
   bool planGlobalTraj(const Eigen::Vector3d & start_pos);
   bool topoReplan(bool collide);
 
-  void planYaw(const Eigen::Vector3d & start_yaw);
+  void planHeading(const Eigen::Vector3d & start_yaw, const Eigen::Vector3d & start_pitch);
+  void setStartMotion(
+    const Eigen::Vector3d & start_vel, const Eigen::Vector3d & start_acc,
+    const Eigen::Vector3d & start_yaw, const Eigen::Vector3d & start_pitch);
 
   void initPlanModules(const std::shared_ptr<rclcpp::Node> & nh);
   void setGlobalWaypoints(vector<Eigen::Vector3d> & waypoints);
@@ -54,10 +57,16 @@ private:
   unique_ptr<TopologyPRM> topo_prm_;
   vector<BsplineOptimizer::Ptr> bspline_optimizers_;
 
+  Eigen::Vector3d start_yaw_{Eigen::Vector3d::Zero()};
+  Eigen::Vector3d start_pitch_{Eigen::Vector3d::Zero()};
+  Eigen::Vector3d start_vel_plan_{Eigen::Vector3d::Zero()};
+  Eigen::Vector3d start_acc_plan_{Eigen::Vector3d::Zero()};
+
   void updateTrajInfo();
 
   /* global trajectory helpers */
   vector<Eigen::Vector3d> buildGlobalWaypoints(const Eigen::Vector3d & start_pos);
+  void insertNonholonomicStartArc(vector<Eigen::Vector3d> & points);
   PolynomialTraj fitGlobalMinSnapTraj(const vector<Eigen::Vector3d> & points);
   void initLocalTrajFromGlobal(const rclcpp::Time & time_now);
 
@@ -69,6 +78,7 @@ private:
 
   void optimizeTopoBspline(
     double start_t, double duration, vector<Eigen::Vector3d> guide_path, int traj_id);
+  int localCostFunction() const;
   Eigen::MatrixXd reparamLocalTraj(double start_t, double & dt, double & duration);
   Eigen::MatrixXd reparamLocalTraj(double start_t, double duration, int seg_num, double & dt);
 
@@ -80,6 +90,13 @@ private:
 
   // heading planning
   void calcNextYaw(const double & last_yaw, double & yaw);
+  // Direction the body axis must take at time t, read off the position traj.
+  bool tangentAtTime(double t, double dt, Eigen::Vector3d & dir);
+  // Fit a 1-D angle B-spline through sampled angles with fixed boundary states.
+  fast_planner::NonUniformBspline fitAngleBspline(
+    const vector<Eigen::Vector3d> & waypts, const vector<int> & waypt_idx,
+    const Eigen::Vector3d & start_state, const Eigen::Vector3d & end_state, double dt,
+    int optimizer_id);
 
   // !SECTION stable
 

@@ -374,6 +374,27 @@ void PlanningVisualization::drawYawTraj(
   displayLineList(pts1, pts2, 0.04, Eigen::Vector4d(1, 0.5, 0, 1), 0, 5);
 }
 
+/* Full 3D body axis of a nonholonomic robot, R = Rz(yaw) * Ry(pitch) applied to
+ * the forward unit vector. */
+void PlanningVisualization::drawHeadingTraj(
+  fast_planner::NonUniformBspline & pos, fast_planner::NonUniformBspline & yaw,
+  fast_planner::NonUniformBspline & pitch, const double & dt)
+{
+  double duration = pos.getTimeSum();
+  vector<Eigen::Vector3d> pts1, pts2;
+
+  for (double tc = 0.0; tc <= duration + 1e-3; tc += dt) {
+    Eigen::Vector3d pc = pos.evaluateDeBoorT(tc);
+    pc[2] += 0.15;
+    double yc = yaw.evaluateDeBoorT(tc)[0];
+    double pc_angle = pitch.evaluateDeBoorT(tc)[0];
+    Eigen::Vector3d dir(cos(pc_angle) * cos(yc), cos(pc_angle) * sin(yc), -sin(pc_angle));
+    pts1.push_back(pc);
+    pts2.push_back(pc + 1.0 * dir);
+  }
+  displayLineList(pts1, pts2, 0.04, Eigen::Vector4d(1, 0.5, 0, 1), 0, 5);
+}
+
 void PlanningVisualization::drawYawPath(
   fast_planner::NonUniformBspline & pos, const vector<double> & yaw, const double & dt)
 {

@@ -183,6 +183,10 @@ struct PlanParameters
                                          // control points
   double clearance_;
   int dynamic_;
+  /* nonholonomic robot: the body axis follows the trajectory tangent, so the
+   * heading limits below are enforced by the position optimization itself */
+  bool nonholonomic_;
+  double max_yaw_rate_, max_pitch_rate_, min_vel_;
   /* processing time */
   double time_search_ = 0.0;
   double time_optimize_ = 0.0;
@@ -199,6 +203,7 @@ struct LocalTrajData
   Eigen::Vector3d start_pos_;
   fast_planner::NonUniformBspline position_traj_, velocity_traj_, acceleration_traj_, yaw_traj_, yawdot_traj_,
     yawdotdot_traj_;
+  fast_planner::NonUniformBspline pitch_traj_, pitchdot_traj_, pitchdotdot_traj_;
 };
 
 class MidPlanData
@@ -230,6 +235,7 @@ public:
 
   // heading planning
   vector<double> path_yaw_;
+  vector<double> path_pitch_;
   double dt_yaw_;
   double dt_yaw_path_;
 

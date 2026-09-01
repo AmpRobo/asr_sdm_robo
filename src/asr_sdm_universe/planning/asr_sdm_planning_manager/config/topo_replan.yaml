@@ -69,6 +69,13 @@
       use_geometric_path: false
       use_topo_path: true
       use_optimization: true
+      # The head is driven as a nonholonomic body: yaw and pitch follow the
+      # trajectory tangent, so their limits constrain the position trajectory.
+      nonholonomic: true
+      # Mirror the rate limits enforced by asr_sdm_control_manager.
+      max_yaw_rate: 0.5
+      max_pitch_rate: 0.5
+      min_vel: 0.1
 
     topo_prm:
       sample_inflate_x: 1.0
@@ -92,6 +99,14 @@
       lambda5: 1.5
       lambda6: 10.0
       lambda7: 20.0
+      # Nonholonomic heading penalties on the position trajectory. Each weight
+      # pairs with the limit of the same name above and each penalty is
+      # normalized by that limit, so the weights are directly comparable to
+      # lambda1 and to each other. Yaw rate and pitch rate are evaluated
+      # equivalently, so they share the same weight by default.
+      lambda_yaw_rate: 10.0
+      lambda_pitch_rate: 10.0
+      lambda_min_vel: 1.0
       dist0: 0.4
       dist1: 0.0
       algorithm1: 15

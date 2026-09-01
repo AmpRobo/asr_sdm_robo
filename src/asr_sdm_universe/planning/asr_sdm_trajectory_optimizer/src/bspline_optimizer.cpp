@@ -4,6 +4,10 @@
 #include "asr_sdm_trajectory_optimizer/bspline_optimizer.h"
 
 #include <nlopt.h>
+
+#include <algorithm>
+#include <cmath>
+#include <limits>
 // using namespace std;
 
 namespace amprobo
@@ -15,10 +19,13 @@ const int BsplineOptimizer::FEASIBILITY = (1 << 2);
 const int BsplineOptimizer::ENDPOINT = (1 << 3);
 const int BsplineOptimizer::GUIDE = (1 << 4);
 const int BsplineOptimizer::WAYPOINTS = (1 << 6);
+const int BsplineOptimizer::NONHOLONOMIC = (1 << 7);
 
 const int BsplineOptimizer::GUIDE_PHASE = BsplineOptimizer::SMOOTHNESS | BsplineOptimizer::GUIDE;
 const int BsplineOptimizer::NORMAL_PHASE =
   BsplineOptimizer::SMOOTHNESS | BsplineOptimizer::DISTANCE | BsplineOptimizer::FEASIBILITY;
+const int BsplineOptimizer::NONHOLONOMIC_PHASE =
+  BsplineOptimizer::NORMAL_PHASE | BsplineOptimizer::NONHOLONOMIC;
 
 namespace
 {
@@ -37,6 +44,129 @@ int declareGetInt(
   return nh->get_parameter(name).as_int();
 }
 
+/* Speed below which the trajectory tangent, and therefore the heading of a
+ * nonholonomic robot, carries no usable direction information. This is kept
+ * well above machine epsilon so the atan2 Jacobians stay bounded. */
+constexpr double kTangentEps = 1.0e-4;
+constexpr double kMinHeadingSpeed = 0.02;
+
+double wrapToPi(double angle)
+{
+  while (angle > M_PI) angle -= 2.0 * M_PI;
+  while (angle < -M_PI) angle += 2.0 * M_PI;
+  return angle;
+}
+
+enum class HeadingAxis { kYaw, kPitch };
+
+/* Heading of a robot whose body x-axis follows its velocity, together with the
+ * Jacobian of that heading with respect to the velocity. The convention matches
+ * R = Rz(yaw) * Ry(pitch) used by asr_sdm_control_manager, so a positive pitch
+ * points the body axis downwards. */
+struct Heading
+{
+  double yaw = 0.0;
+  double pitch = 0.0;
+  Eigen::Vector3d dyaw_dv = Eigen::Vector3d::Zero();
+  Eigen::Vector3d dpitch_dv = Eigen::Vector3d::Zero();
+  bool valid = false;
+
+  double angle(HeadingAxis axis) const { return axis == HeadingAxis::kYaw ? yaw : pitch; }
+
+  const Eigen::Vector3d & jacobian(HeadingAxis axis) const
+  {
+    return axis == HeadingAxis::kYaw ? dyaw_dv : dpitch_dv;
+  }
+};
+
+/* One-sided hinges on a quantity normalized by its own limit. The quadratic is
+ * mapped through x^2 / (1 + x^2) so a large initial violation saturates instead
+ * of producing ruinous NLopt steps that scribble the control polygon. */
+bool overLimitPenalty(double value, double limit, double & cost, double & dcost_dvalue)
+{
+  const double magnitude = std::fabs(value);
+  if (limit <= 0.0 || magnitude <= limit) return false;
+
+  const double excess = magnitude / limit - 1.0;
+  const double e2 = excess * excess;
+  const double den = 1.0 + e2;
+  cost = e2 / den;
+  dcost_dvalue = 2.0 * excess / (den * den * limit) * (value < 0.0 ? -1.0 : 1.0);
+
+  return true;
+}
+
+bool underLimitPenalty(double value, double limit, double & cost, double & dcost_dvalue)
+{
+  if (limit <= 0.0 || value >= limit || value < kTangentEps) return false;
+
+  const double deficit = 1.0 - value / limit;
+  const double e2 = deficit * deficit;
+  const double den = 1.0 + e2;
+  cost = e2 / den;
+  dcost_dvalue = -2.0 * deficit / (den * den * limit);
+
+  return true;
+}
+
+Heading headingFromVelocity(const Eigen::Vector3d & v)
+{
+  Heading h;
+
+  const double sxy2 = v(0) * v(0) + v(1) * v(1);
+  const double v2 = sxy2 + v(2) * v(2);
+  const double min_speed2 = kMinHeadingSpeed * kMinHeadingSpeed;
+  if (sxy2 < min_speed2 || v2 < min_speed2) return h;
+
+  const double sxy = std::sqrt(sxy2);
+  h.yaw = std::atan2(v(1), v(0));
+  h.pitch = std::atan2(-v(2), sxy);
+  h.dyaw_dv << -v(1) / sxy2, v(0) / sxy2, 0.0;
+  h.dpitch_dv << v(2) * v(0) / (sxy * v2), v(2) * v(1) / (sxy * v2), -sxy / v2;
+  h.valid = true;
+
+  return h;
+}
+
+/* Yaw and pitch are two angles of the same tangent direction and the robot
+ * bounds the rate of both, so they are evaluated by one implementation that only
+ * differs in which angle it reads out of the heading. Yaw needs wrapping because
+ * it is periodic; pitch stays inside (-pi/2, pi/2), where wrapping is a no-op.
+ *
+ * A rate spans two consecutive velocity control points, v_i = (q_{i+1} - q_i)/dt,
+ * so each penalty couples three consecutive position control points. */
+void headingRateCost(
+  const vector<Eigen::Vector3d> & q, double ts, HeadingAxis axis, double max_rate, double & cost,
+  vector<Eigen::Vector3d> & gradient)
+{
+  cost = 0.0;
+  Eigen::Vector3d zero(0, 0, 0);
+  std::fill(gradient.begin(), gradient.end(), zero);
+
+  const int vel_num = static_cast<int>(q.size()) - 1;
+
+  for (int i = 0; i + 1 < vel_num; i++) {
+    const Heading h0 = headingFromVelocity((q[i + 1] - q[i]) / ts);
+    const Heading h1 = headingFromVelocity((q[i + 2] - q[i + 1]) / ts);
+    if (!h0.valid || !h1.valid) continue;
+
+    const double rate = wrapToPi(h1.angle(axis) - h0.angle(axis)) / ts;
+
+    double term = 0.0, dterm_drate = 0.0;
+    if (!overLimitPenalty(rate, max_rate, term, dterm_drate)) continue;
+
+    cost += term;
+
+    const double dcost_dangle = dterm_drate / ts;
+    const Eigen::Vector3d g1 = dcost_dangle * h1.jacobian(axis) / ts;
+    const Eigen::Vector3d g0 = -dcost_dangle * h0.jacobian(axis) / ts;
+
+    gradient[i + 2] += g1;
+    gradient[i + 1] += g0 - g1;
+    gradient[i + 0] += -g0;
+  }
+}
+
 }  // namespace
 
 void BsplineOptimizer::setParam(const std::shared_ptr<rclcpp::Node> & nh)
@@ -49,10 +179,16 @@ void BsplineOptimizer::setParam(const std::shared_ptr<rclcpp::Node> & nh)
   lambda6_ = declareGetDouble(nh, "optimization.lambda6", -1.0);
   lambda7_ = declareGetDouble(nh, "optimization.lambda7", -1.0);
   lambda8_ = declareGetDouble(nh, "optimization.lambda8", -1.0);
+  lambda_yaw_rate_ = declareGetDouble(nh, "optimization.lambda_yaw_rate", 0.0);
+  lambda_pitch_rate_ = declareGetDouble(nh, "optimization.lambda_pitch_rate", 0.0);
+  lambda_min_vel_ = declareGetDouble(nh, "optimization.lambda_min_vel", 0.0);
 
   dist0_ = declareGetDouble(nh, "optimization.dist0", -1.0);
   max_vel_ = declareGetDouble(nh, "manager.max_vel", -1.0);
   max_acc_ = declareGetDouble(nh, "manager.max_acc", -1.0);
+  max_yaw_rate_ = declareGetDouble(nh, "manager.max_yaw_rate", 0.35);
+  max_pitch_rate_ = declareGetDouble(nh, "manager.max_pitch_rate", 0.35);
+  min_vel_ = declareGetDouble(nh, "manager.min_vel", 0.0);
   visib_min_ = declareGetDouble(nh, "optimization.visib_min", -1.0);
   dlmin_ = declareGetDouble(nh, "optimization.dlmin", -1.0);
   wnl_ = declareGetDouble(nh, "optimization.wnl", -1.0);
@@ -118,6 +254,7 @@ void BsplineOptimizer::setCostFunction(const int & cost_code)
   if (cost_function_ & ENDPOINT) cost_str += " endpt |";
   if (cost_function_ & GUIDE) cost_str += " guide |";
   if (cost_function_ & WAYPOINTS) cost_str += " waypt |";
+  if (cost_function_ & NONHOLONOMIC) cost_str += " nonho |";
 
   RCLCPP_INFO(
     rclcpp::get_logger("asr_sdm_trajectory_optimizerimizer"), "cost func: %s", cost_str.c_str());
@@ -161,6 +298,9 @@ void BsplineOptimizer::optimize()
   g_endpoint_.resize(pt_num);
   g_waypoints_.resize(pt_num);
   g_guide_.resize(pt_num);
+  g_yaw_rate_.resize(pt_num);
+  g_pitch_rate_.resize(pt_num);
+  g_min_vel_.resize(pt_num);
 
   if (cost_function_ & ENDPOINT) {
     variable_num_ = dim_ * (pt_num - order_);
@@ -420,6 +560,62 @@ void BsplineOptimizer::calcGuideCost(
   }
 }
 
+/* The heading of a nonholonomic robot cannot be chosen freely: its body x-axis
+ * is the trajectory tangent. The costs below therefore express the yaw and pitch
+ * rate limits of the robot directly on the position control points.
+ *
+ * Heading angles are evaluated on the velocity control points of the position
+ * B-spline, v_i = (q_{i+1} - q_i) / dt, which is the same discretization the
+ * velocity feasibility cost uses. */
+void BsplineOptimizer::calcYawRateCost(
+  const vector<Eigen::Vector3d> & q, double & cost, vector<Eigen::Vector3d> & gradient)
+{
+  headingRateCost(q, bspline_interval_, HeadingAxis::kYaw, max_yaw_rate_, cost, gradient);
+}
+
+void BsplineOptimizer::calcPitchRateCost(
+  const vector<Eigen::Vector3d> & q, double & cost, vector<Eigen::Vector3d> & gradient)
+{
+  headingRateCost(q, bspline_interval_, HeadingAxis::kPitch, max_pitch_rate_, cost, gradient);
+}
+
+/* A screw-driven robot cannot turn on the spot, and a vanishing velocity leaves
+ * the commanded heading undefined. Keeping the forward speed above min_vel_
+ * keeps the tangent, and therefore the heading, well posed. */
+void BsplineOptimizer::calcForwardSpeedCost(
+  const vector<Eigen::Vector3d> & q, double & cost, vector<Eigen::Vector3d> & gradient)
+{
+  cost = 0.0;
+  Eigen::Vector3d zero(0, 0, 0);
+  std::fill(gradient.begin(), gradient.end(), zero);
+
+  const double ts = bspline_interval_;
+  const int vel_num = static_cast<int>(q.size()) - 1;
+  const int first = order_;
+  const int last = vel_num - order_;
+
+  for (int i = first; i < last; i++) {
+    const Eigen::Vector3d v = (q[i + 1] - q[i]) / ts;
+    const double speed = v.norm();
+
+    double term = 0.0, dterm_dspeed = 0.0;
+    if (!underLimitPenalty(speed, min_vel_, term, dterm_dspeed)) continue;
+
+    cost += term;
+
+    const Eigen::Vector3d g = (dterm_dspeed / (speed * ts)) * v;
+    gradient[i + 1] += g;
+    gradient[i + 0] += -g;
+  }
+}
+
+bool BsplineOptimizer::useNonholonomicCost() const
+{
+  // Heading is only meaningful for a 3D position spline; the 1D heading splines
+  // reuse this solver with a quadratic cost and must not enter here.
+  return (cost_function_ & NONHOLONOMIC) && dim_ == 3;
+}
+
 void BsplineOptimizer::combineCost(
   const std::vector<double> & x, std::vector<double> & grad, double & f_combine)
 {
@@ -464,6 +660,8 @@ void BsplineOptimizer::combineCost(
   /*  evaluate costs and their gradient  */
   double f_smoothness, f_distance, f_feasibility, f_endpoint, f_guide, f_waypoints;
   f_smoothness = f_distance = f_feasibility = f_endpoint = f_guide = f_waypoints = 0.0;
+  double f_yaw_rate, f_pitch_rate, f_min_vel;
+  f_yaw_rate = f_pitch_rate = f_min_vel = 0.0;
 
   if (cost_function_ & SMOOTHNESS) {
     calcSmoothnessCost(g_q_, f_smoothness, g_smoothness_);
@@ -500,6 +698,25 @@ void BsplineOptimizer::combineCost(
     f_combine += lambda7_ * f_waypoints;
     for (int i = 0; i < variable_num_ / dim_; i++)
       for (int j = 0; j < dim_; j++) grad[dim_ * i + j] += lambda7_ * g_waypoints_[i + order_](j);
+  }
+  if (useNonholonomicCost()) {
+    calcYawRateCost(g_q_, f_yaw_rate, g_yaw_rate_);
+    f_combine += lambda_yaw_rate_ * f_yaw_rate;
+    for (int i = 0; i < variable_num_ / dim_; i++)
+      for (int j = 0; j < dim_; j++)
+        grad[dim_ * i + j] += lambda_yaw_rate_ * g_yaw_rate_[i + order_](j);
+
+    calcPitchRateCost(g_q_, f_pitch_rate, g_pitch_rate_);
+    f_combine += lambda_pitch_rate_ * f_pitch_rate;
+    for (int i = 0; i < variable_num_ / dim_; i++)
+      for (int j = 0; j < dim_; j++)
+        grad[dim_ * i + j] += lambda_pitch_rate_ * g_pitch_rate_[i + order_](j);
+
+    calcForwardSpeedCost(g_q_, f_min_vel, g_min_vel_);
+    f_combine += lambda_min_vel_ * f_min_vel;
+    for (int i = 0; i < variable_num_ / dim_; i++)
+      for (int j = 0; j < dim_; j++)
+        grad[dim_ * i + j] += lambda_min_vel_ * g_min_vel_[i + order_](j);
   }
   /*  print cost  */
   // if ((cost_function_ & WAYPOINTS) && iter_num_ % 10 == 0) {

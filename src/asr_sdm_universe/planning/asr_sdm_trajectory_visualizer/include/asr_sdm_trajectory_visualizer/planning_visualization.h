@@ -114,6 +114,9 @@ public:
 
   // SECTION developing
   void drawYawTraj(fast_planner::NonUniformBspline & pos, fast_planner::NonUniformBspline & yaw, const double & dt);
+  void drawHeadingTraj(
+    fast_planner::NonUniformBspline & pos, fast_planner::NonUniformBspline & yaw,
+    fast_planner::NonUniformBspline & pitch, const double & dt);
   void drawYawPath(fast_planner::NonUniformBspline & pos, const vector<double> & yaw, const double & dt);
 };
 }  // namespace amprobo

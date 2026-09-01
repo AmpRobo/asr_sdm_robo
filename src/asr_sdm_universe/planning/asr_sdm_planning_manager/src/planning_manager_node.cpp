@@ -13,6 +13,7 @@
 
 #include <algorithm>
 #include <chrono>
+#include <cmath>
 #include <memory>
 #include <thread>
 namespace backward
@@ -22,6 +23,17 @@ backward::SignalHandling sh;
 
 namespace amprobo
 {
+
+namespace
+{
+
+Eigen::Vector3d headingBodyX(double yaw, double pitch)
+{
+  return Eigen::Vector3d(
+    std::cos(pitch) * std::cos(yaw), std::cos(pitch) * std::sin(yaw), -std::sin(pitch));
+}
+
+}  // namespace
 
 // SECTION interfaces for setup and query
 
@@ -46,6 +58,10 @@ void PlanningManager::initPlanModules(const std::shared_ptr<rclcpp::Node> & nh)
   node_->declare_parameter("manager.clearance_threshold", -1.0);
   node_->declare_parameter("manager.local_segment_length", -1.0);
   node_->declare_parameter("manager.control_points_distance", -1.0);
+  node_->declare_parameter("manager.nonholonomic", false);
+  node_->declare_parameter("manager.max_yaw_rate", 0.35);
+  node_->declare_parameter("manager.max_pitch_rate", 0.35);
+  node_->declare_parameter("manager.min_vel", 0.0);
   pp_.max_vel_ = node_->get_parameter("manager.max_vel").as_double();
   pp_.max_acc_ = node_->get_parameter("manager.max_acc").as_double();
   pp_.max_jerk_ = node_->get_parameter("manager.max_jerk").as_double();
@@ -53,6 +69,10 @@ void PlanningManager::initPlanModules(const std::shared_ptr<rclcpp::Node> & nh)
   pp_.clearance_ = node_->get_parameter("manager.clearance_threshold").as_double();
   pp_.local_traj_len_ = node_->get_parameter("manager.local_segment_length").as_double();
   pp_.ctrl_pt_dist = node_->get_parameter("manager.control_points_distance").as_double();
+  pp_.nonholonomic_ = node_->get_parameter("manager.nonholonomic").as_bool();
+  pp_.max_yaw_rate_ = node_->get_parameter("manager.max_yaw_rate").as_double();
+  pp_.max_pitch_rate_ = node_->get_parameter("manager.max_pitch_rate").as_double();
+  pp_.min_vel_ = node_->get_parameter("manager.min_vel").as_double();
 
   node_->declare_parameter("manager.use_geometric_path", false);
   node_->declare_parameter("manager.use_topo_path", false);
@@ -93,6 +113,29 @@ void PlanningManager::initPlanModules(const std::shared_ptr<rclcpp::Node> & nh)
 void PlanningManager::setGlobalWaypoints(vector<Eigen::Vector3d> & waypoints)
 {
   plan_data_.global_waypoints_ = waypoints;
+}
+
+void PlanningManager::setStartMotion(
+  const Eigen::Vector3d & start_vel, const Eigen::Vector3d & start_acc,
+  const Eigen::Vector3d & start_yaw, const Eigen::Vector3d & start_pitch)
+{
+  start_yaw_ = start_yaw;
+  start_pitch_ = start_pitch;
+
+  const Eigen::Vector3d dir = headingBodyX(start_yaw(0), start_pitch(0));
+  if (pp_.nonholonomic_ && dir.squaredNorm() > 1.0e-12) {
+    const Eigen::Vector3d heading = dir.normalized();
+    double speed = start_vel.norm();
+    if (speed < pp_.min_vel_) speed = pp_.min_vel_;
+    start_vel_plan_ = speed * heading;
+    start_acc_plan_ = start_acc.dot(heading) * heading;
+    SPDLOG_INFO(
+      "nonholonomic start: yaw={:.3f} pitch={:.3f} speed={:.3f}", start_yaw(0), start_pitch(0),
+      start_vel_plan_.norm());
+  } else {
+    start_vel_plan_ = start_vel;
+    start_acc_plan_ = start_acc;
+  }
 }
 
 bool PlanningManager::checkTrajCollision(double & distance)
@@ -151,6 +194,8 @@ vector<Eigen::Vector3d> PlanningManager::buildGlobalWaypoints(const Eigen::Vecto
 
   points.insert(points.begin(), start_pos);
 
+  if (pp_.nonholonomic_) insertNonholonomicStartArc(points);
+
   // Insert intermediate points when consecutive waypoints are farther than dist_thresh.
   vector<Eigen::Vector3d> inter_points;
   const double dist_thresh = 4.0;
@@ -179,6 +224,56 @@ vector<Eigen::Vector3d> PlanningManager::buildGlobalWaypoints(const Eigen::Vecto
   return inter_points;
 }
 
+void PlanningManager::insertNonholonomicStartArc(vector<Eigen::Vector3d> & points)
+{
+  if (points.size() < 2) return;
+
+  const Eigen::Vector3d start = points.front();
+  const Eigen::Vector3d goal = points[1];
+  Eigen::Vector3d heading = headingBodyX(start_yaw_(0), start_pitch_(0));
+  if (heading.squaredNorm() < 1.0e-12) return;
+  heading.normalize();
+
+  const Eigen::Vector3d to_goal = goal - start;
+  const double dist = to_goal.norm();
+  if (dist < 1.0e-3) return;
+  const Eigen::Vector3d goal_dir = to_goal / dist;
+
+  const double ang = std::acos(std::max(-1.0, std::min(1.0, heading.dot(goal_dir))));
+  if (ang < 0.15) return;
+
+  const double omega = std::max(1.0e-3, std::min(pp_.max_yaw_rate_, pp_.max_pitch_rate_));
+  const double radius = std::max(pp_.max_vel_, pp_.min_vel_) / omega;
+  const double arc_len = std::min(ang * radius, 0.5 * dist);
+  if (arc_len < 0.5) return;
+  const double alpha = arc_len / radius;
+
+  Eigen::Vector3d axis = heading.cross(goal_dir);
+  if (axis.squaredNorm() < 1.0e-12) {
+    axis = heading.cross(Eigen::Vector3d::UnitZ());
+    if (axis.squaredNorm() < 1.0e-12) axis = heading.cross(Eigen::Vector3d::UnitY());
+  }
+  axis.normalize();
+  const Eigen::Vector3d radial = axis.cross(heading);
+
+  const int n = std::max(1, static_cast<int>(std::lround(arc_len / 4.0)));
+  vector<Eigen::Vector3d> arc;
+  arc.reserve(static_cast<size_t>(n));
+  for (int k = 1; k <= n; ++k) {
+    const double theta = alpha * static_cast<double>(k) / static_cast<double>(n);
+    const Eigen::Vector3d pt =
+      start + radius * (heading * std::sin(theta) + radial * (1.0 - std::cos(theta)));
+    if ((pt - goal).norm() < 0.5) break;
+    arc.push_back(pt);
+  }
+  if (arc.empty()) return;
+
+  points.insert(points.begin() + 1, arc.begin(), arc.end());
+  SPDLOG_INFO(
+    "nonholonomic start arc: heading error {:.1f} deg, {} seed waypoints, radius {:.2f} m",
+    ang * 180.0 / M_PI, static_cast<int>(arc.size()), radius);
+}
+
 PolynomialTraj PlanningManager::fitGlobalMinSnapTraj(const vector<Eigen::Vector3d> & points)
 {
   // Convert waypoints to a position matrix and allocate segment times by distance / max_vel.
@@ -198,7 +293,9 @@ PolynomialTraj PlanningManager::fitGlobalMinSnapTraj(const vector<Eigen::Vector3
   time(time.rows() - 1) *= 2.0;
   time(time.rows() - 1) = std::max(1.0, time(time.rows() - 1));
 
-  return minSnapTraj(pos, zero, zero, zero, zero, time);
+  const Eigen::Vector3d start_vel = pp_.nonholonomic_ ? start_vel_plan_ : zero;
+  const Eigen::Vector3d start_acc = pp_.nonholonomic_ ? start_acc_plan_ : zero;
+  return minSnapTraj(pos, start_vel, zero, start_acc, zero, time);
 }
 
 void PlanningManager::initLocalTrajFromGlobal(const rclcpp::Time & time_now)
@@ -304,15 +401,21 @@ void PlanningManager::selectBestTraj(fast_planner::NonUniformBspline & traj)
   traj = trajs[0];
 }
 
+/* On a nonholonomic robot the heading is not an independent degree of freedom,
+ * so the yaw and pitch limits are optimized together with the position. */
+int PlanningManager::localCostFunction() const
+{
+  return pp_.nonholonomic_ ? BsplineOptimizer::NONHOLONOMIC_PHASE : BsplineOptimizer::NORMAL_PHASE;
+}
+
 void PlanningManager::refineTraj(fast_planner::NonUniformBspline & best_traj, double & time_inc)
 {
   rclcpp::Time t1 = node_->now();
   time_inc = 0.0;
   double dt, t_inc;
 
-  // int cost_function = BsplineOptimizer::NORMAL_PHASE | BsplineOptimizer::VISIBILITY;
   Eigen::MatrixXd ctrl_pts = best_traj.getControlPoint();
-  int cost_function = BsplineOptimizer::NORMAL_PHASE;
+  int cost_function = localCostFunction();
 
   best_traj.setPhysicalLimits(pp_.max_vel_, pp_.max_acc_);
   double ratio = best_traj.checkRatio();
@@ -404,8 +507,8 @@ void PlanningManager::optimizeTopoBspline(
 
   // second phase, normal optimization
 
-  Eigen::MatrixXd opt_ctrl_pts2 = bspline_optimizers_[traj_id]->BsplineOptimizeTraj(
-    opt_ctrl_pts1, dt, BsplineOptimizer::NORMAL_PHASE, 1, 1);
+  Eigen::MatrixXd opt_ctrl_pts2 =
+    bspline_optimizers_[traj_id]->BsplineOptimizeTraj(opt_ctrl_pts1, dt, localCostFunction(), 1, 1);
 
   plan_data_.topo_traj_pos2_[traj_id] = fast_planner::NonUniformBspline(opt_ctrl_pts2, 3, dt);
 
@@ -512,73 +615,108 @@ void PlanningManager::findCollisionRange(
 
 // !SECTION
 
-void PlanningManager::planYaw(const Eigen::Vector3d & start_yaw)
+bool PlanningManager::tangentAtTime(double t, double dt, Eigen::Vector3d & dir)
 {
-  SPDLOG_INFO("plan yaw");
-  auto t1 = node_->now();
-  // calculate waypoints of heading
+  constexpr double kMinTangent = 1.0e-4;
 
+  dir = local_data_.velocity_traj_.evaluateDeBoorT(t);
+  if (dir.norm() > kMinTangent) return true;
+
+  // The segment starts and ends at rest, where the velocity carries no
+  // direction; fall back to the chord spanning one heading sample.
   auto & pos = local_data_.position_traj_;
-  double duration = pos.getTimeSum();
+  const double duration = pos.getTimeSum();
+  const double t0 = max(0.0, min(t, duration - dt));
+  dir = pos.evaluateDeBoorT(min(duration, t0 + dt)) - pos.evaluateDeBoorT(t0);
 
+  return dir.norm() > kMinTangent;
+}
+
+fast_planner::NonUniformBspline PlanningManager::fitAngleBspline(
+  const vector<Eigen::Vector3d> & waypts, const vector<int> & waypt_idx,
+  const Eigen::Vector3d & start_state, const Eigen::Vector3d & end_state, double dt,
+  int optimizer_id)
+{
+  const int seg_num = static_cast<int>(waypts.size());
+
+  Eigen::MatrixXd ctrl_pts(seg_num + 3, 1);
+  ctrl_pts.setZero();
+
+  // Boundary states become the three leading and trailing control points, which
+  // the solver holds fixed.
+  Eigen::Matrix3d states2pts;
+  states2pts << 1.0, -dt, (1 / 3.0) * dt * dt, 1.0, 0.0, -(1 / 6.0) * dt * dt, 1.0, dt,
+    (1 / 3.0) * dt * dt;
+  ctrl_pts.block(0, 0, 3, 1) = states2pts * start_state;
+  ctrl_pts.block(seg_num, 0, 3, 1) = states2pts * end_state;
+
+  bspline_optimizers_[optimizer_id]->setWaypoints(waypts, waypt_idx);
+  const int cost_func = BsplineOptimizer::SMOOTHNESS | BsplineOptimizer::WAYPOINTS;
+  ctrl_pts = bspline_optimizers_[optimizer_id]->BsplineOptimizeTraj(ctrl_pts, dt, cost_func, 1, 1);
+
+  fast_planner::NonUniformBspline traj;
+  traj.setUniformBspline(ctrl_pts, 3, dt);
+  return traj;
+}
+
+/* Yaw and pitch are no longer planned as free degrees of freedom: a
+ * nonholonomic robot points where it moves, so both angles are read off the
+ * tangent of the position trajectory. How fast that tangent may turn is bounded
+ * by the nonholonomic terms of the position cost function, which is what makes
+ * the resulting heading trackable. */
+void PlanningManager::planHeading(
+  const Eigen::Vector3d & start_yaw, const Eigen::Vector3d & start_pitch)
+{
+  auto t1 = node_->now();
+
+  const double duration = local_data_.position_traj_.getTimeSum();
   double dt_yaw = 0.3;
   int seg_num = ceil(duration / dt_yaw);
   dt_yaw = duration / seg_num;
 
-  const double forward_t = 2.0;
-  double last_yaw = start_yaw(0);
-  vector<Eigen::Vector3d> waypts;
+  vector<Eigen::Vector3d> yaw_waypts, pitch_waypts;
   vector<int> waypt_idx;
-
-  // seg_num -> seg_num - 1 points for constraint excluding the boundary states
+  double last_yaw = start_yaw(0);
+  double last_pitch = start_pitch(0);
 
   for (int i = 0; i < seg_num; ++i) {
-    double tc = i * dt_yaw;
-    Eigen::Vector3d pc = pos.evaluateDeBoorT(tc);
-    double tf = min(duration, tc + forward_t);
-    Eigen::Vector3d pf = pos.evaluateDeBoorT(tf);
-    Eigen::Vector3d pd = pf - pc;
+    double yaw = last_yaw;
+    double pitch = last_pitch;
 
-    Eigen::Vector3d waypt;
-    if (pd.norm() > 1e-6) {
-      waypt(0) = atan2(pd(1), pd(0));
-      waypt(1) = waypt(2) = 0.0;
-      calcNextYaw(last_yaw, waypt(0));
-    } else {
-      waypt = waypts.back();
+    Eigen::Vector3d dir;
+    if (tangentAtTime(i * dt_yaw, dt_yaw, dir)) {
+      yaw = atan2(dir(1), dir(0));
+      calcNextYaw(last_yaw, yaw);
+      pitch = atan2(-dir(2), dir.head<2>().norm());
     }
-    waypts.push_back(waypt);
+
+    yaw_waypts.push_back(Eigen::Vector3d(yaw, 0.0, 0.0));
+    pitch_waypts.push_back(Eigen::Vector3d(pitch, 0.0, 0.0));
     waypt_idx.push_back(i);
+
+    last_yaw = yaw;
+    last_pitch = pitch;
   }
 
-  // calculate initial control points with boundary state constraints
+  // The robot comes to rest at the end of the segment, so hold the last heading.
+  const Eigen::Vector3d end_yaw(last_yaw, 0.0, 0.0);
+  const Eigen::Vector3d end_pitch(last_pitch, 0.0, 0.0);
 
-  Eigen::MatrixXd yaw(seg_num + 3, 1);
-  yaw.setZero();
-
-  Eigen::Matrix3d states2pts;
-  states2pts << 1.0, -dt_yaw, (1 / 3.0) * dt_yaw * dt_yaw, 1.0, 0.0, -(1 / 6.0) * dt_yaw * dt_yaw,
-    1.0, dt_yaw, (1 / 3.0) * dt_yaw * dt_yaw;
-  yaw.block(0, 0, 3, 1) = states2pts * start_yaw;
-
-  Eigen::Vector3d end_v = local_data_.velocity_traj_.evaluateDeBoorT(duration - 0.1);
-  Eigen::Vector3d end_yaw(atan2(end_v(1), end_v(0)), 0, 0);
-  calcNextYaw(last_yaw, end_yaw(0));
-  yaw.block(seg_num, 0, 3, 1) = states2pts * end_yaw;
-
-  // solve
-  bspline_optimizers_[1]->setWaypoints(waypts, waypt_idx);
-  int cost_func = BsplineOptimizer::SMOOTHNESS | BsplineOptimizer::WAYPOINTS;
-  yaw = bspline_optimizers_[1]->BsplineOptimizeTraj(yaw, dt_yaw, cost_func, 1, 1);
-
-  // update traj info
-  local_data_.yaw_traj_.setUniformBspline(yaw, 3, dt_yaw);
+  local_data_.yaw_traj_ = fitAngleBspline(yaw_waypts, waypt_idx, start_yaw, end_yaw, dt_yaw, 1);
   local_data_.yawdot_traj_ = local_data_.yaw_traj_.getDerivative();
   local_data_.yawdotdot_traj_ = local_data_.yawdot_traj_.getDerivative();
 
-  vector<double> path_yaw;
-  for (size_t i = 0; i < waypts.size(); ++i) path_yaw.push_back(waypts[i][0]);
-  plan_data_.path_yaw_ = path_yaw;
+  local_data_.pitch_traj_ =
+    fitAngleBspline(pitch_waypts, waypt_idx, start_pitch, end_pitch, dt_yaw, 2);
+  local_data_.pitchdot_traj_ = local_data_.pitch_traj_.getDerivative();
+  local_data_.pitchdotdot_traj_ = local_data_.pitchdot_traj_.getDerivative();
+
+  plan_data_.path_yaw_.clear();
+  plan_data_.path_pitch_.clear();
+  for (int i = 0; i < seg_num; ++i) {
+    plan_data_.path_yaw_.push_back(yaw_waypts[i](0));
+    plan_data_.path_pitch_.push_back(pitch_waypts[i](0));
+  }
   plan_data_.dt_yaw_ = dt_yaw;
   plan_data_.dt_yaw_path_ = dt_yaw;
 

@@ -27,9 +27,11 @@ public:
   static const int ENDPOINT;
   static const int GUIDE;
   static const int WAYPOINTS;
+  static const int NONHOLONOMIC;
 
   static const int GUIDE_PHASE;
   static const int NORMAL_PHASE;
+  static const int NONHOLONOMIC_PHASE;
 
   BsplineOptimizer() {}
   ~BsplineOptimizer() {}
@@ -92,9 +94,15 @@ private:
   double lambda6_;                // visibility cost weight
   double lambda7_;                // waypoints cost weight
   double lambda8_;                // acc smoothness
+  double lambda_yaw_rate_;        // yaw rate feasibility weight
+  double lambda_pitch_rate_;      // pitch rate feasibility weight
+  double lambda_min_vel_;         // minimum forward speed weight
                                   //
   double dist0_;                  // safe distance
   double max_vel_, max_acc_;      // dynamic limits
+  double max_yaw_rate_;           // heading rate limit [rad/s]
+  double max_pitch_rate_;         // pitch rate limit [rad/s]
+  double min_vel_;                // forward speed below which the tangent is ill-defined
   double visib_min_;              // threshold of visibility
   double wnl_;                    //
   double dlmin_;                  //
@@ -114,6 +122,9 @@ private:
   vector<Eigen::Vector3d> g_endpoint_;
   vector<Eigen::Vector3d> g_guide_;
   vector<Eigen::Vector3d> g_waypoints_;
+  vector<Eigen::Vector3d> g_yaw_rate_;
+  vector<Eigen::Vector3d> g_pitch_rate_;
+  vector<Eigen::Vector3d> g_min_vel_;
 
   int variable_num_;                   // optimization variables
   int iter_num_;                       // iteration of the solver
@@ -145,6 +156,20 @@ private:
     const vector<Eigen::Vector3d> & q, double & cost, vector<Eigen::Vector3d> & gradient);
   void calcViewCost(
     const vector<Eigen::Vector3d> & q, double & cost, vector<Eigen::Vector3d> & gradient);
+
+  /* nonholonomic heading costs: the body axis of the robot is slaved to the
+   * trajectory tangent, so yaw and pitch are functions of the position control
+   * points and their limits become constraints on the position trajectory.
+   * The two rate costs are evaluated equivalently, differing only in which
+   * angle of the tangent they bound. */
+  void calcYawRateCost(
+    const vector<Eigen::Vector3d> & q, double & cost, vector<Eigen::Vector3d> & gradient);
+  void calcPitchRateCost(
+    const vector<Eigen::Vector3d> & q, double & cost, vector<Eigen::Vector3d> & gradient);
+  void calcForwardSpeedCost(
+    const vector<Eigen::Vector3d> & q, double & cost, vector<Eigen::Vector3d> & gradient);
+
+  bool useNonholonomicCost() const;
   bool isQuadratic();
 
   /* for benckmark evaluation only */
