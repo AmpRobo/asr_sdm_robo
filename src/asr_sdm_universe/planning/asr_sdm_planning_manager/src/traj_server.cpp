@@ -277,16 +277,13 @@ void cmdCallback()
   cmd.yaw = yaw;
   cmd.yaw_dot = yawdot;
 
-  // Head-frame twist: forward along x, pitch about y, yaw about z.
-  // Axes match R = Rz(yaw) * Ry(pitch) used by asr_sdm_control_manager, so the
-  // body rates follow from the planned heading rates. The planner already keeps
-  // both within the limits the controller enforces.
+  // Head-frame twist: forward along x, pitch about y, yaw about z. No roll.
   cmd.vel.linear.x = vel.norm();
   cmd.vel.linear.y = 0.0;
   cmd.vel.linear.z = 0.0;
-  cmd.vel.angular.x = -yawdot * std::sin(pitch);
+  cmd.vel.angular.x = 0.0;
   cmd.vel.angular.y = pitchdot;
-  cmd.vel.angular.z = yawdot * std::cos(pitch);
+  cmd.vel.angular.z = yawdot;
 
   auto pos_err = pos_f - pos;
   // if (pos_err.norm() > 1e-3) {
