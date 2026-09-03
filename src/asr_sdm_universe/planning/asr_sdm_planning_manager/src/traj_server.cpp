@@ -293,7 +293,7 @@ void cmdCallback()
   // }
   // cmd.yaw_dot = 1.0;
 
-  last_yaw_ = cmd.yaw;
+  last_yaw_ = yaw;
   last_pitch_ = pitch;
 
   pos_cmd_pub->publish(cmd);
