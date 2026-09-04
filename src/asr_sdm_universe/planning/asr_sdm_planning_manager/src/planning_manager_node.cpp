@@ -115,6 +115,11 @@ void PlanningManager::setGlobalWaypoints(vector<Eigen::Vector3d> & waypoints)
   plan_data_.global_waypoints_ = waypoints;
 }
 
+void PlanningManager::setGoalHeading(const Eigen::Vector3d & heading)
+{
+  goal_heading_ = heading.squaredNorm() > 1.0e-12 ? heading.normalized() : Eigen::Vector3d::Zero();
+}
+
 void PlanningManager::setStartMotion(
   const Eigen::Vector3d & start_vel, const Eigen::Vector3d & start_acc,
   const Eigen::Vector3d & start_yaw, const Eigen::Vector3d & start_pitch)
@@ -295,7 +300,18 @@ PolynomialTraj PlanningManager::fitGlobalMinSnapTraj(const vector<Eigen::Vector3
 
   const Eigen::Vector3d start_vel = pp_.nonholonomic_ ? start_vel_plan_ : zero;
   const Eigen::Vector3d start_acc = pp_.nonholonomic_ ? start_acc_plan_ : zero;
-  return minSnapTraj(pos, start_vel, zero, start_acc, zero, time);
+
+  // A zero terminal velocity leaves the tangent at the goal with no direction,
+  // and the heading is read straight off that tangent, so the robot arrives
+  // facing whichever way the fit happened to curl in from. minSnapTraj imposes
+  // the terminal velocity as an equality constraint, so any nonzero speed pins
+  // the direction exactly; keep it small enough that the robot still stops.
+  constexpr double kMinArrivalSpeed = 1.0e-2;
+  const Eigen::Vector3d end_vel = goal_heading_.squaredNorm() > 1.0e-12
+                                    ? std::max(pp_.min_vel_, kMinArrivalSpeed) * goal_heading_
+                                    : zero;
+
+  return minSnapTraj(pos, start_vel, end_vel, start_acc, zero, time);
 }
 
 void PlanningManager::initLocalTrajFromGlobal(const rclcpp::Time & time_now)

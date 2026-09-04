@@ -37,6 +37,9 @@ public:
 
   void initPlanModules(const std::shared_ptr<rclcpp::Node> & nh);
   void setGlobalWaypoints(vector<Eigen::Vector3d> & waypoints);
+  // Body axis the robot should hold on arrival. A zero vector means no heading
+  // was requested and the trajectory ends at rest, as it did before.
+  void setGoalHeading(const Eigen::Vector3d & heading);
 
   bool checkTrajCollision(double & distance);
 
@@ -61,6 +64,7 @@ private:
   Eigen::Vector3d start_pitch_{Eigen::Vector3d::Zero()};
   Eigen::Vector3d start_vel_plan_{Eigen::Vector3d::Zero()};
   Eigen::Vector3d start_acc_plan_{Eigen::Vector3d::Zero()};
+  Eigen::Vector3d goal_heading_{Eigen::Vector3d::Zero()};
 
   void updateTrajInfo();
 

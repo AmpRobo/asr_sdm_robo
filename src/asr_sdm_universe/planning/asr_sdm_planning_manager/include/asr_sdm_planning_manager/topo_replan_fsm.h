@@ -59,6 +59,7 @@ private:
   Eigen::Vector3d start_pt_, start_vel_, start_acc_;  // start state
   Eigen::Vector3d start_yaw_, start_pitch_;           // heading state (angle, rate, acc)
   Eigen::Vector3d target_point_, end_vel_;            // target state
+  Eigen::Vector3d end_heading_;  // body axis to hold on arrival, zero if none requested
   int current_wp_;
 
   /* ROS utils */
@@ -82,6 +83,9 @@ private:
   /* ROS functions */
   void execFSMCallback();
   void checkCollisionCallback();
+  // Take a new target. arrival_heading is the body axis to hold once there, or
+  // zero when the caller has no orientation to offer.
+  void acceptTarget(const nav_msgs::msg::Path & path, const Eigen::Vector3d & arrival_heading);
   void waypointCallback(const nav_msgs::msg::Path::SharedPtr msg);
   void goalposeCallback(const geometry_msgs::msg::PoseStamped::SharedPtr msg);
   void odometryCallback(const nav_msgs::msg::Odometry::SharedPtr msg);

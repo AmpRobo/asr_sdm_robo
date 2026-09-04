@@ -19,6 +19,7 @@ void TopoReplanFSM::init(const std::shared_ptr<rclcpp::Node> & nh)
   collide_ = false;
   start_yaw_.setZero();
   start_pitch_.setZero();
+  end_heading_.setZero();
 
   /*  fsm param  */
   node_->declare_parameter("fsm.flight_type", std::string(""));
@@ -66,10 +67,13 @@ void TopoReplanFSM::init(const std::shared_ptr<rclcpp::Node> & nh)
     node_->create_publisher<asr_sdm_planning_manager::msg::Bspline>("/planning/bspline", 20);
 }
 
-void TopoReplanFSM::waypointCallback(const nav_msgs::msg::Path::SharedPtr msg)
+void TopoReplanFSM::acceptTarget(
+  const nav_msgs::msg::Path & path, const Eigen::Vector3d & arrival_heading)
 {
-  if (msg->poses[0].pose.position.z < -0.1) return;
+  if (path.poses[0].pose.position.z < -0.1) return;
   SPDLOG_INFO("Triggered!");
+
+  end_heading_ = arrival_heading;
 
   vector<Eigen::Vector3d> global_wp;
   if (flight_type_ == "REFERENCE_PATH") {
@@ -82,10 +86,14 @@ void TopoReplanFSM::waypointCallback(const nav_msgs::msg::Path::SharedPtr msg)
     }
   } else {
     if (flight_type_ == "MANUAL_TARGET") {
-      target_point_(0) = msg->poses[0].pose.position.x;
-      target_point_(1) = msg->poses[0].pose.position.y;
+      target_point_(0) = path.poses[0].pose.position.x;
+      target_point_(1) = path.poses[0].pose.position.y;
       target_point_(2) = 1.0;
-      SPDLOG_INFO("manual: {} {} {}", target_point_(0), target_point_(1), target_point_(2));
+      const bool has_heading = end_heading_.squaredNorm() > 1.0e-12;
+      SPDLOG_INFO(
+        "manual: {} {} {}, arrival heading {:.1f} deg (requested: {})", target_point_(0),
+        target_point_(1), target_point_(2),
+        has_heading ? atan2(end_heading_(1), end_heading_(0)) * 180.0 / M_PI : 0.0, has_heading);
 
     } else if (flight_type_ == "PRESET_TARGET") {
       target_point_(0) = waypoints_[current_wp_][0];
@@ -101,6 +109,7 @@ void TopoReplanFSM::waypointCallback(const nav_msgs::msg::Path::SharedPtr msg)
   }
 
   planning_manager_->setGlobalWaypoints(global_wp);
+  planning_manager_->setGoalHeading(end_heading_);
   end_vel_.setZero();
   have_target_ = true;
   trigger_ = true;
@@ -110,12 +119,28 @@ void TopoReplanFSM::waypointCallback(const nav_msgs::msg::Path::SharedPtr msg)
   }
 }
 
+void TopoReplanFSM::waypointCallback(const nav_msgs::msg::Path::SharedPtr msg)
+{
+  // A waypoint path is a list of positions; nothing in it asks for a particular
+  // heading on arrival, and its poses carry an identity orientation that would
+  // otherwise read as a request to face +x.
+  acceptTarget(*msg, Eigen::Vector3d::Zero());
+}
+
 void TopoReplanFSM::goalposeCallback(const geometry_msgs::msg::PoseStamped::SharedPtr msg)
 {
-  auto waypoint_msg = std::make_shared<nav_msgs::msg::Path>();
-  waypoint_msg->header = msg->header;
-  waypoint_msg->poses.push_back(*msg);
-  waypointCallback(waypoint_msg);
+  nav_msgs::msg::Path path;
+  path.header = msg->header;
+  path.poses.push_back(*msg);
+
+  // A goal pose, unlike a waypoint path, states which way the operator wants the
+  // robot to face once it gets there.
+  const auto & q = msg->pose.orientation;
+  const Eigen::Quaterniond orient(q.w, q.x, q.y, q.z);
+  Eigen::Vector3d heading = Eigen::Vector3d::Zero();
+  if (orient.norm() > 1.0e-6) heading = orient.normalized().toRotationMatrix().col(0);
+
+  acceptTarget(path, heading);
 }
 
 void TopoReplanFSM::odometryCallback(const nav_msgs::msg::Odometry::SharedPtr msg)
