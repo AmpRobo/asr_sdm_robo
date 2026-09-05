@@ -2,7 +2,18 @@
 
 GRAMPC is a nonlinear MPC framework that is suitable for dynamical systems with sampling times in the (sub)millisecond range and that allows for an efficient implementation on embedded hardware. The algorithm is based on an augmented Lagrangian formulation with a tailored gradient method for the inner minimization problem.
 
-This repository packages the plain C solver core together with its C++ interface as a single `ament_cmake` ROS 2 library target. The MATLAB/Simulink and Python interfaces, the standalone examples and the plain Makefile build have been removed; see the [upstream repository](https://github.com/grampc/grampc) for those.
+This package bundles [GRAMPC](https://github.com/grampc/grampc) and [GRAMPC-S](https://github.com/grampc/grampc-s), the stochastic MPC extension, into a single `ament_cmake` package. The MATLAB/Simulink and Python interfaces and the plain Makefile builds have been removed; see the upstream repositories for those.
+
+## Library targets
+
+The package exports two libraries:
+
+| Target | Contents |
+| --- | --- |
+| `grampc::grampc` | the plain C solver core |
+| `grampc::grampc_s` | GRAMPC-S: stochastic MPC, C++ interface using Eigen |
+
+`grampc_s` is the only C++ frontend: it provides `grampc::Grampc`, `grampc::ProblemDescription` and the `probfct` callbacks (`ffct`, `lfct`, ...). The raw-pointer C++ interface that upstream GRAMPC ships under `cpp/` has been dropped, because it defines the same symbols and could therefore never be linked alongside GRAMPC-S.
 
 ## Building
 
@@ -11,6 +22,8 @@ Place the package in the `src` directory of a ROS 2 workspace and build it:
 ```bash
 colcon build --packages-select grampc
 ```
+
+The GRAMPC-S examples are built by default; pass `-DGRAMPC_BUILD_EXAMPLES=OFF` via `--cmake-args` to skip them.
 
 ## Using the library
 
@@ -24,30 +37,32 @@ and link against the exported target in your `CMakeLists.txt`:
 
 ```cmake
 find_package(grampc REQUIRED)
-target_link_libraries(my_node grampc::grampc)
+target_link_libraries(my_node grampc::grampc_s)
 ```
 
-Headers are installed under the `grampc/` prefix. Derive from `grampc::ProblemDescription` to define an optimal control problem and hand it to `grampc::Grampc`:
+Include the umbrella header, derive from `grampc::ProblemDescription` and hand the problem to `grampc::Grampc`. Working examples for nine systems are in [examples/](examples).
 
 ```cpp
-#include <grampc/grampc.hpp>
+#include <grampc_s/grampc_s.hpp>
 
 class MyProblem : public grampc::ProblemDescription
 {
-  void ocp_dim(typeInt *Nx, typeInt *Nu, typeInt *Np, typeInt *Ng,
-               typeInt *Nh, typeInt *NgT, typeInt *NhT) override;
-  void ffct(typeRNum *out, ctypeRNum t, ctypeRNum *x, ctypeRNum *u,
-            ctypeRNum *p, const typeGRAMPCparam *param) override;
-  void dfdx_vec(typeRNum *out, ctypeRNum t, ctypeRNum *x, ctypeRNum *u,
-                ctypeRNum *p, ctypeRNum *vec, const typeGRAMPCparam *param) override;
+public:
+  MyProblem() : ProblemDescription(/*Nx*/ 2, /*Nu*/ 1, /*Np*/ 0,
+                                   /*Ng*/ 0, /*Nh*/ 0, /*NgT*/ 0, /*NhT*/ 0) {}
+
+  void ffct(VectorRef out, ctypeRNum t, VectorConstRef x, VectorConstRef u,
+            VectorConstRef p, const grampc::GrampcParam& param) override;
+  void dfdx_vec(VectorRef out, ctypeRNum t, VectorConstRef x, VectorConstRef u,
+                VectorConstRef p, VectorConstRef vec,
+                const grampc::GrampcParam& param) override;
   // cost terms and constraints as needed
 };
-
-MyProblem problem;
-grampc::Grampc solver(&problem);
-solver.setparam_real("Thor", 1.0);
-solver.run();
 ```
+
+Note the argument order of the `dfd*_vec` family: `(out, t, x, u, p, vec, param)`, as changed in GRAMPC 2.3.
+
+The Eigen-based `grampc::ProblemDescription` lives in `<grampc/eigen/problem_description.hpp>`; upstream keeps it under `python/include` because it is shared with the Python bindings.
 
 The plain C API remains available through `<grampc/grampc.h>`.
 
@@ -59,4 +74,4 @@ Please cite the paper when you are using results obtained with GRAMPC.
 
 ## License
 
-BSD-3-Clause, see [LICENSE.txt](LICENSE.txt).
+BSD-3-Clause, see [LICENSE.txt](LICENSE.txt) and [LICENSE-grampc-s.txt](LICENSE-grampc-s.txt).

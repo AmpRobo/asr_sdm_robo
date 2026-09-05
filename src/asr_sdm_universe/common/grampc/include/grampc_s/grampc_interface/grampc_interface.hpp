@@ -1,23 +1,19 @@
-/* This file is part of GRAMPC - (https://github.com/grampc/grampc)
+/* This file is part of GRAMPC-S - (https://github.com/grampc/grampc-s)
  *
- * GRAMPC -- A software framework for embedded nonlinear model predictive
- * control using a gradient-based augmented Lagrangian approach
+ * GRAMPC-S -- A software framework for stochastic model predictive control (SMPC)
  *
- * Copyright 2014-2025 by Knut Graichen, Andreas Voelz, Thore Wietzke,
- * Tobias Englert (<v2.3), Felix Mesmer (<v2.3), Soenke Rhein (<v2.3),
- * Bartosz Kaepernick (<v2.0), Tilman Utz (<v2.0).
+ * Copyright 2024 Daniel Landgraf, Andreas Voelz, Knut Graichen.
  * All rights reserved.
  *
- * GRAMPC is distributed under the BSD-3-Clause license, see LICENSE.txt
+ * GRAMPC-S is distributed under the BSD-3-Clause license, see LICENSE.txt
  *
  */
 
 
-#ifndef GRAMPC_HPP
-#define GRAMPC_HPP
+#ifndef GRAMPC_INTERFACE_HPP
+#define GRAMPC_INTERFACE_HPP
 
-#include <grampc/problem_description.hpp>
-
+#include <grampc_s/problem_description/problem_description.hpp>
 
 namespace grampc
 {
@@ -27,13 +23,12 @@ namespace grampc
 	{
 	public:
 		/** Create GRAMPC solver for problem description */
-		Grampc(ProblemDescription *problem_description);
+		Grampc(ProblemDescriptionPtr problem_description);
 
 		/** Free allocated memory */
 		~Grampc();
 
 	private:
-        /** Copy and assignment constructors are private, to prevent duplicate ressource management of the grampc struct */
 		Grampc(const Grampc&);
 
 		Grampc& operator=(const Grampc&);
@@ -49,9 +44,11 @@ namespace grampc
 		void setopt_string(const char* optName, const char* optValue);
 
 		/** Set option with float/double vector value */
+		void setopt_real_vector(const char* optName, VectorConstRef optValue);
 		void setopt_real_vector(const char* optName, ctypeRNum* optValue);
 
 		/** Set option with int vector value */
+		void setopt_int_vector(const char* optName, IntVectorConstRef optValue);
 		void setopt_int_vector(const char* optName, ctypeInt* optValue);
 
 		/** Print options */
@@ -61,6 +58,7 @@ namespace grampc
 		void setparam_real(const char* paramName, ctypeRNum paramValue);
 
 		/** Set parameter with float/double vector value */
+		void setparam_real_vector(const char* paramName, VectorConstRef paramValue);
 		void setparam_real_vector(const char* paramName, ctypeRNum* paramValue);
 
 		/** Print parameters */
@@ -68,12 +66,6 @@ namespace grampc
 
         /** Estimate bound for minimal penalty parameter */
         typeInt estim_penmin(ctypeInt rungrampc);
-
-        /** Check gradients of the supplied problem description */
-        void check_gradients(ctypeRNum tolerance, ctypeRNum step_size);
-
-        /** Get options and parameter from file **/
-        void get_config_from_file(const typeChar *fileName);
 
 		/** Run GRAMPC solver */
 		void run();
@@ -93,6 +85,8 @@ namespace grampc
 		/** Get access to solution */
 		const typeGRAMPCsol* getSolution() const;
 
+		ProblemDescriptionPtr getProblem() const;
+
 	private:
 #ifdef FIXEDSIZE
         typeGRAMPCparam grampc_param_;
@@ -102,9 +96,14 @@ namespace grampc
         typeGRAMPC grampc_struct_;
 #endif
         typeGRAMPC *grampc_;
-		ProblemDescription *problem_description_;
+		ProblemDescriptionPtr problem_description_;
 	};
 
+	// Alias
+	typedef std::shared_ptr<Grampc> GrampcPtr;
+	
+	// Create GRAMPC solver for problem description
+	GrampcPtr Solver(ProblemDescriptionPtr problem_description);
 }
 
-#endif // GRAMPC_HPP
+#endif // GRAMPC_INTERFACE_HPP

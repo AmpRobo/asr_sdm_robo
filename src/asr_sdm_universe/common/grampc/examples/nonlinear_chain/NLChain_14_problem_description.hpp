@@ -1,0 +1,50 @@
+/* This file is part of GRAMPC-S - (https://github.com/grampc/grampc-s)
+ *
+ * GRAMPC-S -- A software framework for stochastic model predictive control (SMPC)
+ *
+ * Copyright 2024 Daniel Landgraf, Andreas Voelz, Knut Graichen.
+ * All rights reserved.
+ *
+ * GRAMPC-S is distributed under the BSD-3-Clause license, see LICENSE.txt
+ *
+ */
+
+#ifndef NLCHAIN14_HPP
+#define NLCHAIN14_HPP
+
+#include <grampc_s/problem_description/taylor_problem_description.hpp>
+
+using namespace grampc;
+
+class Chain_14_ProblemDescription : public TaylorBaseProblemDescription
+{
+public:
+    Chain_14_ProblemDescription(const std::vector<typeRNum>& pCost);
+
+    virtual void ffct(VectorRef out, ctypeRNum t, VectorConstRef x, VectorConstRef u, VectorConstRef p, const GrampcParam& param) override;
+    virtual void dfdx_vec(VectorRef out, ctypeRNum t, VectorConstRef x, VectorConstRef u, VectorConstRef p, VectorConstRef vec, const GrampcParam& param) override;
+    virtual void dfdu_vec(VectorRef out, ctypeRNum t, VectorConstRef x, VectorConstRef u, VectorConstRef p, VectorConstRef vec, const GrampcParam& param) override;
+    virtual void dfdp_vec(VectorRef out, ctypeRNum t, VectorConstRef x, VectorConstRef u, VectorConstRef p, VectorConstRef vec, const GrampcParam& param) override;
+
+    virtual void lfct(VectorRef out, ctypeRNum t, VectorConstRef x, VectorConstRef u, VectorConstRef p, const GrampcParam& param) override;
+    virtual void dldx(VectorRef out, ctypeRNum t, VectorConstRef x, VectorConstRef u, VectorConstRef p, const GrampcParam& param) override;
+    virtual void dldu(VectorRef out, ctypeRNum t, VectorConstRef x, VectorConstRef u, VectorConstRef p, const GrampcParam& param) override;
+
+    virtual void Vfct(VectorRef out, ctypeRNum t, VectorConstRef x, VectorConstRef p, const GrampcParam& param) override;
+    virtual void dVdx(VectorRef out, ctypeRNum t, VectorConstRef x, VectorConstRef p, const GrampcParam& param) override;
+	virtual void dVdT(VectorRef out, ctypeRNum t, VectorConstRef x, VectorConstRef p, const GrampcParam& param) override;
+
+    virtual void hfct(VectorRef out, ctypeRNum t, VectorConstRef x, VectorConstRef u, VectorConstRef p, const GrampcParam& param) override;
+    virtual void dhdx_vec(VectorRef out, ctypeRNum t, VectorConstRef x, VectorConstRef u, VectorConstRef p, VectorConstRef vec, const GrampcParam& param) override;
+    virtual void dhdu_vec(VectorRef out, ctypeRNum t, VectorConstRef x, VectorConstRef u, VectorConstRef p, VectorConstRef vec, const GrampcParam& param) override;
+
+    virtual void hTfct(VectorRef out, ctypeRNum T, VectorConstRef x, VectorConstRef p, const GrampcParam& param) override;
+    virtual void dhTdx_vec(VectorRef out, ctypeRNum T, VectorConstRef x, VectorConstRef p, VectorConstRef vec, const GrampcParam& param) override;
+    virtual void dhTdT_vec(VectorRef out, ctypeRNum T, VectorConstRef x, VectorConstRef p, VectorConstRef vec, const GrampcParam& param) override;
+
+private:
+    // cost parameters
+    std::vector<typeRNum> pCost_;
+};
+
+#endif // NLCHAIN14_HPP

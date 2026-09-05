@@ -6,6 +6,7 @@
   <description>
     GRAMPC - a software framework for embedded nonlinear model predictive control
     using a gradient-based augmented Lagrangian approach, packaged as a ROS 2 C++ library.
+    Includes GRAMPC-S, the stochastic MPC extension built on top of the same solver core.
   </description>
 
   <maintainer email="xiaoyu@todo.todo">xiaoyu</maintainer>
@@ -15,8 +16,11 @@
   <author>Knut Graichen</author>
   <author>Andreas Voelz</author>
   <author>Thore Wietzke</author>
+  <author>Daniel Landgraf</author>
 
   <buildtool_depend>ament_cmake</buildtool_depend>
+
+  <depend>eigen</depend>
 
   <export>
     <build_type>ament_cmake</build_type>
