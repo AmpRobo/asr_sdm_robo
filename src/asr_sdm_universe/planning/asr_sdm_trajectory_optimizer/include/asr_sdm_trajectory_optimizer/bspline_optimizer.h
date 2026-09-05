@@ -9,6 +9,7 @@
 #include <map_query_interface.hpp>
 #include <rclcpp/rclcpp.hpp>
 
+#include <chrono>
 #include <memory>
 
 // Gradient and elasitc band optimization
@@ -107,8 +108,6 @@ private:
   double wnl_;                    //
   double dlmin_;                  //
                                   //
-  int algorithm1_;                // optimization algorithms for quadratic cost
-  int algorithm2_;                // optimization algorithms for general cost
   int max_iteration_num_[4];      // stopping criteria that can be used
   double max_iteration_time_[4];  // stopping criteria that can be used
 
@@ -127,16 +126,27 @@ private:
   vector<Eigen::Vector3d> g_min_vel_;
 
   int variable_num_;                   // optimization variables
-  int iter_num_;                       // iteration of the solver
+  int iter_num_;                       // cost evaluations performed by the solver
   std::vector<double> best_variable_;  //
   double min_cost_;                    //
+
+  // Wall-clock origin of the running solve, used to honour max_iteration_time_.
+  std::chrono::steady_clock::time_point opt_start_time_;
 
   vector<Eigen::Vector3d> block_pts_;  // blocking points to compute visibility
 
   /* cost function */
   /* calculate each part of cost function with control points q as input */
 
-  static double costFunction(unsigned n, const double * x, double * grad, void * func_data);
+  /* Objective handed to the L-BFGS solver: fills grad with the gradient at x and
+   * returns the cost. Also tracks the best iterate seen so far. */
+  double evaluateCost(const double * x, double * grad, int n);
+
+  /* True once the evaluation or wall-clock budget of the current solve is spent.
+   * The L-BFGS solver only offers cancellation once per iteration, so the
+   * budgets are honoured at iteration granularity. */
+  bool budgetExhausted() const;
+
   void combineCost(const std::vector<double> & x, vector<double> & grad, double & cost);
 
   // q contains all control points
@@ -170,7 +180,6 @@ private:
     const vector<Eigen::Vector3d> & q, double & cost, vector<Eigen::Vector3d> & gradient);
 
   bool useNonholonomicCost() const;
-  bool isQuadratic();
 
   /* for benckmark evaluation only */
 public:

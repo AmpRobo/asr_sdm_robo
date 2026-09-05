@@ -3,7 +3,7 @@
 
 #include "asr_sdm_trajectory_optimizer/bspline_optimizer.h"
 
-#include <nlopt.h>
+#include <asr_sdm_lbfgs_solver/lbfgs.hpp>
 
 #include <algorithm>
 #include <cmath>
@@ -81,7 +81,7 @@ struct Heading
 
 /* One-sided hinges on a quantity normalized by its own limit. The quadratic is
  * mapped through x^2 / (1 + x^2) so a large initial violation saturates instead
- * of producing ruinous NLopt steps that scribble the control polygon. */
+ * of producing ruinous solver steps that scribble the control polygon. */
 bool overLimitPenalty(double value, double limit, double & cost, double & dcost_dvalue)
 {
   const double magnitude = std::fabs(value);
@@ -202,8 +202,6 @@ void BsplineOptimizer::setParam(const std::shared_ptr<rclcpp::Node> & nh)
   max_iteration_time_[2] = declareGetDouble(nh, "optimization.max_iteration_time3", -1.0);
   max_iteration_time_[3] = declareGetDouble(nh, "optimization.max_iteration_time4", -1.0);
 
-  algorithm1_ = declareGetInt(nh, "optimization.algorithm1", -1);
-  algorithm2_ = declareGetInt(nh, "optimization.algorithm2", -1);
   order_ = declareGetInt(nh, "optimization.order", -1);
 }
 
@@ -311,21 +309,6 @@ void BsplineOptimizer::optimize()
     variable_num_ = max(0, dim_ * (pt_num - 2 * order_));
   }
 
-  /* do optimization using NLopt solver */
-  const int algorithm = isQuadratic() ? algorithm1_ : algorithm2_;
-  nlopt_opt opt = nlopt_create(static_cast<nlopt_algorithm>(algorithm), variable_num_);
-  if (!opt) {
-    RCLCPP_ERROR(
-      rclcpp::get_logger("asr_sdm_trajectory_optimizerimizer"),
-      "[Optimization]: failed to create NLopt solver: algorithm=%d, variables=%d", algorithm,
-      variable_num_);
-    return;
-  }
-  nlopt_set_min_objective(opt, BsplineOptimizer::costFunction, this);
-  nlopt_set_maxeval(opt, max_iteration_num_[max_num_id_]);
-  nlopt_set_maxtime(opt, max_iteration_time_[max_time_id_]);
-  nlopt_set_xtol_rel(opt, 1e-5);
-
   vector<double> q(variable_num_);
   for (int i = order_; i < pt_num; ++i) {
     if (!(cost_function_ & ENDPOINT) && i >= pt_num - order_) continue;
@@ -334,39 +317,42 @@ void BsplineOptimizer::optimize()
     }
   }
 
-  if (dim_ != 1) {
-    vector<double> lb(variable_num_), ub(variable_num_);
-    const double bound = 10.0;
-    for (int i = 0; i < variable_num_; ++i) {
-      lb[i] = q[i] - bound;
-      ub[i] = q[i] + bound;
-    }
-    nlopt_set_lower_bounds(opt, lb.data());
-    nlopt_set_upper_bounds(opt, ub.data());
+  /* Seed the result with the initial guess so an aborted solve leaves the
+   * control points untouched rather than reading a stale best_variable_. */
+  best_variable_ = q;
+  if (variable_num_ <= 0) return;
+
+  /* do optimization using the L-BFGS solver */
+  opt_start_time_ = std::chrono::steady_clock::now();
+
+  lbfgs::Parameters<double> params;
+  params.epsilon = 1.0e-5;
+  /* Stop once the objective stagnates over three iterations, the closest
+   * analogue of the relative step tolerance the previous solver used. */
+  params.past = 3;
+  params.delta = 1.0e-5;
+  params.max_iterations = max(0, max_iteration_num_[max_num_id_]);
+
+  const lbfgs::Result<double> result = lbfgs::minimize<double>(
+    variable_num_, q.data(),
+    [this](const double * x, double * grad, int n, double) { return evaluateCost(x, grad, n); },
+    [this](const lbfgs::Progress<double> &) { return budgetExhausted() ? 1 : 0; }, params);
+
+  /* Running out of iterations, line-search steps or wall-clock time is the
+   * normal way a real-time solve ends, so only genuine failures are reported. */
+  switch (result.status) {
+    case lbfgs::Status::Canceled:
+    case lbfgs::Status::MaximumIteration:
+    case lbfgs::Status::MaximumLineSearch:
+      break;
+    default:
+      if (!result.ok()) {
+        RCLCPP_WARN(
+          rclcpp::get_logger("asr_sdm_trajectory_optimizerimizer"), "[Optimization]: lbfgs: %s",
+          std::string(lbfgs::strerror(result.status)).c_str());
+      }
+      break;
   }
-
-  try {
-    // cout << fixed << setprecision(7);
-    // vec_time_.clear();
-    // vec_cost_.clear();
-    // time_start_ = ros::Time::now();
-
-    double final_cost = 0.0;
-    nlopt_result result = nlopt_optimize(opt, q.data(), &final_cost);
-    if (result < 0) {
-      RCLCPP_WARN(
-        rclcpp::get_logger("asr_sdm_trajectory_optimizerimizer"),
-        "[Optimization]: nlopt failed with code %d", static_cast<int>(result));
-    }
-
-    /* retrieve the optimization result */
-    // cout << "Min cost:" << min_cost_ << endl;
-  } catch (std::exception & e) {
-    RCLCPP_WARN(
-      rclcpp::get_logger("asr_sdm_trajectory_optimizerimizer"), "[Optimization]: nlopt exception");
-    cout << e.what() << endl;
-  }
-  nlopt_destroy(opt);
 
   for (int i = order_; i < control_points_.rows(); ++i) {
     if (!(cost_function_ & ENDPOINT) && i >= pt_num - order_) continue;
@@ -619,7 +605,7 @@ bool BsplineOptimizer::useNonholonomicCost() const
 void BsplineOptimizer::combineCost(
   const std::vector<double> & x, std::vector<double> & grad, double & f_combine)
 {
-  /* convert the NLopt format vector to control points. */
+  /* convert the flat solver vector to control points. */
 
   // This solver can support 1D-3D B-spline optimization, but we use Vector3d to store each control
   // point For 1D case, the second and third elements are zero, and similar for the 2D case.
@@ -733,41 +719,37 @@ void BsplineOptimizer::combineCost(
   // }
 }
 
-double BsplineOptimizer::costFunction(unsigned n, const double * x, double * grad, void * func_data)
+double BsplineOptimizer::evaluateCost(const double * x, double * grad, int n)
 {
-  BsplineOptimizer * opt = reinterpret_cast<BsplineOptimizer *>(func_data);
   double cost = 0.0;
   std::vector<double> x_vec(x, x + n);
   std::vector<double> grad_vec;
-  opt->combineCost(x_vec, grad_vec, cost);
+  combineCost(x_vec, grad_vec, cost);
   if (grad) {
-    for (unsigned i = 0; i < n; ++i) grad[i] = grad_vec[i];
+    for (int i = 0; i < n; ++i) grad[i] = grad_vec[i];
   }
-  opt->iter_num_++;
+  iter_num_++;
 
   /* save the min cost result */
-  if (cost < opt->min_cost_) {
-    opt->min_cost_ = cost;
-    opt->best_variable_.assign(x, x + n);
+  if (cost < min_cost_) {
+    min_cost_ = cost;
+    best_variable_.assign(x, x + n);
   }
   return cost;
+}
 
-  // /* evaluation */
-  // ros::Time te1 = ros::Time::now();
-  // double time_now = (te1 - opt->time_start_).toSec();
-  // opt->vec_time_.push_back(time_now);
-  // if (opt->vec_cost_.size() == 0)
-  // {
-  //   opt->vec_cost_.push_back(f_combine);
-  // }
-  // else if (opt->vec_cost_.back() > f_combine)
-  // {
-  //   opt->vec_cost_.push_back(f_combine);
-  // }
-  // else
-  // {
-  //   opt->vec_cost_.push_back(opt->vec_cost_.back());
-  // }
+bool BsplineOptimizer::budgetExhausted() const
+{
+  const int max_eval = max_iteration_num_[max_num_id_];
+  if (max_eval > 0 && iter_num_ >= max_eval) return true;
+
+  const double max_time = max_iteration_time_[max_time_id_];
+  if (max_time > 0.0) {
+    const std::chrono::duration<double> elapsed = std::chrono::steady_clock::now() - opt_start_time_;
+    if (elapsed.count() >= max_time) return true;
+  }
+
+  return false;
 }
 
 vector<Eigen::Vector3d> BsplineOptimizer::matrixToVectors(const Eigen::MatrixXd & ctrl_pts)
@@ -782,16 +764,6 @@ vector<Eigen::Vector3d> BsplineOptimizer::matrixToVectors(const Eigen::MatrixXd 
 Eigen::MatrixXd BsplineOptimizer::getControlPoints()
 {
   return this->control_points_;
-}
-
-bool BsplineOptimizer::isQuadratic()
-{
-  if (cost_function_ == GUIDE_PHASE) {
-    return true;
-  } else if (cost_function_ == (SMOOTHNESS | WAYPOINTS)) {
-    return true;
-  }
-  return false;
 }
 
 }  // namespace amprobo

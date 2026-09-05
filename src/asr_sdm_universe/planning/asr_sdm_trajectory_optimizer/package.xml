@@ -12,6 +12,7 @@
 
   <depend>rclcpp</depend>
   <depend>asr_sdm_esdf_map</depend>
+  <depend>asr_sdm_lbfgs_solver</depend>
 
   <export>
     <build_type>ament_cmake</build_type>

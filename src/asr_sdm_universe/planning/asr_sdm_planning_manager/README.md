@@ -64,7 +64,7 @@ If you use __Fast-Planner__ for your application or research, please cite our re
 
 - Our software is developed and tested in Ubuntu 16.04, [ROS Kinetic](http://wiki.ros.org/kinetic/Installation/Ubuntu). Other version may require minor modification.
 
-- We use [**NLopt**](https://nlopt.readthedocs.io/en/latest/NLopt_Installation) to solve the non-linear optimization problem.
+- We use the in-tree **asr_sdm_lbfgs_solver** package (L-BFGS) to solve the non-linear optimization problem, so no external optimizer needs to be installed.
 
 - The __planning_simulator__ depends on the C++ linear algebra library __Armadillo__, which can be installed by ``` sudo apt-get install libarmadillo-dev ```.
 
@@ -136,7 +136,7 @@ If you use depth images with lower resolution (like 256x144), you might disable 
 Finally, please kindly give a STAR to this repo if it helps your research or work, thanks! :)
 
 ## 5. Acknowledgements
-  We use **NLopt** for non-linear optimization.
+  We use **asr_sdm_lbfgs_solver**, a C++17 port of the L-BFGS implementation by Jorge Nocedal and Naoaki Okazaki, for non-linear optimization.
 
 ## 6. Licence
 The source code is released under [GPLv3](http://www.gnu.org/licenses/) license.
