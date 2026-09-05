@@ -1,0 +1,24 @@
+<?xml version="1.0"?>
+<?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
+<package format="3">
+  <name>grampc</name>
+  <version>2.3.0</version>
+  <description>
+    GRAMPC - a software framework for embedded nonlinear model predictive control
+    using a gradient-based augmented Lagrangian approach, packaged as a ROS 2 C++ library.
+  </description>
+
+  <maintainer email="xiaoyu@todo.todo">xiaoyu</maintainer>
+  <license>BSD-3-Clause</license>
+  <url type="website">https://github.com/grampc/grampc</url>
+
+  <author>Knut Graichen</author>
+  <author>Andreas Voelz</author>
+  <author>Thore Wietzke</author>
+
+  <buildtool_depend>ament_cmake</buildtool_depend>
+
+  <export>
+    <build_type>ament_cmake</build_type>
+  </export>
+</package>
