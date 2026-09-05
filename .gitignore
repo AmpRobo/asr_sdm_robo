@@ -35,6 +35,7 @@
 install
 build
 log
+dependency
 
 #Files
 build_output.log

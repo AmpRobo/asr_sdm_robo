@@ -18,7 +18,7 @@ From the workspace root:
 
 ```bash
 cd ~/asr_sdm_robo
-./setup-dev-env.sh --pinocchio
+./setup-dev-env.sh --dependency
 source /opt/ros/jazzy/setup.bash
 source ~/.bashrc
 ```
@@ -26,7 +26,7 @@ source ~/.bashrc
 If ROS 2 Jazzy is not installed yet, install both environments with:
 
 ```bash
-./setup-dev-env.sh --ros --pinocchio
+./setup-dev-env.sh --ros --dependency
 ```
 
 Install the remaining workspace dependencies without replacing the robotpkg

@@ -3,8 +3,9 @@
 本文说明 ASR-SDM 工作区使用的 Pinocchio 安装方式。Pinocchio 项目地址：
 [stack-of-tasks/pinocchio](https://github.com/stack-of-tasks/pinocchio)。
 
-推荐使用仓库根目录的 `setup-dev-env.sh`，通过 robotpkg 安装 Pinocchio、
-coal 和 eigenpy。需要特定分支或本地修改时，再使用源码安装脚本。
+推荐使用仓库根目录的 `setup-dev-env.sh --dependency`，通过 robotpkg 安装
+Pinocchio、coal 和 eigenpy（该选项同时会安装 c-periphery 静态库）。需要特定
+分支或本地修改时，再使用源码安装脚本。
 
 ## 1. 支持环境
 
@@ -27,18 +28,18 @@ robotpkg 安装流程目前使用 amd64 软件源，不适用于 ARM64。ARM64 �
 - 安装 Pinocchio、coal 和 eigenpy；
 - 将 `/opt/openrobots` 相关环境变量写入 `~/.bashrc`。
 
-仅安装 Pinocchio 工具链：
+安装 Pinocchio 工具链（`--dependency` 会同时安装 c-periphery）：
 
 ```bash
 cd ~/asr_sdm_robo
-./setup-dev-env.sh --pinocchio
+./setup-dev-env.sh --dependency
 ```
 
 如果 ROS 2 Jazzy 尚未安装，可以一并安装：
 
 ```bash
 cd ~/asr_sdm_robo
-./setup-dev-env.sh --ros --pinocchio
+./setup-dev-env.sh --ros --dependency
 ```
 
 脚本的 `-y` 选项仅用于 CI，不建议普通交互式安装使用。

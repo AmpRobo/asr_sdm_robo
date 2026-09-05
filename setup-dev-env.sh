@@ -6,7 +6,7 @@
 set -euo pipefail
 
 option_common=false
-option_pinocchio=false
+option_dependency=false
 option_ros=false
 option_nvidia=false
 option_no_nvidia=false
@@ -30,6 +30,17 @@ cudnn_cuda_major="13"           # cuDNN 9 flavour matching the CUDA major versio
 tensorrt_version="11.1.0"
 opencv_version="4.14.0"
 
+# Workspace-local third-party sources. COLCON_IGNORE in dependency/ keeps colcon
+# from treating them as packages when building the ROS 2 workspace.
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+dependency_dir="${script_dir}/dependency"
+periphery_repo_url="https://github.com/AmpRobo/c-periphery.git"
+periphery_src_dir="${dependency_dir}/c-periphery"
+periphery_version="2.5.0"
+periphery_install_prefix="/usr/local"
+opencv_src_dir="${dependency_dir}/opencv-${opencv_version}"
+opencv_contrib_src_dir="${dependency_dir}/opencv_contrib-${opencv_version}"
+
 # CUDA library search paths, filled in by install_opencv_cuda
 cuda_lib_dirs=()
 
@@ -44,7 +55,8 @@ print_help() {
     echo "  --list                  List all installable components"
     echo "  --common                Install common development packages (toolchain, git, python3, CLI tools, Coral GUI)"
     echo "  --ros                   Install ROS 2 ${ros_distro} desktop + rosdep/colcon (Ubuntu 24.04)"
-    echo "  --pinocchio             Install Pinocchio from robotpkg apt packages"
+    echo "  --dependency            Install third-party libraries (Pinocchio from robotpkg,"
+    echo "                          c-periphery ${periphery_version} static library)"
     echo "  --nvidia                Install the NVIDIA stack (driver ${nvidia_driver_branch}, CUDA ${cuda_version},"
     echo "                          cuBLAS, NPP, cuDNN, TensorRT ${tensorrt_version}, OpenCV ${opencv_version} + CUDA)"
     echo "  -y                      Use non-interactive mode"
@@ -67,8 +79,13 @@ print_list() {
     echo "  --common      Common       Install build toolchain, git, python3, CLI tools and Coral GUI libraries"
     echo "  --ros         ROS 2        Install ROS 2 ${ros_distro} desktop + rosdep/colcon (Ubuntu 24.04),"
     echo "                             and set ROS_DOMAIN_ID=${ros_domain_id} in ~/.bashrc"
-    echo "  --pinocchio   Pinocchio    Install Pinocchio and Python bindings via robotpkg apt"
+    echo "  --dependency  Dependency   Install the third-party libraries below"
     echo "  --nvidia      NVIDIA       Install the GPU stack below (Ubuntu 24.04, x86_64)"
+    echo ""
+    echo "  Components of --dependency:"
+    echo "    Pinocchio       robotpkg apt (C++ library and Python bindings)"
+    echo "    c-periphery     ${periphery_version} static library from dependency/c-periphery"
+    echo "                    into ${periphery_install_prefix}"
     echo ""
     echo "  Components of --nvidia:"
     echo "    NVIDIA driver   ${nvidia_driver_branch} (cuda-drivers-${nvidia_driver_branch}; skip with --no-cuda-drivers)"
@@ -78,15 +95,17 @@ print_list() {
     echo "    cuDNN           libcudnn9-cuda-${cudnn_cuda_major}"
     echo "    TensorRT        ${tensorrt_version} (needs the NVIDIA TensorRT local apt repo)"
     echo "    OpenCV + CUDA   ${opencv_version} into ~/.local/opencv-cuda"
+    echo "                    (source in dependency/opencv-${opencv_version} and"
+    echo "                     dependency/opencv_contrib-${opencv_version})"
     echo ""
     echo "Examples:"
     echo "  ./setup-dev-env.sh --list"
     echo "  ./setup-dev-env.sh --common"
     echo "  ./setup-dev-env.sh --ros"
-    echo "  ./setup-dev-env.sh --pinocchio"
+    echo "  ./setup-dev-env.sh --dependency"
     echo "  ./setup-dev-env.sh --nvidia"
     echo "  ./setup-dev-env.sh --nvidia --runtime --no-cuda-drivers"
-    echo "  ./setup-dev-env.sh --ros --nvidia --pinocchio -y"
+    echo "  ./setup-dev-env.sh --ros --nvidia --dependency -y"
 }
 
 run_cmd() {
@@ -194,6 +213,150 @@ install_common() {
     apt_install install "${common_packages[@]}"
 
     echo -e "\e[32mDone.\e[0m Common packages installed."
+}
+
+ensure_dependency_dir() {
+    # Keep a COLCON_IGNORE marker so `colcon build` from the workspace root does not
+    # treat third-party trees under dependency/ as packages.
+    mkdir -p "${dependency_dir}"
+    if [[ ! -f "${dependency_dir}/COLCON_IGNORE" ]]; then
+        touch "${dependency_dir}/COLCON_IGNORE"
+    fi
+}
+
+# Download a GitHub tag zip into dependency/<dir_name> when that tree is missing.
+# GitHub extracts the archive as <repo>-<tag>/, which must match dir_name.
+ensure_github_tag_source() {
+    local repo="$1"
+    local tag="$2"
+    local dir_name="$3"
+    local dest_dir="${dependency_dir}/${dir_name}"
+    local zip_path="${dependency_dir}/${dir_name}.zip"
+    local url="https://github.com/${repo}/archive/refs/tags/${tag}.zip"
+
+    ensure_dependency_dir
+
+    if [[ -f "${dest_dir}/CMakeLists.txt" ]]; then
+        echo "${dir_name} source already present in ${dest_dir}, skipping download."
+        return 0
+    fi
+
+    if [[ -e "${dest_dir}" ]]; then
+        echo -e "\e[31m${dest_dir} exists but has no CMakeLists.txt; not overwriting it.\e[m" >&2
+        return 1
+    fi
+
+    if [[ ! -f "${zip_path}" ]]; then
+        echo -e "\e[36mDownloading ${repo} ${tag} into ${dependency_dir}...\e[m"
+        run_cmd wget -q --show-progress -O "${zip_path}" "${url}"
+    else
+        echo "Using existing archive ${zip_path}."
+    fi
+
+    echo "Extracting ${zip_path}..."
+    run_cmd unzip -q -d "${dependency_dir}" "${zip_path}"
+
+    if [[ ! -f "${dest_dir}/CMakeLists.txt" ]]; then
+        echo -e "\e[31mFailed to extract ${repo} ${tag} into ${dest_dir}.\e[m" >&2
+        return 1
+    fi
+}
+
+ensure_periphery_source() {
+    ensure_dependency_dir
+
+    if [[ -f "${periphery_src_dir}/CMakeLists.txt" ]]; then
+        echo "c-periphery source already present in ${periphery_src_dir}, skipping clone."
+        return 0
+    fi
+
+    if [[ -e "${periphery_src_dir}" ]]; then
+        echo -e "\e[31m${periphery_src_dir} exists but has no CMakeLists.txt; not overwriting it.\e[m" >&2
+        return 1
+    fi
+
+    echo -e "\e[36mCloning c-periphery into ${periphery_src_dir}...\e[m"
+    run_cmd git clone --depth 1 "${periphery_repo_url}" "${periphery_src_dir}"
+}
+
+ensure_opencv_source() {
+    ensure_github_tag_source "opencv/opencv" "${opencv_version}" "opencv-${opencv_version}"
+    ensure_github_tag_source "opencv/opencv_contrib" "${opencv_version}" "opencv_contrib-${opencv_version}"
+}
+
+install_periphery() {
+    local build_dir="${periphery_src_dir}/build"
+    local static_lib=""
+    local candidate
+    local multiarch=""
+    local -a generator
+
+    echo -e "\e[36mInstalling c-periphery ${periphery_version} as a static library...\e[m"
+
+    if ! command -v sudo >/dev/null 2>&1; then
+        apt-get -y update
+        apt-get -y install sudo
+    fi
+
+    apt_install update
+    apt_install install \
+        build-essential \
+        cmake \
+        git \
+        pkg-config \
+        ninja-build \
+        linux-libc-dev
+
+    ensure_periphery_source
+
+    rm -rf "${build_dir}"
+    mkdir -p "${build_dir}"
+
+    if command -v ninja >/dev/null 2>&1; then
+        generator=(-G Ninja)
+    else
+        generator=()
+    fi
+
+    echo "  SOURCE_DIR      = ${periphery_src_dir}"
+    echo "  BUILD_DIR       = ${build_dir}"
+    echo "  INSTALL_PREFIX  = ${periphery_install_prefix}"
+
+    # CMAKE_INSTALL_LIBDIR=lib keeps libperiphery.a in /usr/local/lib so the
+    # linker and find_package(periphery) both find it without a multiarch path.
+    run_cmd cmake -S "${periphery_src_dir}" -B "${build_dir}" "${generator[@]}" \
+        -D CMAKE_BUILD_TYPE=Release \
+        -D CMAKE_INSTALL_PREFIX="${periphery_install_prefix}" \
+        -D CMAKE_INSTALL_LIBDIR=lib \
+        -D BUILD_SHARED_LIBS=OFF \
+        -D BUILD_TESTS=OFF
+
+    run_cmd cmake --build "${build_dir}" --parallel "$(nproc)"
+    run_cmd sudo cmake --install "${build_dir}"
+
+    if command -v dpkg-architecture >/dev/null 2>&1; then
+        multiarch="$(dpkg-architecture -qDEB_HOST_MULTIARCH 2>/dev/null || true)"
+    fi
+
+    for candidate in \
+        "${periphery_install_prefix}/lib/libperiphery.a" \
+        "${periphery_install_prefix}/lib64/libperiphery.a" \
+        "${periphery_install_prefix}/lib/${multiarch}/libperiphery.a"
+    do
+        if [[ -n "${candidate}" && -f "${candidate}" ]]; then
+            static_lib="${candidate}"
+            break
+        fi
+    done
+
+    if [[ -z "${static_lib}" ]]; then
+        echo -e "\e[31mFailed to install c-periphery: libperiphery.a was not found under ${periphery_install_prefix}.\e[m" >&2
+        return 1
+    fi
+
+    echo -e "\e[32mDone.\e[0m c-periphery static library installed:"
+    echo "  ${static_lib}"
+    echo "CMake package: find_package(periphery)  (prefix ${periphery_install_prefix})"
 }
 
 ubuntu_codename() {
@@ -383,6 +546,13 @@ fi"
 
     echo -e "\e[32mDone.\e[0m ROS 2 ${ros_distro} installed (ROS_DOMAIN_ID=${ros_domain_id})."
     echo "Reload: source ~/.bashrc  |  Verify: ros2 run demo_nodes_cpp talker"
+}
+
+install_dependency() {
+    echo -e "\e[36mInstalling third-party libraries (c-periphery, Pinocchio)...\e[m"
+    install_periphery
+    install_pinocchio_from_apt
+    echo -e "\e[32mDependency setup complete.\e[0m"
 }
 
 install_pinocchio_from_apt() {
@@ -756,8 +926,8 @@ ensure_unversioned_cuda_lib() {
 install_opencv_cuda() {
     local previous_dir="${PWD}"
     local install_prefix="${OPENCV_CUDA_PREFIX:-${HOME}/.local/opencv-cuda}"
+    # Keep the CUDA object tree out of the workspace; only the source lives in dependency/.
     local build_root="${OPENCV_CUDA_BUILD_ROOT:-${HOME}/.cache/opencv_cuda_build}"
-    local src_root="${build_root}/src"
     local build_dir="${build_root}/build-${opencv_version}"
     local cuda_libs_root
     local cuda_lib_path
@@ -856,25 +1026,13 @@ install_opencv_cuda() {
     echo "  CUDA_HOME       = ${CUDA_HOME}"
     echo "  CUDA_LIBS_ROOT  = ${cuda_libs_root}"
     echo "  CUDA_ARCH_BIN   = ${cuda_arch_bin}"
+    echo "  SOURCE_DIR      = ${opencv_src_dir}"
+    echo "  CONTRIB_DIR     = ${opencv_contrib_src_dir}"
     echo "  INSTALL_PREFIX  = ${install_prefix}"
     echo "  BUILD_DIR       = ${build_dir}"
 
-    mkdir -p "${src_root}" "${install_prefix}"
-    cd "${src_root}"
-
-    if [[ ! -d "opencv-${opencv_version}" ]]; then
-        echo "Downloading OpenCV ${opencv_version}..."
-        run_cmd wget -q --show-progress -O "opencv-${opencv_version}.zip" \
-            "https://github.com/opencv/opencv/archive/refs/tags/${opencv_version}.zip"
-        unzip -q "opencv-${opencv_version}.zip"
-    fi
-
-    if [[ ! -d "opencv_contrib-${opencv_version}" ]]; then
-        echo "Downloading OpenCV contrib ${opencv_version}..."
-        run_cmd wget -q --show-progress -O "opencv_contrib-${opencv_version}.zip" \
-            "https://github.com/opencv/opencv_contrib/archive/refs/tags/${opencv_version}.zip"
-        unzip -q "opencv_contrib-${opencv_version}.zip"
-    fi
+    mkdir -p "${install_prefix}"
+    ensure_opencv_source
 
     rm -rf "${build_dir}"
     mkdir -p "${build_dir}"
@@ -892,7 +1050,7 @@ install_opencv_cuda() {
         -D CMAKE_CXX_STANDARD=17 \
         -D CMAKE_PREFIX_PATH="${cuda_libs_root}/targets/x86_64-linux" \
         -D CMAKE_LIBRARY_PATH="${cuda_lib_path}" \
-        -D OPENCV_EXTRA_MODULES_PATH="${src_root}/opencv_contrib-${opencv_version}/modules" \
+        -D OPENCV_EXTRA_MODULES_PATH="${opencv_contrib_src_dir}/modules" \
         -D BUILD_LIST="${build_list}" \
         -D WITH_CUDA=ON \
         -D WITH_CUDNN=ON \
@@ -934,7 +1092,7 @@ install_opencv_cuda() {
         -D BUILD_JAVA=OFF \
         -D OPENCV_GENERATE_PKGCONFIG=ON \
         -D OPENCV_ENABLE_NONFREE=OFF \
-        "${src_root}/opencv-${opencv_version}"
+        "${opencv_src_dir}"
 
     echo "Building (this can take a while)..."
     if command -v ninja >/dev/null 2>&1; then
@@ -970,6 +1128,7 @@ export PKG_CONFIG_PATH=\"${prefix_expr}/lib/pkgconfig\${PKG_CONFIG_PATH:+:\${PKG
     cd "${previous_dir}"
 
     echo -e "\e[32mDone.\e[0m OpenCV ${opencv_version} installed into ${install_prefix}."
+    echo "Source tree: ${opencv_src_dir}"
     echo "Sourceable copy of the same env: ${env_file}"
 }
 
@@ -1017,8 +1176,8 @@ parse_args() {
                 option_ros=true
                 shift
                 ;;
-            --pinocchio)
-                option_pinocchio=true
+            --dependency)
+                option_dependency=true
                 shift
                 ;;
             --nvidia)
@@ -1084,9 +1243,9 @@ main() {
     fi
 
     if [[ "${option_common}" != true && "${option_ros}" != true \
-        && "${option_pinocchio}" != true && "${option_nvidia}" != true ]]; then
+        && "${option_dependency}" != true && "${option_nvidia}" != true ]]; then
         print_help
-        echo "No actionable option provided. Use --list, --common, --ros, --nvidia and/or --pinocchio."
+        echo "No actionable option provided. Use --list, --common, --ros, --nvidia and/or --dependency."
         exit 1
     fi
 
@@ -1104,8 +1263,8 @@ main() {
         install_nvidia_stack
     fi
 
-    if [[ "${option_pinocchio}" == true ]]; then
-        install_pinocchio_from_apt
+    if [[ "${option_dependency}" == true ]]; then
+        install_dependency
     fi
 }
 

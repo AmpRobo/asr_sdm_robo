@@ -17,10 +17,10 @@ Workspace for Amphibious Snake-like Robot with Screw-drive Mechanism
 ./setup-dev-env.sh --common
 ./setup-dev-env.sh --ros
 ./setup-dev-env.sh --nvidia
-./setup-dev-env.sh --pinocchio
+./setup-dev-env.sh --dependency
 
 # Full setup without prompts (intended for CI)
-./setup-dev-env.sh --common --ros --nvidia --pinocchio -y
+./setup-dev-env.sh --common --ros --nvidia --dependency -y
 ```
 
 | Flag | Installs |
@@ -28,7 +28,7 @@ Workspace for Amphibious Snake-like Robot with Screw-drive Mechanism
 | `--common` | Build toolchain (`build-essential`, `cmake`, `ninja-build`, `ccache`, `gdb`), `git`, Python 3 dev packages, Qt 6 + QML modules, everyday CLI tools |
 | `--ros` | ROS 2 Jazzy desktop, `rosdep`, `colcon`, and the matching `~/.bashrc` entries |
 | `--nvidia` | NVIDIA driver 595, CUDA Toolkit 13.2, cuBLAS / NPP / cuFFT, cuDNN 9, TensorRT 11.1.0, and OpenCV 4.14.0 built with CUDA |
-| `--pinocchio` | Pinocchio and its Python bindings from the robotpkg apt repository |
+| `--dependency` | Pinocchio and Python bindings from robotpkg, plus the [c-periphery](https://github.com/AmpRobo/c-periphery) 2.5.0 static library from `dependency/c-periphery` into `/usr/local` |
 
 Modifiers:
 
@@ -95,7 +95,7 @@ colcon build --symlink-install --packages-select asr_sdm_monitor
 Notes:
 
 - Run `./setup-dev-env.sh` (see above) before the first build. The perception packages additionally need the `--nvidia` role, so `source ~/.bashrc` first to pick up `CUDA_HOME` and `OpenCV_DIR`.
-- `rosdep` only resolves the keys declared in `package.xml`. CUDA, cuDNN, TensorRT and CUDA-enabled OpenCV are not covered and must come from `--nvidia`.
+- `rosdep` only resolves the keys declared in `package.xml`. CUDA, cuDNN, TensorRT and CUDA-enabled OpenCV are not covered and must come from `--nvidia`. Pinocchio and c-periphery are installed with `--dependency`.
 - To rebuild from scratch, remove the generated directories: `rm -rf build install log`.
 
 ### asr_sdm_monitor
@@ -126,7 +126,7 @@ export _colcon_cd_root=/opt/ros/2/
 ```
 
 ### C Library for Linux Peripheral I/O (GPIO, LED, PWM, SPI, I2C, MMIO, Serial)
-https://github.com/vsergeev/c-periphery
+https://github.com/AmpRobo/c-periphery
 
 ### How to grant user permissions to utilize the spidev port
 ```sh
@@ -248,10 +248,10 @@ colcon build --symlink-install --parallel-workers 2
 ./setup-dev-env.sh --common
 ./setup-dev-env.sh --ros
 ./setup-dev-env.sh --nvidia
-./setup-dev-env.sh --pinocchio
+./setup-dev-env.sh --dependency
 
 # 全部安装且不询问（供 CI 使用）
-./setup-dev-env.sh --common --ros --nvidia --pinocchio -y
+./setup-dev-env.sh --common --ros --nvidia --dependency -y
 ```
 
 | 选项 | 安装内容 |
@@ -259,7 +259,7 @@ colcon build --symlink-install --parallel-workers 2
 | `--common` | 编译工具链（`build-essential`、`cmake`、`ninja-build`、`ccache`、`gdb`）、`git`、Python 3 开发包、Qt 6 与 QML 模块、常用命令行工具 |
 | `--ros` | ROS 2 Jazzy desktop、`rosdep`、`colcon`，并写入对应的 `~/.bashrc` 配置 |
 | `--nvidia` | NVIDIA 驱动 595、CUDA Toolkit 13.2、cuBLAS / NPP / cuFFT、cuDNN 9、TensorRT 11.1.0，以及启用 CUDA 编译的 OpenCV 4.14.0 |
-| `--pinocchio` | 通过 robotpkg apt 源安装 Pinocchio 及其 Python 绑定 |
+| `--dependency` | 通过 robotpkg 安装 Pinocchio 及其 Python 绑定，并从 `dependency/c-periphery` 编译 [c-periphery](https://github.com/AmpRobo/c-periphery) 2.5.0 静态库安装到 `/usr/local` |
 
 修饰选项：
 
@@ -326,7 +326,7 @@ colcon build --symlink-install --packages-select asr_sdm_monitor
 说明：
 
 - 首次编译前请先执行 `./setup-dev-env.sh`（见上文）。perception 相关包还需要 `--nvidia` 类别，编译前先 `source ~/.bashrc` 以加载 `CUDA_HOME` 与 `OpenCV_DIR`。
-- `rosdep` 只能解析 `package.xml` 中声明的依赖键，CUDA、cuDNN、TensorRT 以及启用 CUDA 的 OpenCV 不在其覆盖范围内，需通过 `--nvidia` 安装。
+- `rosdep` 只能解析 `package.xml` 中声明的依赖键，CUDA、cuDNN、TensorRT 以及启用 CUDA 的 OpenCV 不在其覆盖范围内，需通过 `--nvidia` 安装。Pinocchio 与 c-periphery 通过 `--dependency` 安装。
 - 需要完全重新编译时，删除生成目录即可：`rm -rf build install log`。
 
 ### asr_sdm_monitor
@@ -356,7 +356,7 @@ export _colcon_cd_root=/opt/ros/2/
 ```
 
 ### Linux 外设 I/O C 库（GPIO、LED、PWM、SPI、I2C、MMIO、串口）
-https://github.com/vsergeev/c-periphery
+https://github.com/AmpRobo/c-periphery
 
 ### 如何为用户授予 spidev 端口权限
 ```sh
