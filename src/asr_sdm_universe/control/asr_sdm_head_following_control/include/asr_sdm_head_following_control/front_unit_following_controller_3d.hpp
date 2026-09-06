@@ -63,6 +63,12 @@ struct FrontUnitController3DParameters
   double max_curvature;
   double curvature_velocity_epsilon;
   double damping = 0.02;         // 阻尼最小二乘的 λ (8.40)
+  double min_linear_velocity = 0.0;
+  double max_linear_velocity = 1.0;
+  double min_pitch_rate = -0.5;
+  double max_pitch_rate = 0.5;
+  double min_yaw_rate = -0.5;
+  double max_yaw_rate = 0.5;
 };
 
 struct SimulationState3D
@@ -111,6 +117,8 @@ public:
   explicit FrontUnitFollowingController3D(const FrontUnitController3DParameters & params);
 
   SimulationState3D makeInitialState() const;
+  asr_sdm_control_msgs::msg::RobotCommand toHeadFollowingCommand(
+    const asr_sdm_control_msgs::msg::RobotCommand & cmd) const;
   asr_sdm_control_msgs::msg::RobotCommand limitCommand(
     const asr_sdm_control_msgs::msg::RobotCommand & cmd) const;
   JointVelocity3D computeJointVelocity(

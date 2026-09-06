@@ -165,6 +165,18 @@ private:
       "kinematic_controller.curvature_velocity_epsilon", 1.0e-6);
     controller_params_.damping = node_->declare_parameter<double>(
       "kinematic_controller.damping", 0.02);
+    controller_params_.min_linear_velocity = node_->declare_parameter<double>(
+      "min_linear_velocity", 0.0);
+    controller_params_.max_linear_velocity = node_->declare_parameter<double>(
+      "max_linear_velocity", 0.12);
+    controller_params_.min_pitch_rate = node_->declare_parameter<double>(
+      "min_pitch_rate", -0.35);
+    controller_params_.max_pitch_rate = node_->declare_parameter<double>(
+      "max_pitch_rate", 0.35);
+    controller_params_.min_yaw_rate = node_->declare_parameter<double>(
+      "min_yaw_rate", -0.35);
+    controller_params_.max_yaw_rate = node_->declare_parameter<double>(
+      "max_yaw_rate", 0.35);
 
     robot_cmd_topic_ = node_->declare_parameter<std::string>(
       "robot_cmd_topic", "/control/asr_sdm/robot_cmd");
@@ -196,12 +208,6 @@ private:
       "joint_position_limit_rad", model_params_.joint_limit);
     control_period_ms_ = node_->declare_parameter<int>("control_period_ms", 20);
     cmd_timeout_sec_ = node_->declare_parameter<double>("cmd_timeout_sec", 0.3);
-    min_linear_velocity_ = node_->declare_parameter<double>("min_linear_velocity", 0.0);
-    max_linear_velocity_ = node_->declare_parameter<double>("max_linear_velocity", 0.12);
-    min_pitch_rate_ = node_->declare_parameter<double>("min_pitch_rate", -0.35);
-    max_pitch_rate_ = node_->declare_parameter<double>("max_pitch_rate", 0.35);
-    min_yaw_rate_ = node_->declare_parameter<double>("min_yaw_rate", -0.35);
-    max_yaw_rate_ = node_->declare_parameter<double>("max_yaw_rate", 0.35);
     screw_velocity_scale_ = node_->declare_parameter<double>(
       "screw_velocity_scale", 21.277);
     publish_control_cmd_ = node_->declare_parameter<bool>("publish_control_cmd", false);
@@ -225,21 +231,7 @@ private:
 
   void onRobotCmd(const asr_sdm_control_msgs::msg::RobotCommand::SharedPtr msg)
   {
-    cmd_cur_ = *msg;
-
-    // Head-following command from msg.vel: forward along head x, pitch about y,
-    // yaw about z. Linear is world-frame velocity; angular.y/z are planned rates.
-    const double v_forward = std::hypot(
-      msg->vel.linear.x, msg->vel.linear.y, msg->vel.linear.z);
-    cmd_cur_.vel.linear.x =
-      std::clamp(v_forward, min_linear_velocity_, max_linear_velocity_);
-    cmd_cur_.vel.linear.y = 0.0;
-    cmd_cur_.vel.linear.z = 0.0;
-    cmd_cur_.vel.angular.x = 0.0;
-    cmd_cur_.vel.angular.y =
-      std::clamp(msg->vel.angular.y, min_pitch_rate_, max_pitch_rate_);
-    cmd_cur_.vel.angular.z =
-      std::clamp(msg->vel.angular.z, min_yaw_rate_, max_yaw_rate_);
+    cmd_cur_ = controller_->toHeadFollowingCommand(*msg);
     last_cmd_time_ = node_->now();
     const auto now = std::chrono::steady_clock::now();
     if (now - last_robot_cmd_log_ >= std::chrono::seconds(1)) {
@@ -553,12 +545,6 @@ private:
   double initial_yaw_{0.0};
   int control_period_ms_{20};
   double cmd_timeout_sec_{0.3};
-  double min_linear_velocity_{0.0};
-  double max_linear_velocity_{0.12};
-  double min_pitch_rate_{-0.35};
-  double max_pitch_rate_{0.35};
-  double min_yaw_rate_{-0.35};
-  double max_yaw_rate_{0.35};
   double screw_velocity_scale_{21.277};
   bool publish_control_cmd_{false};
   double joint_angle_scale_{1.0};

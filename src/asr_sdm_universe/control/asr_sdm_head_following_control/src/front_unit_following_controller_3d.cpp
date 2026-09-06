@@ -192,6 +192,27 @@ SimulationState3D FrontUnitFollowingController3D::makeInitialState() const
   return state;
 }
 
+asr_sdm_control_msgs::msg::RobotCommand FrontUnitFollowingController3D::toHeadFollowingCommand(
+  const asr_sdm_control_msgs::msg::RobotCommand & cmd) const
+{
+  asr_sdm_control_msgs::msg::RobotCommand head_cmd = cmd;
+
+  // Head-following command from cmd.vel: forward along head x, pitch about y,
+  // yaw about z. Linear is world-frame velocity; angular.y/z are planned rates.
+  const double v_forward = std::hypot(
+    cmd.vel.linear.x, cmd.vel.linear.y, cmd.vel.linear.z);
+  head_cmd.vel.linear.x = std::clamp(
+    v_forward, params_.min_linear_velocity, params_.max_linear_velocity);
+  head_cmd.vel.linear.y = 0.0;
+  head_cmd.vel.linear.z = 0.0;
+  head_cmd.vel.angular.x = 0.0;
+  head_cmd.vel.angular.y = std::clamp(
+    cmd.vel.angular.y, params_.min_pitch_rate, params_.max_pitch_rate);
+  head_cmd.vel.angular.z = std::clamp(
+    cmd.vel.angular.z, params_.min_yaw_rate, params_.max_yaw_rate);
+  return head_cmd;
+}
+
 asr_sdm_control_msgs::msg::RobotCommand FrontUnitFollowingController3D::limitCommand(
   const asr_sdm_control_msgs::msg::RobotCommand & cmd) const
 {
