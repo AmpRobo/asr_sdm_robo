@@ -62,6 +62,7 @@ void PlanningManager::initPlanModules(const std::shared_ptr<rclcpp::Node> & nh)
   node_->declare_parameter("manager.max_yaw_rate", 0.35);
   node_->declare_parameter("manager.max_pitch_rate", 0.35);
   node_->declare_parameter("manager.min_vel", 0.0);
+  node_->declare_parameter("manager.max_time_lengthen_ratio", 1.5);
   pp_.max_vel_ = node_->get_parameter("manager.max_vel").as_double();
   pp_.max_acc_ = node_->get_parameter("manager.max_acc").as_double();
   pp_.max_jerk_ = node_->get_parameter("manager.max_jerk").as_double();
@@ -73,6 +74,8 @@ void PlanningManager::initPlanModules(const std::shared_ptr<rclcpp::Node> & nh)
   pp_.max_yaw_rate_ = node_->get_parameter("manager.max_yaw_rate").as_double();
   pp_.max_pitch_rate_ = node_->get_parameter("manager.max_pitch_rate").as_double();
   pp_.min_vel_ = node_->get_parameter("manager.min_vel").as_double();
+  pp_.max_time_lengthen_ratio_ =
+    std::max(1.0, node_->get_parameter("manager.max_time_lengthen_ratio").as_double());
 
   node_->declare_parameter("manager.use_geometric_path", false);
   node_->declare_parameter("manager.use_topo_path", false);
@@ -393,7 +396,9 @@ bool PlanningManager::topoReplan(bool collide)
 
       double t_opt = (node_->now() - t1).seconds();
       SPDLOG_INFO("[planner]: optimization time: {}", t_opt);
-      selectBestTraj(best_traj);
+      const int best_id = selectBestTraj(best_traj);
+      SPDLOG_INFO(
+        "[planner]: candidate {} of {} selected", best_id, static_cast<int>(select_paths.size()));
       refineTraj(best_traj, time_inc);
 
       local_data_.position_traj_ = best_traj;
@@ -405,16 +410,27 @@ bool PlanningManager::topoReplan(bool collide)
   return true;
 }
 
-void PlanningManager::selectBestTraj(fast_planner::NonUniformBspline & traj)
+/* Pick the candidate of least jerk. The candidates share their index with
+ * plan_data_.topo_select_paths_ and are drawn in that order, so they are
+ * searched in place rather than sorted: reordering them loses which
+ * topological path the refined trajectory came from. */
+int PlanningManager::selectBestTraj(fast_planner::NonUniformBspline & traj)
 {
-  // sort by jerk
   vector<fast_planner::NonUniformBspline> & trajs = plan_data_.topo_traj_pos2_;
-  sort(
-    trajs.begin(), trajs.end(),
-    [&](fast_planner::NonUniformBspline & tj1, fast_planner::NonUniformBspline & tj2) {
-      return tj1.getJerk() < tj2.getJerk();
-    });
-  traj = trajs[0];
+
+  int best = 0;
+  double best_jerk = trajs[0].getJerk();
+  for (size_t i = 1; i < trajs.size(); ++i) {
+    const double jerk = trajs[i].getJerk();
+    if (jerk < best_jerk) {
+      best_jerk = jerk;
+      best = static_cast<int>(i);
+    }
+  }
+
+  traj = trajs[best];
+  plan_data_.best_topo_idx_ = best;
+  return best;
 }
 
 /* On a nonholonomic robot the heading is not an independent degree of freedom,
@@ -430,15 +446,32 @@ void PlanningManager::refineTraj(fast_planner::NonUniformBspline & best_traj, do
   time_inc = 0.0;
   double dt, t_inc;
 
-  Eigen::MatrixXd ctrl_pts = best_traj.getControlPoint();
-  int cost_function = localCostFunction();
-
   best_traj.setPhysicalLimits(pp_.max_vel_, pp_.max_acc_);
   double ratio = best_traj.checkRatio();
   SPDLOG_INFO("ratio: {}", ratio);
-  reparamBspline(best_traj, ratio, ctrl_pts, dt, t_inc);
+
+  Eigen::MatrixXd ctrl_pts;
+  vector<Eigen::Vector3d> point_set;
+  reparamBspline(best_traj, ratio, ctrl_pts, dt, t_inc, point_set);
   time_inc += t_inc;
 
+  /* Refinement only reallocates time and trims the clearance; which way to go
+   * around an obstacle was already decided by the topological candidate. The
+   * distance cost has no gradient beyond dist0, so in free space the jerk cost
+   * is the only force left and it pulls the control polygon straight, undoing
+   * the detour. Anchoring on the samples the reparameterization was fitted to
+   * holds the shape, and absorbs the residual of refitting a lengthened,
+   * no longer uniform spline at a single interval. */
+  vector<Eigen::Vector3d> anchors;
+  vector<int> anchor_idx;
+  const int seg_num = static_cast<int>(ctrl_pts.rows()) - 3;
+  for (int i = 1; i < seg_num && i < static_cast<int>(point_set.size()); ++i) {
+    anchors.push_back(point_set[i]);
+    anchor_idx.push_back(i);
+  }
+  bspline_optimizers_[0]->setWaypoints(anchors, anchor_idx);
+
+  const int cost_function = localCostFunction() | BsplineOptimizer::ANCHOR;
   ctrl_pts = bspline_optimizers_[0]->BsplineOptimizeTraj(ctrl_pts, dt, cost_function, 1, 1);
   best_traj = fast_planner::NonUniformBspline(ctrl_pts, 3, dt);
   SPDLOG_WARN(
@@ -456,22 +489,31 @@ void PlanningManager::updateTrajInfo()
 
 void PlanningManager::reparamBspline(
   fast_planner::NonUniformBspline & bspline, double ratio, Eigen::MatrixXd & ctrl_pts, double & dt,
-  double & time_inc)
+  double & time_inc, vector<Eigen::Vector3d> & point_set)
 {
   double time_origin = bspline.getTimeSum();
   int seg_num = bspline.getControlPoint().rows() - 3;
   // double length = bspline.getLength(0.1);
   // int seg_num = ceil(length / pp_.ctrl_pt_dist);
 
-  ratio = min(1.01, ratio);
+  /* checkRatio() reports how far the segment exceeds the velocity and
+   * acceleration limits, so only lengthening restores feasibility. A ratio
+   * below one says the segment is already feasible, and shrinking it there
+   * would push the robot past the speed the global trajectory asked for and
+   * undo the deliberately slow first and last global segments. The upper bound
+   * matters because lengthenTime() leaves the leading and trailing knot spans
+   * untouched, so the larger the stretch the less a single-interval refit can
+   * represent the result. */
+  ratio = std::max(1.0, std::min(pp_.max_time_lengthen_ratio_, ratio));
   bspline.lengthenTime(ratio);
   double duration = bspline.getTimeSum();
   dt = duration / double(seg_num);
   time_inc = duration - time_origin;
 
-  vector<Eigen::Vector3d> point_set;
-  for (double time = 0.0; time <= duration + 1e-4; time += dt) {
-    point_set.push_back(bspline.evaluateDeBoorT(time));
+  point_set.clear();
+  point_set.reserve(static_cast<size_t>(seg_num) + 1);
+  for (int i = 0; i <= seg_num; ++i) {
+    point_set.push_back(bspline.evaluateDeBoorT(static_cast<double>(i) * dt));
   }
   fast_planner::NonUniformBspline::parameterizeToBspline(
     dt, point_set, plan_data_.local_start_end_derivative_, ctrl_pts);
@@ -553,6 +595,10 @@ Eigen::MatrixXd PlanningManager::reparamLocalTraj(double start_t, double & dt, d
   return ctrl_pts;
 }
 
+/* Unlike the overload above, this one runs on one thread per topological
+ * candidate, so it must not publish into plan_data_. It would be writing the
+ * boundary derivatives of the very window the caller already recorded through
+ * the other overload, since only seg_num differs between the candidates. */
 Eigen::MatrixXd PlanningManager::reparamLocalTraj(
   double start_t, double duration, int seg_num, double & dt)
 {
@@ -560,7 +606,6 @@ Eigen::MatrixXd PlanningManager::reparamLocalTraj(
   vector<Eigen::Vector3d> start_end_derivative;
 
   global_data_.getTrajByDuration(start_t, duration, seg_num, point_set, start_end_derivative, dt);
-  plan_data_.local_start_end_derivative_ = start_end_derivative;
 
   /* parameterization of B-spline */
   Eigen::MatrixXd ctrl_pts;

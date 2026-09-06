@@ -20,6 +20,7 @@ const int BsplineOptimizer::ENDPOINT = (1 << 3);
 const int BsplineOptimizer::GUIDE = (1 << 4);
 const int BsplineOptimizer::WAYPOINTS = (1 << 6);
 const int BsplineOptimizer::NONHOLONOMIC = (1 << 7);
+const int BsplineOptimizer::ANCHOR = (1 << 8);
 
 const int BsplineOptimizer::GUIDE_PHASE = BsplineOptimizer::SMOOTHNESS | BsplineOptimizer::GUIDE;
 const int BsplineOptimizer::NORMAL_PHASE =
@@ -179,6 +180,7 @@ void BsplineOptimizer::setParam(const std::shared_ptr<rclcpp::Node> & nh)
   lambda6_ = declareGetDouble(nh, "optimization.lambda6", -1.0);
   lambda7_ = declareGetDouble(nh, "optimization.lambda7", -1.0);
   lambda8_ = declareGetDouble(nh, "optimization.lambda8", -1.0);
+  lambda_anchor_ = declareGetDouble(nh, "optimization.lambda_anchor", 1.0);
   lambda_yaw_rate_ = declareGetDouble(nh, "optimization.lambda_yaw_rate", 0.0);
   lambda_pitch_rate_ = declareGetDouble(nh, "optimization.lambda_pitch_rate", 0.0);
   lambda_min_vel_ = declareGetDouble(nh, "optimization.lambda_min_vel", 0.0);
@@ -253,6 +255,7 @@ void BsplineOptimizer::setCostFunction(const int & cost_code)
   if (cost_function_ & GUIDE) cost_str += " guide |";
   if (cost_function_ & WAYPOINTS) cost_str += " waypt |";
   if (cost_function_ & NONHOLONOMIC) cost_str += " nonho |";
+  if (cost_function_ & ANCHOR) cost_str += " anchor|";
 
   RCLCPP_INFO(
     rclcpp::get_logger("asr_sdm_trajectory_optimizerimizer"), "cost func: %s", cost_str.c_str());
@@ -514,6 +517,10 @@ void BsplineOptimizer::calcWaypointsCost(
     Eigen::Vector3d waypt = waypoints_[i];
     int idx = waypt_idx_[i];
 
+    // The same optimizer instance serves splines of different lengths, so a set
+    // of waypoints left over from an earlier solve may index past this one.
+    if (idx < 0 || idx + 2 >= static_cast<int>(q.size())) continue;
+
     q1 = q[idx];
     q2 = q[idx + 1];
     q3 = q[idx + 2];
@@ -679,11 +686,15 @@ void BsplineOptimizer::combineCost(
     for (int i = 0; i < variable_num_ / dim_; i++)
       for (int j = 0; j < dim_; j++) grad[dim_ * i + j] += lambda5_ * g_guide_[i + order_](j);
   }
-  if (cost_function_ & WAYPOINTS) {
+  if (cost_function_ & (WAYPOINTS | ANCHOR)) {
+    /* Both terms are the same quadratic on the trajectory positions and differ
+     * only in weight, because passing through requested waypoints and holding
+     * a shape that another stage already decided are tuned independently. */
+    const double lambda = (cost_function_ & ANCHOR) ? lambda_anchor_ : lambda7_;
     calcWaypointsCost(g_q_, f_waypoints, g_waypoints_);
-    f_combine += lambda7_ * f_waypoints;
+    f_combine += lambda * f_waypoints;
     for (int i = 0; i < variable_num_ / dim_; i++)
-      for (int j = 0; j < dim_; j++) grad[dim_ * i + j] += lambda7_ * g_waypoints_[i + order_](j);
+      for (int j = 0; j < dim_; j++) grad[dim_ * i + j] += lambda * g_waypoints_[i + order_](j);
   }
   if (useNonholonomicCost()) {
     calcYawRateCost(g_q_, f_yaw_rate, g_yaw_rate_);

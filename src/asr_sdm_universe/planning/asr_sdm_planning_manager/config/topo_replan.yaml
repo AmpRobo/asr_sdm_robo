@@ -76,6 +76,11 @@
       max_yaw_rate: 0.5
       max_pitch_rate: 0.5
       min_vel: 0.1
+      # Largest factor by which refinement may stretch the duration of a local
+      # segment. A topological detour is longer than the segment it replaces but
+      # inherits its duration, so it starts out over-speed and needs the extra
+      # time. Set to 1.01 to leave the timing almost untouched.
+      max_time_lengthen_ratio: 1.5
 
     topo_prm:
       sample_inflate_x: 1.0
@@ -94,11 +99,18 @@
     optimization:
       lambda1: 10.0
       lambda2: 5.0
-      lambda3: 0.0
+      # Velocity and acceleration feasibility. This has to stay above zero now
+      # that a detour is allowed to ask for more time than it inherited:
+      # max_time_lengthen_ratio bounds the stretch, this term does the rest.
+      lambda3: 1.0
       lambda4: 0.001
       lambda5: 1.5
       lambda6: 10.0
       lambda7: 20.0
+      # Holds the refined trajectory on the shape the selected topological
+      # candidate converged to. Raise it if the refinement still cuts the corner
+      # of a detour, lower it if the refinement can no longer open up clearance.
+      lambda_anchor: 2.0
       # Nonholonomic heading penalties on the position trajectory. Each weight
       # pairs with the limit of the same name above and each penalty is
       # normalized by that limit, so the weights are directly comparable to

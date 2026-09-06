@@ -183,6 +183,9 @@ struct PlanParameters
                                          // control points
   double clearance_;
   int dynamic_;
+  // Largest factor by which refinement may stretch the duration of a local
+  // segment to bring it back inside the velocity and acceleration limits.
+  double max_time_lengthen_ratio_;
   /* nonholonomic robot: the body axis follows the trajectory tangent, so the
    * heading limits below are enforced by the position optimization itself */
   bool nonholonomic_;
@@ -224,10 +227,12 @@ public:
   vector<vector<Eigen::Vector3d>> topo_filtered_paths_;
   vector<vector<Eigen::Vector3d>> topo_select_paths_;
 
-  // multiple topological trajectories
+  // multiple topological trajectories, indexed like topo_select_paths_
   vector<fast_planner::NonUniformBspline> topo_traj_pos1_;
   vector<fast_planner::NonUniformBspline> topo_traj_pos2_;
   vector<fast_planner::NonUniformBspline> refines_;
+  // Candidate the refinement was run on, or -1 when no candidate was selected.
+  int best_topo_idx_ = -1;
 
   // visibility constraint
   vector<Eigen::Vector3d> block_pts_;
@@ -247,6 +252,7 @@ public:
     topo_paths_.clear();
     topo_filtered_paths_.clear();
     topo_select_paths_.clear();
+    best_topo_idx_ = -1;
   }
 
   void addTopoPaths(
