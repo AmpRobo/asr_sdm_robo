@@ -18,7 +18,7 @@ by those nodes.
 |---|---|---|
 | [`asr_sdm_guidance_planner`](asr_sdm_guidance_planner/) | 3D A* + sphere corridor + L-BFGS guidance waypoints | library `GuidancePlanner`; test node `rviz_astar_lbfgs_planner` |
 | [`asr_sdm_local_path_modifier`](asr_sdm_local_path_modifier/) | Fast-Planner A* / TopologyPRM, plus a TopologyPRM-style local detour library | libraries `Astar`, `TopologyPRM`, `TopoPathModifier`; test node `local_path_modifier_test` |
-| [`asr_sdm_trajectory_optimizer`](asr_sdm_trajectory_optimizer/) | L-BFGS B-spline optimization, including nonholonomic heading costs | library only |
+| [`asr_sdm_trajectory_optimizer`](asr_sdm_trajectory_optimizer/) | L-BFGS B-spline optimization: nonholonomic heading costs and an ANCHOR term that holds a refined detour on the selected topological shape | library only |
 | [`asr_sdm_trajectory_generator`](asr_sdm_trajectory_generator/) | Closed-form minimum-snap polynomial trajectory | library only; the legacy `traj_generator` node is not built |
 | [`asr_sdm_trajectory_visualizer`](asr_sdm_trajectory_visualizer/) | RViz markers for goals, paths, B-splines, heading | library used by `planning_manager_node` |
 | [`asr_sdm_planning_manager`](asr_sdm_planning_manager/) | Topological replan FSM, heading B-splines, trajectory execution | `planning_manager_node`, `traj_server`; msg `Bspline` |
@@ -43,7 +43,8 @@ The production planning path is:
 /goal_pose (or /waypoint_generator/waypoints) + odom
   -> planning_manager_node
        global min-snap polynomial
-       local B-spline (TopologyPRM + L-BFGS)
+       local B-spline: TopologyPRM candidates → L-BFGS → lowest-jerk pick
+       refine: stretch duration (capped) + ANCHOR so jerk does not straighten the detour
        yaw / pitch from the trajectory tangent
   -> /planning/bspline
   -> traj_server (100 Hz)
@@ -52,7 +53,10 @@ The production planning path is:
 
 The robot is treated as a nonholonomic head: body +x follows the path tangent
 (`R = Rz(yaw) * Ry(pitch)`). The optimizer penalizes yaw rate, pitch rate, and
-too-low forward speed on the position B-spline. `traj_server` then samples that
+too-low forward speed on the position B-spline. After a topological detour is
+chosen, refinement only reallocates time (`manager.max_time_lengthen_ratio`) and
+trims clearance; `optimization.lambda_anchor` holds the selected candidate
+shape so the jerk term cannot cut the corner. `traj_server` then samples that
 heading into the twist fields that `asr_sdm_control_manager` consumes.
 
 `planning_simulator` can start this chain with `planning:=enable`.
@@ -235,7 +239,8 @@ source install/setup.bash
 /goal_pose（或 /waypoint_generator/waypoints）+ odom
   -> planning_manager_node
        全局 min-snap 多项式
-       局部 B-spline（TopologyPRM + L-BFGS）
+       局部 B-spline：TopologyPRM 候选 → L-BFGS → 选 jerk 最小
+       精修：拉长时间（有上限）+ ANCHOR，避免 jerk 把绕行拉直
        由轨迹切向得到 yaw / pitch
   -> /planning/bspline
   -> traj_server（100 Hz）
@@ -244,7 +249,10 @@ source install/setup.bash
 
 机器人按非完整头部处理：机体系 +x 跟随路径切向（`R = Rz(yaw) * Ry(pitch)`）。
 优化器在位置 B-spline 上惩罚偏航角速度、俯仰角速度和过低前向速度。
-`traj_server` 再把该朝向采样进 `asr_sdm_control_manager` 使用的 twist 字段。
+选出拓扑绕行后，精修只重新分配时间（`manager.max_time_lengthen_ratio`）并修
+间隙；`optimization.lambda_anchor` 把轨迹钉在所选候选的形状上，避免 jerk 项
+把弯角切掉。`traj_server` 再把该朝向采样进 `asr_sdm_control_manager` 使用的
+twist 字段。
 
 `GuidancePlanner` 和 `TopoPathModifier` 还没有接到 `planning_manager`；
 它们目前只在各自的测试节点里跑。`planning_manager` 用的是同一包里的
@@ -396,3 +404,14 @@ ros2 launch asr_sdm_local_path_modifier local_path_modifier_test.launch.py
 
 正式链 launch 参数：`odom_topic`（默认 `/visual_slam/odom`）、`cmd_topic`
 （默认 `/control/asr_sdm/robot_cmd`）。
+
+### Build
+
+```bash
+cd ~/asr_sdm_robo
+source /opt/ros/jazzy/setup.bash
+colcon build \
+  --packages-up-to asr_sdm_planning_manager asr_sdm_guidance_planner asr_sdm_local_path_modifier \
+  --symlink-install
+source install/setup.bash
+```
