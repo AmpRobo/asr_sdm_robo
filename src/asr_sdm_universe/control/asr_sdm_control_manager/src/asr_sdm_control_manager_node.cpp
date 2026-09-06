@@ -226,12 +226,20 @@ private:
   void onRobotCmd(const asr_sdm_control_msgs::msg::RobotCommand::SharedPtr msg)
   {
     cmd_cur_ = *msg;
+
+    // Head-following command from msg.vel: forward along head x, pitch about y,
+    // yaw about z. Linear is world-frame velocity; angular.y/z are planned rates.
+    const double v_forward = std::hypot(
+      msg->vel.linear.x, msg->vel.linear.y, msg->vel.linear.z);
     cmd_cur_.vel.linear.x =
-      std::min(std::max(msg->vel.linear.x, min_linear_velocity_), max_linear_velocity_);
+      std::clamp(v_forward, min_linear_velocity_, max_linear_velocity_);
+    cmd_cur_.vel.linear.y = 0.0;
+    cmd_cur_.vel.linear.z = 0.0;
+    cmd_cur_.vel.angular.x = 0.0;
     cmd_cur_.vel.angular.y =
-      std::min(std::max(msg->vel.angular.y, min_pitch_rate_), max_pitch_rate_);
+      std::clamp(msg->vel.angular.y, min_pitch_rate_, max_pitch_rate_);
     cmd_cur_.vel.angular.z =
-      std::min(std::max(msg->vel.angular.z, min_yaw_rate_), max_yaw_rate_);
+      std::clamp(msg->vel.angular.z, min_yaw_rate_, max_yaw_rate_);
     last_cmd_time_ = node_->now();
     const auto now = std::chrono::steady_clock::now();
     if (now - last_robot_cmd_log_ >= std::chrono::seconds(1)) {

@@ -13,6 +13,8 @@
 #include "std_msgs/msg/empty.hpp"
 #include "visualization_msgs/msg/marker.hpp"
 
+#include <Eigen/Geometry>
+
 #include <chrono>
 #include <cmath>
 #include <memory>
@@ -277,10 +279,20 @@ void cmdCallback()
   cmd.yaw = yaw;
   cmd.yaw_dot = yawdot;
 
-  // Head-frame twist: forward along x, pitch about y, yaw about z. No roll.
-  cmd.vel.linear.x = vel.norm();
-  cmd.vel.linear.y = 0.0;
-  cmd.vel.linear.z = 0.0;
+  cmd.pos.position.x = pos(0);
+  cmd.pos.position.y = pos(1);
+  cmd.pos.position.z = pos(2);
+  const Eigen::Quaterniond q =
+    Eigen::AngleAxisd(yaw, Eigen::Vector3d::UnitZ()) *
+    Eigen::AngleAxisd(pitch, Eigen::Vector3d::UnitY());
+  cmd.pos.orientation.x = q.x();
+  cmd.pos.orientation.y = q.y();
+  cmd.pos.orientation.z = q.z();
+  cmd.pos.orientation.w = q.w();
+
+  cmd.vel.linear.x = vel(0);
+  cmd.vel.linear.y = vel(1);
+  cmd.vel.linear.z = vel(2);
   cmd.vel.angular.x = 0.0;
   cmd.vel.angular.y = pitchdot;
   cmd.vel.angular.z = yawdot;
