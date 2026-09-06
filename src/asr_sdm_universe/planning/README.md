@@ -1,8 +1,8 @@
 # ASR-SDM planning packages
 
 This directory contains the planning-side packages used by the ASR-SDM stack.
-Four executables publish ROS 2 topics; the remaining packages are libraries
-called by those nodes.
+Four executables use ROS 2 topics; the remaining packages are libraries called
+by those nodes.
 
 [English](#english) · [中文](#中文)
 
@@ -17,30 +17,69 @@ called by those nodes.
 | Package | Responsibility | Main products |
 |---|---|---|
 | [`asr_sdm_guidance_planner`](asr_sdm_guidance_planner/) | 3D A* + sphere corridor + L-BFGS guidance waypoints | library `GuidancePlanner`; test node `rviz_astar_lbfgs_planner` |
-| [`asr_sdm_local_path_modifier`](asr_sdm_local_path_modifier/) | TopologyPRM-style local detour around a blocked path segment | library `TopoPathModifier`; test node `local_path_modifier_test` |
-| [`asr_sdm_trajectory_optimizer`](asr_sdm_trajectory_optimizer/) | Gradient-based B-spline trajectory optimization | library only, no topics |
-| [`asr_sdm_trajectory_generator`](asr_sdm_trajectory_generator/) | Closed-form minimum-jerk / mini-snap trajectory | library; standalone node `traj_generator` |
-| [`asr_sdm_trajectory_visualizer`](asr_sdm_trajectory_visualizer/) | RViz markers for goals, paths, B-splines, yaw | library used by `planning_manager_node` |
-| [`asr_sdm_planning_manager`](asr_sdm_planning_manager/) | Topological replan FSM, B-spline publication, trajectory execution | `planning_manager_node`, `traj_server` |
+| [`asr_sdm_local_path_modifier`](asr_sdm_local_path_modifier/) | Fast-Planner A* / TopologyPRM, plus a TopologyPRM-style local detour library | libraries `Astar`, `TopologyPRM`, `TopoPathModifier`; test node `local_path_modifier_test` |
+| [`asr_sdm_trajectory_optimizer`](asr_sdm_trajectory_optimizer/) | L-BFGS B-spline optimization, including nonholonomic heading costs | library only |
+| [`asr_sdm_trajectory_generator`](asr_sdm_trajectory_generator/) | Closed-form minimum-snap polynomial trajectory | library only; the legacy `traj_generator` node is not built |
+| [`asr_sdm_trajectory_visualizer`](asr_sdm_trajectory_visualizer/) | RViz markers for goals, paths, B-splines, heading | library used by `planning_manager_node` |
+| [`asr_sdm_planning_manager`](asr_sdm_planning_manager/) | Topological replan FSM, heading B-splines, trajectory execution | `planning_manager_node`, `traj_server`; msg `Bspline` |
 
-Data flow:
+Production dependencies are one-way:
 
 ```text
-guidance waypoints → local modifier (optional) → planning_manager (B-spline) → traj_server (position command)
+asr_sdm_esdf_map ------------------+
+asr_sdm_local_path_modifier -------+  (Astar, TopologyPRM)
+asr_sdm_trajectory_generator ------+
+asr_sdm_trajectory_optimizer ------+--> asr_sdm_planning_manager
+asr_sdm_trajectory_visualizer -----+
+bspline ---------------------------+
 ```
 
-Guidance and local-modifier topics currently come from **test nodes**. Those
-libraries are not yet wired into `planning_manager`.
+`GuidancePlanner` and `TopoPathModifier` are not linked into `planning_manager`
+yet. Those libraries are exercised by their test nodes.
 
-### Published topics
+The production planning path is:
+
+```text
+/goal_pose (or /waypoint_generator/waypoints) + odom
+  -> planning_manager_node
+       global min-snap polynomial
+       local B-spline (TopologyPRM + L-BFGS)
+       yaw / pitch from the trajectory tangent
+  -> /planning/bspline
+  -> traj_server (100 Hz)
+  -> /control/asr_sdm/robot_cmd
+```
+
+The robot is treated as a nonholonomic head: body +x follows the path tangent
+(`R = Rz(yaw) * Ry(pitch)`). The optimizer penalizes yaw rate, pitch rate, and
+too-low forward speed on the position B-spline. `traj_server` then samples that
+heading into the twist fields that `asr_sdm_control_manager` consumes.
+
+`planning_simulator` can start this chain with `planning:=enable`.
+
+### Topics
 
 #### 1. `planning_manager_node` (`asr_sdm_planning_manager`)
 
-`TopoReplanFSM` publishes the planning outputs:
+`TopoReplanFSM` plus the in-process ESDF map (`asr_sdm_esdf_map`). Parameters
+come from `asr_sdm_planning_manager/config/topo_replan.yaml`.
+
+**Subscribe**
 
 | Topic | Type | Role |
 |---|---|---|
-| `/planning/bspline` | `asr_sdm_planning_manager/msg/Bspline` | B-spline after a successful plan: control points, knots, yaw |
+| `/goal_pose` | `geometry_msgs/msg/PoseStamped` | RViz goal. Position is the target; orientation +x is the arrival heading |
+| `/waypoint_generator/waypoints` | `nav_msgs/msg/Path` | Waypoint list. Arrival heading is left unspecified |
+| `odom` | `nav_msgs/msg/Odometry` | Robot pose. Remapped to `/visual_slam/odom` in `asr_sdm_planning_manager.launch.py` |
+
+Launch also remaps the in-process ESDF map inputs (`/esdf_map/odom`,
+`/esdf_map/cloud`, `/esdf_map/pose`, `/esdf_map/depth`).
+
+**Publish**
+
+| Topic | Type | Role |
+|---|---|---|
+| `/planning/bspline` | `asr_sdm_planning_manager/msg/Bspline` | Local B-spline after a successful plan: position control points, knots, yaw, pitch |
 | `/planning/replan` | `std_msgs/msg/Empty` | Replan trigger; tells `traj_server` to drop the current trajectory |
 | `/planning/new` | `std_msgs/msg/Empty` | New trajectory is ready |
 
@@ -48,29 +87,59 @@ Visualization is published through `asr_sdm_trajectory_visualizer`:
 
 | Topic | Type | Role |
 |---|---|---|
-| `/planning_vis/trajectory` | `visualization_msgs/msg/Marker` | Goal, geometric path, polynomial global trajectory, B-spline |
+| `/planning_vis/trajectory` | `visualization_msgs/msg/Marker` | Goal, geometric path, global min-snap polynomial (black), local B-spline (red) |
 | `/planning_vis/topo_path` | `visualization_msgs/msg/Marker` | Topological candidate paths (phase 1 / phase 2) |
 | `/planning_vis/prediction` | `visualization_msgs/msg/Marker` | Dynamic obstacle prediction |
 | `/planning_vis/visib_constraint` | `visualization_msgs/msg/Marker` | Visibility constraints |
 | `/planning_vis/frontier` | `visualization_msgs/msg/Marker` | Frontier |
-| `/planning_vis/yaw` | `visualization_msgs/msg/Marker` | Yaw trajectory |
+| `/planning_vis/yaw` | `visualization_msgs/msg/Marker` | Body-axis heading along the trajectory (yaw + pitch) |
 
 #### 2. `traj_server` (`asr_sdm_planning_manager`)
 
 Subscribes to `/planning/bspline` and samples it at 100 Hz.
 
+**Subscribe**
+
 | Topic | Type | Role |
 |---|---|---|
-| `/position_cmd` | `asr_sdm_control_msgs/msg/RobotCommand` | Position / velocity / acceleration / yaw command. Remapped to `planning/pos_cmd` in `asr_sdm_planning_manager.launch.py` |
-| `planning/position_cmd_vis` | `visualization_msgs/msg/Marker` | Arrow at the current command pose |
-| `planning/travel_traj` | `visualization_msgs/msg/Marker` | Flown trajectory so far |
+| `planning/bspline` | `asr_sdm_planning_manager/msg/Bspline` | Trajectory to execute (resolves to `/planning/bspline` with no namespace) |
+| `planning/replan` | `std_msgs/msg/Empty` | Truncate the current trajectory |
+| `planning/new` | `std_msgs/msg/Empty` | Clear travelled-path visualization |
+| `odom` | `nav_msgs/msg/Odometry` | Same remap as the planner |
 
-With no namespace the last two resolve to `/planning/position_cmd_vis` and
-`/planning/travel_traj`.
+**Publish**
+
+| Topic | Type | Role |
+|---|---|---|
+| `/position_cmd` | `asr_sdm_control_msgs/msg/RobotCommand` | Sampled command. Remapped to `/control/asr_sdm/robot_cmd` in `asr_sdm_planning_manager.launch.py` |
+| `planning/position_cmd_vis` | `visualization_msgs/msg/Marker` | Arrow along the current body +x (yaw + pitch) |
+| `planning/travel_traj` | `visualization_msgs/msg/Marker` | Commanded positions so far |
+
+The command fills Cartesian `position` / `velocity` / `acceleration` and `yaw` /
+`yaw_dot`, and the head-frame twist that the controller uses:
+
+- `vel.linear.x` — forward speed
+- `vel.angular.y` — pitch rate
+- `vel.angular.z` — yaw rate
+
+With no namespace the last two visualization topics resolve to
+`/planning/position_cmd_vis` and `/planning/travel_traj`.
 
 #### 3. `rviz_astar_lbfgs_planner` (`asr_sdm_guidance_planner` test node)
 
-The library does not publish. The RViz test node publishes:
+The library does not publish. The RViz test node does.
+
+**Subscribe**
+
+| Topic | Type | Role |
+|---|---|---|
+| `/clicked_point` | `geometry_msgs/msg/PointStamped` | First click = start, second click = goal and plan |
+| `/esdf_map/occupancy_inflate` | `sensor_msgs/msg/PointCloud2` | Occupied voxels (topic map mode, or binary-load fallback) |
+| `/esdf_map/esdf_distance` | `sensor_msgs/msg/PointCloud2` | ESDF distance in `intensity` (topic map mode, or binary-load fallback) |
+
+Default map source is the package `maps/` binaries (`occupancy.bin`, `esdf.bin`).
+
+**Publish**
 
 | Topic | Type | Role |
 |---|---|---|
@@ -83,44 +152,52 @@ The library does not publish. The RViz test node publishes:
 
 #### 4. `local_path_modifier_test` (`asr_sdm_local_path_modifier` test node)
 
-The library does not publish. The test node publishes:
+The library does not publish. The test node does.
+
+**Subscribe**
 
 | Topic | Type | Role |
 |---|---|---|
-| `/planning/virtual_obstacles` | `visualization_msgs/msg/Marker` | Temporary spherical obstacles from RViz clicks |
+| `/planning/waypoints` | `nav_msgs/msg/Path` | Latest guidance waypoints (reliable + transient_local) |
+| `/planning/add_virtual_obstacle` | `geometry_msgs/msg/PointStamped` | RViz click: add a temporary spherical obstacle |
+| `/planning/clear_virtual_obstacles` | `std_msgs/msg/Empty` | Clear all temporary obstacles |
+
+**Publish**
+
+| Topic | Type | Role |
+|---|---|---|
+| `/planning/virtual_obstacles` | `visualization_msgs/msg/Marker` | Temporary spherical obstacles |
 | `/planning/topo_candidate_paths` | `visualization_msgs/msg/MarkerArray` | Selected TopologyPRM candidate detours (yellow) |
 
 It does **not** publish `/planning/modified_path`; it publishes all selected
 candidates.
 
-#### 5. `traj_generator` (`asr_sdm_trajectory_generator`)
-
-Standalone minimum-jerk generator; it does not go through `planning_manager`.
-
-| Topic | Type | Role |
-|---|---|---|
-| `/traj_generator/traj_vis` | `visualization_msgs/msg/Marker` | Generated trajectory |
-| `/traj_generator/cmd_vis` | `visualization_msgs/msg/Marker` | Current command-state arrow |
-| `/drone_commander/onboard_command` | `swarmtal_msgs/msg/DroneOnboardCommand` | Onboard control command |
-
 ### Packages that do not publish
 
-- `asr_sdm_trajectory_optimizer`: B-spline optimizer library
-- Library parts of `asr_sdm_guidance_planner` and `asr_sdm_local_path_modifier`: called by the manager or test nodes
+- `asr_sdm_trajectory_optimizer`: B-spline optimizer library (L-BFGS)
+- `asr_sdm_trajectory_generator`: min-snap polynomial library; the standalone
+  `traj_generator` demo is intentionally not built
+- Library parts of `asr_sdm_guidance_planner` and `asr_sdm_local_path_modifier`:
+  called by the manager or test nodes
 
 ### Production interfaces
 
-The three topics that matter for the production stack:
+The topics that matter for the production stack:
 
-1. `/planning/bspline` — planning output
-2. `/planning/replan` and `/planning/new` — trajectory lifetime
-3. `/position_cmd` (launch remaps to `planning/pos_cmd`) — position command for the controller
+1. `/goal_pose` — operator goal (RViz)
+2. `/planning/bspline` — planning output (position + yaw + pitch)
+3. `/planning/replan` and `/planning/new` — trajectory lifetime
+4. `/position_cmd` (launch remaps to `/control/asr_sdm/robot_cmd`) — command for
+   `asr_sdm_control_manager`
 
 ### Launch
 
 ```bash
-# Topological replan + traj_server
+# Topological replan + traj_server (production chain)
 ros2 launch asr_sdm_planning_manager asr_sdm_planning_manager.launch.py
+
+# Same chain inside the planning simulator
+ros2 launch planning_simulator planning_simulator.launch.py planning:=enable
 
 # Guidance planner test (RViz start/goal clicks)
 ros2 launch asr_sdm_guidance_planner astar_lbfgs_planner.launch.py
@@ -129,31 +206,75 @@ ros2 launch asr_sdm_guidance_planner astar_lbfgs_planner.launch.py
 ros2 launch asr_sdm_local_path_modifier local_path_modifier_test.launch.py
 ```
 
+Launch arguments for the production chain: `odom_topic` (default
+`/visual_slam/odom`) and `cmd_topic` (default `/control/asr_sdm/robot_cmd`).
+
+### Build
+
+```bash
+cd ~/asr_sdm_robo
+source /opt/ros/jazzy/setup.bash
+colcon build \
+  --packages-up-to asr_sdm_planning_manager asr_sdm_guidance_planner asr_sdm_local_path_modifier \
+  --symlink-install
+source install/setup.bash
+```
+
 ---
 
 <a id="中文"></a>
 
 ## 中文
 
-`planning` 目录里真正会 **publish** 的是 4 个可执行节点；其余包是库，不直接发 topic。
+`planning` 目录里真正走 ROS topic 的是 4 个节点：`planning_manager_node`、
+`traj_server`、`rviz_astar_lbfgs_planner`、`local_path_modifier_test`。其余包是库。
 
-数据流大致是：
+正式规划路径：
 
 ```text
-guidance waypoints → local modifier（可选）→ planning_manager（B-spline）→ traj_server（位置指令）
+/goal_pose（或 /waypoint_generator/waypoints）+ odom
+  -> planning_manager_node
+       全局 min-snap 多项式
+       局部 B-spline（TopologyPRM + L-BFGS）
+       由轨迹切向得到 yaw / pitch
+  -> /planning/bspline
+  -> traj_server（100 Hz）
+  -> /control/asr_sdm/robot_cmd
 ```
 
-guidance / local modifier 的 `/planning/waypoints` 等目前只在测试节点上发，还没有接到 `planning_manager`。
+机器人按非完整头部处理：机体系 +x 跟随路径切向（`R = Rz(yaw) * Ry(pitch)`）。
+优化器在位置 B-spline 上惩罚偏航角速度、俯仰角速度和过低前向速度。
+`traj_server` 再把该朝向采样进 `asr_sdm_control_manager` 使用的 twist 字段。
 
-### 发布的 topic
+`GuidancePlanner` 和 `TopoPathModifier` 还没有接到 `planning_manager`；
+它们目前只在各自的测试节点里跑。`planning_manager` 用的是同一包里的
+`Astar` / `TopologyPRM`。
+
+`planning_simulator` 可用 `planning:=enable` 拉起这条正式链。
+
+### 发布 / 订阅的 topic
 
 #### 1. `planning_manager_node`（正式规划栈）
 
-包：`asr_sdm_planning_manager`，由 `TopoReplanFSM` 发布。
+包：`asr_sdm_planning_manager`，由 `TopoReplanFSM` 发布。参数在
+`config/topo_replan.yaml`。ESDF 地图在节点内通过 `asr_sdm_esdf_map` 初始化。
+
+**Subscribe**
 
 | Topic | 类型 | 内容 |
 |---|---|---|
-| `/planning/bspline` | `asr_sdm_planning_manager/msg/Bspline` | 规划成功后的 B-spline：控制点、knots、yaw |
+| `/goal_pose` | `geometry_msgs/msg/PoseStamped` | RViz 目标。位置是终点；姿态 +x 是到达朝向 |
+| `/waypoint_generator/waypoints` | `nav_msgs/msg/Path` | 航点列表。不指定到达朝向 |
+| `odom` | `nav_msgs/msg/Odometry` | 机器人位姿。launch 默认 remap 成 `/visual_slam/odom` |
+
+launch 同时 remap 进程内 ESDF 地图输入（`/esdf_map/odom`、`/esdf_map/cloud`、
+`/esdf_map/pose`、`/esdf_map/depth`）。
+
+**Publish**
+
+| Topic | 类型 | 内容 |
+|---|---|---|
+| `/planning/bspline` | `asr_sdm_planning_manager/msg/Bspline` | 规划成功后的局部 B-spline：控制点、knots、yaw、pitch |
 | `/planning/replan` | `std_msgs/msg/Empty` | 触发重规划，通知 `traj_server` 丢掉当前轨迹 |
 | `/planning/new` | `std_msgs/msg/Empty` | 新轨迹生成完成 |
 
@@ -161,28 +282,58 @@ guidance / local modifier 的 `/planning/waypoints` 等目前只在测试节点�
 
 | Topic | 类型 | 内容 |
 |---|---|---|
-| `/planning_vis/trajectory` | `visualization_msgs/msg/Marker` | 目标点、几何路径、多项式全局轨、B-spline |
+| `/planning_vis/trajectory` | `visualization_msgs/msg/Marker` | 目标点、几何路径、全局 min-snap 多项式（黑）、局部 B-spline（红） |
 | `/planning_vis/topo_path` | `visualization_msgs/msg/Marker` | 拓扑候选路径（phase1/phase2） |
 | `/planning_vis/prediction` | `visualization_msgs/msg/Marker` | 动态障碍预测 |
 | `/planning_vis/visib_constraint` | `visualization_msgs/msg/Marker` | 可见性约束 |
 | `/planning_vis/frontier` | `visualization_msgs/msg/Marker` | frontier |
-| `/planning_vis/yaw` | `visualization_msgs/msg/Marker` | yaw 轨迹 |
+| `/planning_vis/yaw` | `visualization_msgs/msg/Marker` | 沿轨迹的机体系朝向（yaw + pitch） |
 
 #### 2. `traj_server`（轨迹执行）
 
 同一包，订阅 `/planning/bspline`，按 100 Hz 采样后下发控制指令。
 
+**Subscribe**
+
 | Topic | 类型 | 内容 |
 |---|---|---|
-| `/position_cmd` | `asr_sdm_control_msgs/msg/RobotCommand` | 位置/速度/加速度/yaw 指令。launch 里 remap 成 `planning/pos_cmd` |
-| `planning/position_cmd_vis` | `visualization_msgs/msg/Marker` | 当前指令位置的箭头可视化 |
-| `planning/travel_traj` | `visualization_msgs/msg/Marker` | 已飞过的轨迹 |
+| `planning/bspline` | `asr_sdm_planning_manager/msg/Bspline` | 待执行轨迹（无 namespace 时即 `/planning/bspline`） |
+| `planning/replan` | `std_msgs/msg/Empty` | 截断当前轨迹 |
+| `planning/new` | `std_msgs/msg/Empty` | 清空已飞轨迹可视化 |
+| `odom` | `nav_msgs/msg/Odometry` | 与规划节点同一 remap |
+
+**Publish**
+
+| Topic | 类型 | 内容 |
+|---|---|---|
+| `/position_cmd` | `asr_sdm_control_msgs/msg/RobotCommand` | 采样指令。launch 里 remap 成 `/control/asr_sdm/robot_cmd` |
+| `planning/position_cmd_vis` | `visualization_msgs/msg/Marker` | 当前机体系 +x 方向箭头（yaw + pitch） |
+| `planning/travel_traj` | `visualization_msgs/msg/Marker` | 已发出的指令位置 |
+
+指令同时填笛卡尔 `position` / `velocity` / `acceleration` 和 `yaw` /
+`yaw_dot`，以及控制器实际使用的机体系 twist：
+
+- `vel.linear.x`：前进速度
+- `vel.angular.y`：俯仰角速度
+- `vel.angular.z`：偏航角速度
 
 无 namespace 时后两个实际是 `/planning/position_cmd_vis`、`/planning/travel_traj`。
 
 #### 3. `rviz_astar_lbfgs_planner`（guidance 测试节点）
 
-包：`asr_sdm_guidance_planner`。库本身不发 topic；测试节点发：
+包：`asr_sdm_guidance_planner`。库本身不发 topic；测试节点发。
+
+**Subscribe**
+
+| Topic | 类型 | 内容 |
+|---|---|---|
+| `/clicked_point` | `geometry_msgs/msg/PointStamped` | 第一次点击为起点，第二次为终点并规划 |
+| `/esdf_map/occupancy_inflate` | `sensor_msgs/msg/PointCloud2` | 占据体素（topic 地图模式，或二进制加载失败后的回退） |
+| `/esdf_map/esdf_distance` | `sensor_msgs/msg/PointCloud2` | ESDF 距离在 `intensity`（同上） |
+
+默认用地图包内 `maps/occupancy.bin`、`maps/esdf.bin`。
+
+**Publish**
 
 | Topic | 类型 | 内容 |
 |---|---|---|
@@ -197,30 +348,51 @@ guidance / local modifier 的 `/planning/waypoints` 等目前只在测试节点�
 
 包：`asr_sdm_local_path_modifier`。库本身不发 topic。
 
+**Subscribe**
+
 | Topic | 类型 | 内容 |
 |---|---|---|
-| `/planning/virtual_obstacles` | `visualization_msgs/msg/Marker` | RViz 点选的临时球形障碍 |
+| `/planning/waypoints` | `nav_msgs/msg/Path` | 最新引导路点（reliable + transient_local） |
+| `/planning/add_virtual_obstacle` | `geometry_msgs/msg/PointStamped` | RViz 点选，加临时球形障碍 |
+| `/planning/clear_virtual_obstacles` | `std_msgs/msg/Empty` | 清空临时障碍 |
+
+**Publish**
+
+| Topic | 类型 | 内容 |
+|---|---|---|
+| `/planning/virtual_obstacles` | `visualization_msgs/msg/Marker` | 临时球形障碍 |
 | `/planning/topo_candidate_paths` | `visualization_msgs/msg/MarkerArray` | TopologyPRM 选出的黄色候选绕行路径 |
 
 不发 `/planning/modified_path`，只发全部候选路径。
 
-#### 5. `traj_generator`（独立最小 jerk 轨迹）
-
-包：`asr_sdm_trajectory_generator`，不走 planning_manager。
-
-| Topic | 类型 | 内容 |
-|---|---|---|
-| `/traj_generator/traj_vis` | `visualization_msgs/msg/Marker` | 生成轨迹 |
-| `/traj_generator/cmd_vis` | `visualization_msgs/msg/Marker` | 当前指令状态箭头 |
-| `/drone_commander/onboard_command` | `swarmtal_msgs/msg/DroneOnboardCommand` | 机载控制指令 |
-
 ### 不发布 topic 的包
 
-- `asr_sdm_trajectory_optimizer`：B-spline 优化库
-- `asr_sdm_local_path_modifier` / `asr_sdm_guidance_planner` 的库部分：被 manager 或测试节点调用，不自己建 publisher
+- `asr_sdm_trajectory_optimizer`：B-spline 优化库（L-BFGS）
+- `asr_sdm_trajectory_generator`：min-snap 多项式库；独立 `traj_generator` 演示节点故意不编译
+- `asr_sdm_guidance_planner` / `asr_sdm_local_path_modifier` 的库部分：被 manager 或测试节点调用
 
-### 正式栈对外接口（最关键的 3 个）
+### 正式栈对外接口
 
-1. `/planning/bspline`：规划输出
-2. `/planning/replan` / `/planning/new`：轨迹生命周期
-3. `/position_cmd`（launch 后为 `planning/pos_cmd`）：给控制器的位置指令
+1. `/goal_pose`：操作员目标（RViz）
+2. `/planning/bspline`：规划输出（位置 + yaw + pitch）
+3. `/planning/replan` / `/planning/new`：轨迹生命周期
+4. `/position_cmd`（launch 后为 `/control/asr_sdm/robot_cmd`）：给 `asr_sdm_control_manager` 的指令
+
+### Launch
+
+```bash
+# 拓扑重规划 + traj_server（正式链）
+ros2 launch asr_sdm_planning_manager asr_sdm_planning_manager.launch.py
+
+# 在 planning_simulator 里拉起同一条链
+ros2 launch planning_simulator planning_simulator.launch.py planning:=enable
+
+# guidance 测试（RViz 点选起终点）
+ros2 launch asr_sdm_guidance_planner astar_lbfgs_planner.launch.py
+
+# 局部改路测试（通常接在 guidance 之后）
+ros2 launch asr_sdm_local_path_modifier local_path_modifier_test.launch.py
+```
+
+正式链 launch 参数：`odom_topic`（默认 `/visual_slam/odom`）、`cmd_topic`
+（默认 `/control/asr_sdm/robot_cmd`）。
