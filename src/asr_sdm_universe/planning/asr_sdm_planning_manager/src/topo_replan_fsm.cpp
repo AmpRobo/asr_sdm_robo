@@ -16,6 +16,8 @@ void TopoReplanFSM::init(const std::shared_ptr<rclcpp::Node> & nh)
   current_wp_ = 0;
   exec_state_ = FSM_EXEC_STATE::INIT;
   have_target_ = false;
+  have_odom_ = false;
+  trigger_ = false;
   collide_ = false;
   start_yaw_.setZero();
   start_pitch_.setZero();

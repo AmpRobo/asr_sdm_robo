@@ -89,7 +89,7 @@ planning leaves these at zero because controller odometry is already in the ROS 
 | `src/asr_sdm_universe/control/asr_sdm_control_manager/` | Publishes `/control/asr_sdm/odom` with `child_frame_id = base` |
 | `src/asr_sdm_universe/localization/.../vins_estimator/src/utility/visualization.cpp` | `base → camera`; camera-frustum MarkerArray |
 | `src/asr_sdm_simulator/logging_simulator/config/logging_simulator.yaml` | Logging initial pose and `tf_*` |
-| `src/asr_sdm_simulator/planning_simulator/config/planning_simulator.yaml` | Planning initial pose (ROS yaw) |
+| `src/asr_sdm_universe/control/asr_sdm_control_manager/config/asr_sdm_control_manager.yaml` | Planning initial pose (ROS yaw) |
 
 ---
 
@@ -184,4 +184,4 @@ planning 不设这三项（全 0），因为控制器里程计已经是 ROS 机�
 | `src/asr_sdm_universe/control/asr_sdm_control_manager/` | 发布 `/control/asr_sdm/odom`，`child_frame_id = base` |
 | `src/asr_sdm_universe/localization/.../vins_estimator/src/utility/visualization.cpp` | `base → camera`；相机框 MarkerArray |
 | `src/asr_sdm_simulator/logging_simulator/config/logging_simulator.yaml` | logging 初始位姿与 `tf_*` |
-| `src/asr_sdm_simulator/planning_simulator/config/planning_simulator.yaml` | planning 初始位姿（ROS yaw） |
+| `src/asr_sdm_universe/control/asr_sdm_control_manager/config/asr_sdm_control_manager.yaml` | planning 初始位姿（ROS yaw） |

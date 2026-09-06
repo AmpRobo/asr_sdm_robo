@@ -25,7 +25,6 @@ def _enabled(flag: LaunchConfiguration) -> IfCondition:
 
 def generate_launch_description():
     pkg_share = get_package_share_directory("planning_simulator")
-    config = os.path.join(pkg_share, "config", "planning_simulator.yaml")
     rviz_config = os.path.join(pkg_share, "config", "rviz.rviz")
     map_generator_config = os.path.join(
         get_package_share_directory("asr_sdm_map_generator"),
@@ -39,7 +38,6 @@ def generate_launch_description():
 
     sim_odom = "/control/asr_sdm/odom"
     vins_odom = "/localization/video_inertial_navigation_systems/odometry"
-    visual_slam_odom = "/visual_slam/odom"
 
     robot_model_arg = DeclareLaunchArgument(
         "robot_model",
@@ -82,37 +80,7 @@ def generate_launch_description():
                     "/simulator/planning_simulator/add_static_obstacle",
             },
         ],
-        remappings=[("odometry", visual_slam_odom)],
-    )
-
-    planning_simulator = Node(
-        package="planning_simulator",
-        executable="planning_simulator",
-        name="planning_simulator",
-        output="screen",
-        parameters=[config],
-        remappings=[
-            ("odom", visual_slam_odom),
-            ("cmd", "so3_cmd"),
-            ("imu", "sim/imu"),
-            ("force_disturbance", "force_disturbance"),
-            ("moment_disturbance", "moment_disturbance"),
-            ("initialpose", "/control/initial_pose"),
-        ],
-    )
-
-    so3_disturbance_generator = Node(
-        package="so3_disturbance_generator",
-        executable="so3_disturbance_generator",
-        name="so3_disturbance_generator",
-        output="screen",
-        remappings=[
-            ("odom", visual_slam_odom),
-            ("noisy_odom", "/state_ukf/odom"),
-            ("correction", "/visual_slam/correction"),
-            ("force_disturbance", "force_disturbance"),
-            ("moment_disturbance", "moment_disturbance"),
-        ],
+        remappings=[("odometry", sim_odom)],
     )
 
     odom_visualization = Node(
@@ -195,7 +163,7 @@ def generate_launch_description():
             os.path.join(
                 get_package_share_directory("asr_sdm_planning_manager"),
                 "launch", "asr_sdm_planning_manager.launch.py")),
-        launch_arguments={"odom_topic": visual_slam_odom}.items(),
+        launch_arguments={"odom_topic": sim_odom}.items(),
         condition=_enabled(planning),
     )
 
@@ -213,8 +181,6 @@ def generate_launch_description():
         teleop_arg,
         planning_arg,
         random_map_sensing,
-        planning_simulator,
-        so3_disturbance_generator,
         odom_visualization,
         odom_visualization_control,
         odom_visualization_vins,

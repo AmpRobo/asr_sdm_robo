@@ -36,7 +36,10 @@ def generate_launch_description():
         executable="planning_manager_node",
         name="planning_manager_node",
         output="screen",
-        parameters=[config],
+        parameters=[
+            config,
+            {"esdf_map.simulation_odom_topic": odom_topic},
+        ],
         remappings=[
             ("odom", odom_topic),
             ("/esdf_map/odom", odom_topic),

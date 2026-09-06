@@ -1,6 +1,6 @@
 # planning_simulator
 
-Planning simulation stack: map generation, dynamics simulation, RViz, plus optional robot model, kinematic control, gamepad teleop, and planning.
+Planning simulation stack: map generation, RViz, plus optional robot model, kinematic control, gamepad teleop, and planning.
 
 [English](#english) · [中文](#中文)
 
@@ -26,7 +26,7 @@ source install/setup.bash
 ros2 launch planning_simulator planning_simulator.launch.py
 ```
 
-By default this starts the simulator, random map, RViz, the `asr_sdm` robot model, and the kinematic controller. The model appears at `(-5, 0, 0)`. Gamepad teleop and planning are off.
+By default this starts the random map, RViz, the `asr_sdm` robot model, and the kinematic controller. The model appears at `(-5, 0, 0)`. Gamepad teleop and planning are off.
 
 List all launch arguments:
 
@@ -47,7 +47,7 @@ ros2 launch planning_simulator planning_simulator.launch.py --show-args
 Common combinations:
 
 ```bash
-# Default: sim + model + controller (drive with robot_cmd)
+# Default: map + model + controller (drive with robot_cmd)
 ros2 launch planning_simulator planning_simulator.launch.py
 
 # Add gamepad teleop
@@ -64,7 +64,7 @@ ros2 launch planning_simulator planning_simulator.launch.py odom_source:=control
 ros2 launch planning_simulator planning_simulator.launch.py \
   robot_model:=asr_sdm control:=enable teleop:=enable planning:=enable
 
-# Sim only, no controller (model will not move; may be invisible in RViz if Fixed Frame is world)
+# Map and RViz only, no controller (model will not move; may be invisible in RViz if Fixed Frame is world)
 ros2 launch planning_simulator planning_simulator.launch.py control:=disable
 ```
 
@@ -76,23 +76,17 @@ Node parameters and topic names live in:
 config/planning_simulator.yaml
 ```
 
-The `robot_model` and `control` optional stacks receive the same file via `config_file` and read their sections from it:
-
-- Model: `features.use_asr_sdm_model`, `topics`, `robot_model`
-- Controller: `features.use_kinematic_controller`, `topics`, `kinematic_controller`
-
-To change initial pose, topic names, or controller gains, edit that YAML and restart the launch (no rebuild needed; this package uses symlink install).
+This file documents the topic names used by the launch. Initial pose and controller gains live in `asr_sdm_control_manager/config/asr_sdm_control_manager.yaml`. Restart the launch after editing (this package uses symlink install).
 
 ### Topics
 
 | Topic | Description |
 |---|---|
 | `/control/asr_sdm/robot_cmd` | Input from teleop / planning; drives the kinematic controller |
-| `/control/asr_sdm/odom` | Odometry published by the controller; model pose source with `odom_source:=control` |
+| `/control/asr_sdm/odom` | Odometry published by the controller; model pose source with `odom_source:=control`. Planning and map sensing also use this topic so a new goal starts from the current robot pose |
 | `/localization/video_inertial_navigation_systems/odometry` | VINS odometry; model pose source with `odom_source:=vins` |
 | `/control/joint_states` | Joint states for `robot_state_publisher` |
 | `/control/initial_pose` | Reset controller pose (RViz 2D Pose Estimate) |
-| `/visual_slam/odom` | Simulator dynamics odometry |
 | `/simulator/planning_simulator/add_static_obstacle` | Click-to-add pillar obstacles (RViz Static Obstacle tool) |
 
 Without a gamepad, publish a RobotCommand (using `vel`) to exercise the controller:
@@ -122,7 +116,7 @@ Responsibilities:
 
 | Package / launch | Responsibility |
 |---|---|
-| `planning_simulator` | Simulation, map, RViz, top-level assemble |
+| `planning_simulator` | Map, RViz, top-level assemble |
 | `asr_sdm` / `asr_sdm_description.launch.py` | URDF and static TF |
 | `asr_sdm_control_manager` | Kinematic controller |
 | `asr_sdm_teleop` | `joy` + teleop |
@@ -161,7 +155,7 @@ source install/setup.bash
 ros2 launch planning_simulator planning_simulator.launch.py
 ```
 
-默认会启动仿真、随机地图、RViz，并加载 `asr_sdm` 机器人模型与运动学控制器。模型会显示在 `(-5, 0, 0)`，手柄遥控和规划模块默认关闭。
+默认会启动随机地图、RViz，并加载 `asr_sdm` 机器人模型与运动学控制器。模型会显示在 `(-5, 0, 0)`，手柄遥控和规划模块默认关闭。
 
 查看全部启动参数：
 
@@ -182,7 +176,7 @@ ros2 launch planning_simulator planning_simulator.launch.py --show-args
 常用组合：
 
 ```bash
-# 默认：仿真 + 模型 + 控制器（可用 robot_cmd 驱动）
+# 默认：地图 + 模型 + 控制器（可用 robot_cmd 驱动）
 ros2 launch planning_simulator planning_simulator.launch.py
 
 # 加手柄遥控
@@ -199,7 +193,7 @@ ros2 launch planning_simulator planning_simulator.launch.py odom_source:=control
 ros2 launch planning_simulator planning_simulator.launch.py \
   robot_model:=asr_sdm control:=enable teleop:=enable planning:=enable
 
-# 只看仿真，不启动控制器（模型不会动，RViz Fixed Frame 为 world 时可能看不见模型）
+# 只看地图和 RViz，不启动控制器（模型不会动，RViz Fixed Frame 为 world 时可能看不见模型）
 ros2 launch planning_simulator planning_simulator.launch.py control:=disable
 ```
 
@@ -211,23 +205,17 @@ ros2 launch planning_simulator planning_simulator.launch.py control:=disable
 config/planning_simulator.yaml
 ```
 
-`robot_model`、`control` 两个可选栈通过 `config_file` 读取同一份配置里的对应段落：
-
-- 模型：`features.use_asr_sdm_model`、`topics`、`robot_model`
-- 控制器：`features.use_kinematic_controller`、`topics`、`kinematic_controller`
-
-改初始位姿、话题名、控制器增益等，优先改这份 yaml，然后重新启动 launch（不必单独重编，本包用 symlink install）。
+本文件记录 launch 使用的话题名。初始位姿和控制器增益在 `asr_sdm_control_manager/config/asr_sdm_control_manager.yaml`。改完后重新启动 launch（本包用 symlink install）。
 
 ### 相关话题
 
 | 话题 | 说明 |
 |---|---|
 | `/control/asr_sdm/robot_cmd` | 手柄 / 规划侧输入，驱动运动学控制器 |
-| `/control/asr_sdm/odom` | 控制器发布的里程计；`odom_source:=control` 时作为模型位姿来源 |
+| `/control/asr_sdm/odom` | 控制器发布的里程计；`odom_source:=control` 时作为模型位姿来源。规划与地图感知也订阅该话题，第二次设目标会从当前机器人位置开始 |
 | `/localization/video_inertial_navigation_systems/odometry` | VINS 里程计；`odom_source:=vins` 时作为模型位姿来源 |
 | `/control/joint_states` | 控制器发布的关节状态，供给 `robot_state_publisher` |
 | `/control/initial_pose` | 重置控制器位姿（RViz 2D Pose Estimate） |
-| `/visual_slam/odom` | 仿真器动力学里程计 |
 | `/simulator/planning_simulator/add_static_obstacle` | RViz Static Obstacle 工具点击加点柱障碍 |
 
 无手柄时可用 topic 直接发速度测试控制器：
@@ -257,7 +245,7 @@ ros2 topic pub --rate 20 /control/asr_sdm/robot_cmd asr_sdm_control_msgs/msg/Rob
 
 | 包 / launch | 负责 |
 |---|---|
-| `planning_simulator` | 仿真、地图、RViz、一键拼装 |
+| `planning_simulator` | 地图、RViz、一键拼装 |
 | `asr_sdm` / `asr_sdm_description.launch.py` | URDF 与静态 TF |
 | `asr_sdm_control_manager` | 运动学控制器 |
 | `asr_sdm_teleop` | `joy` + teleop |

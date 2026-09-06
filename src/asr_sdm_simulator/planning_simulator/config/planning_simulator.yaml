@@ -13,34 +13,16 @@
       # Start RViz with the package rviz config.
       use_rviz: true
 
-    rate:
-      odom: 100.0
-
-    simulator:
-      init_state_x: -5.0
-      init_state_y: 0.0
-      init_state_z: 3.0
-
     topics:
       sim_odom: /control/asr_sdm/odom
       # Alternative pose source for the robot model, selected with odom_source:=vins.
       # odom_source:=auto follows whichever of the two published last.
       vins_odom: /localization/video_inertial_navigation_systems/odometry
-      visual_slam_odom: /visual_slam/odom
-      state_ukf_odom: /state_ukf/odom
-      visual_slam_correction: /visual_slam/correction
-      so3_cmd: so3_cmd
-      imu: sim/imu
-      force_disturbance: force_disturbance
-      moment_disturbance: moment_disturbance
       initialpose: /control/initial_pose
       joint_states: /control/joint_states
       robot_cmd: /control/asr_sdm/robot_cmd
       controller_state: /control/asr_sdm/controller_state_3d
       control_cmd: /control/asr_sdm/control_cmd_3d
-      position_cmd: position_cmd
-      motors: motors
-      corrections: corrections
       goal_pose: /goal_pose
       add_static_obstacle: /simulator/planning_simulator/add_static_obstacle
 
