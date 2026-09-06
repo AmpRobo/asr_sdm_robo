@@ -1,12 +1,17 @@
 cmake_minimum_required(VERSION 3.8)
 project(asr_sdm_head_following_control)
 
+if(NOT CMAKE_CXX_STANDARD)
+  set(CMAKE_CXX_STANDARD 17)
+endif()
+
 if(CMAKE_COMPILER_IS_GNUCXX OR CMAKE_CXX_COMPILER_ID MATCHES "Clang")
   add_compile_options(-Wall -Wextra -Wpedantic)
 endif()
 
 find_package(ament_cmake REQUIRED)
 find_package(asr_sdm_control_msgs REQUIRED)
+find_package(grampc REQUIRED)
 
 option(BUILD_CONTROLLER_DEMOS "Build the controller plotting demos" OFF)
 
@@ -29,7 +34,27 @@ target_link_libraries(front_unit_following_controller_3d_core PUBLIC
   ${asr_sdm_control_msgs_TARGETS}
 )
 
-install(TARGETS front_unit_following_controller_2d_core front_unit_following_controller_3d_core
+add_library(head_command_mpc STATIC
+  src/head_command_problem_description.cpp
+  src/head_command_mpc.cpp
+)
+target_include_directories(head_command_mpc PUBLIC
+  $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+  $<INSTALL_INTERFACE:include>
+)
+target_include_directories(head_command_mpc PRIVATE
+  ${CMAKE_CURRENT_SOURCE_DIR}/src
+)
+target_link_libraries(head_command_mpc PUBLIC
+  front_unit_following_controller_3d_core
+  grampc::grampc_s
+  ${asr_sdm_control_msgs_TARGETS}
+)
+
+install(TARGETS
+  front_unit_following_controller_2d_core
+  front_unit_following_controller_3d_core
+  head_command_mpc
   EXPORT asr_sdm_head_following_control_targets
   ARCHIVE DESTINATION lib
   LIBRARY DESTINATION lib
@@ -41,7 +66,7 @@ install(DIRECTORY include/
 )
 
 ament_export_targets(asr_sdm_head_following_control_targets HAS_LIBRARY_TARGET)
-ament_export_dependencies(asr_sdm_control_msgs)
+ament_export_dependencies(asr_sdm_control_msgs grampc)
 
 if(BUILD_CONTROLLER_DEMOS)
   find_package(Python3 REQUIRED COMPONENTS Interpreter Development NumPy)
@@ -105,6 +130,14 @@ if(BUILD_TESTING)
   # matplotlibcpp.h is vendored test code and does not follow this package's style.
   set(AMENT_LINT_AUTO_EXCLUDE "ament_cmake_uncrustify;ament_uncrustify;uncrustify")
   ament_lint_auto_find_test_dependencies()
+
+  add_executable(head_command_mpc_test
+    test/head_command_mpc_test.cpp
+  )
+  target_link_libraries(head_command_mpc_test PUBLIC
+    head_command_mpc
+  )
+  add_test(NAME head_command_mpc_test COMMAND head_command_mpc_test)
 endif()
 
 ament_package()

@@ -1,4 +1,5 @@
 #include "asr_sdm_head_following_control/front_unit_following_controller_3d.hpp"
+#include "asr_sdm_head_following_control/head_command_mpc.hpp"
 #include "asr_sdm_kinematic_dynamic_model/asr_sdm_kinematic_model.hpp"
 
 #include "asr_sdm_control_msgs/msg/actuator_cmd.hpp"
@@ -109,6 +110,9 @@ public:
 
     model_ = std::make_unique<asr::AsrSdmKinematicModel>(model_params_);
     controller_ = std::make_unique<asr::FrontUnitFollowingController3D>(controller_params_);
+    if (enable_grampc_compensation_) {
+      mpc_ = std::make_unique<asr::HeadCommandMPC>(mpc_params_);
+    }
 
     state_ = controller_->makeInitialState();
     resetState(initial_x_, initial_y_, initial_z_, initial_yaw_);
@@ -136,8 +140,8 @@ public:
       std::bind(&AsrSdmControlManager::onControlTimer, this));
 
     SPDLOG_INFO(
-      "ASR SDM control manager started: model=URDF-free Pinocchio, robot_cmd={}, state={}",
-      robot_cmd_topic_, controller_state_topic_);
+      "ASR SDM control manager started: model=URDF-free Pinocchio, robot_cmd={}, state={}, grampc={}",
+      robot_cmd_topic_, controller_state_topic_, enable_grampc_compensation_ ? "on" : "off");
   }
 
 private:
@@ -178,6 +182,31 @@ private:
     controller_params_.max_yaw_rate = node_->declare_parameter<double>(
       "max_yaw_rate", 0.35);
 
+    enable_grampc_compensation_ = node_->declare_parameter<bool>(
+      "grampc_compensation.enable", true);
+    mpc_params_.Thor = node_->declare_parameter<double>(
+      "grampc_compensation.Thor", 0.4);
+    mpc_params_.Nhor = node_->declare_parameter<int>(
+      "grampc_compensation.Nhor", 20);
+    mpc_params_.max_grad_iter = node_->declare_parameter<int>(
+      "grampc_compensation.max_grad_iter", 4);
+    mpc_params_.q_position = node_->declare_parameter<double>(
+      "grampc_compensation.q_position", 8.0);
+    mpc_params_.q_heading = node_->declare_parameter<double>(
+      "grampc_compensation.q_heading", 1.5);
+    mpc_params_.r_linear = node_->declare_parameter<double>(
+      "grampc_compensation.r_linear", 0.2);
+    mpc_params_.r_angular = node_->declare_parameter<double>(
+      "grampc_compensation.r_angular", 0.05);
+    mpc_params_.terminal_position_scale = node_->declare_parameter<double>(
+      "grampc_compensation.terminal_position_scale", 4.0);
+    mpc_params_.min_linear_velocity = controller_params_.min_linear_velocity;
+    mpc_params_.max_linear_velocity = controller_params_.max_linear_velocity;
+    mpc_params_.min_pitch_rate = controller_params_.min_pitch_rate;
+    mpc_params_.max_pitch_rate = controller_params_.max_pitch_rate;
+    mpc_params_.min_yaw_rate = controller_params_.min_yaw_rate;
+    mpc_params_.max_yaw_rate = controller_params_.max_yaw_rate;
+
     robot_cmd_topic_ = node_->declare_parameter<std::string>(
       "robot_cmd_topic", "/control/asr_sdm/robot_cmd");
     controller_state_topic_ = node_->declare_parameter<std::string>(
@@ -207,6 +236,7 @@ private:
     joint_position_limit_rad_ = node_->declare_parameter<double>(
       "joint_position_limit_rad", model_params_.joint_limit);
     control_period_ms_ = node_->declare_parameter<int>("control_period_ms", 20);
+    mpc_params_.dt = static_cast<double>(control_period_ms_) / 1000.0;
     cmd_timeout_sec_ = node_->declare_parameter<double>("cmd_timeout_sec", 0.3);
     screw_velocity_scale_ = node_->declare_parameter<double>(
       "screw_velocity_scale", 21.277);
@@ -231,14 +261,17 @@ private:
 
   void onRobotCmd(const asr_sdm_control_msgs::msg::RobotCommand::SharedPtr msg)
   {
+    cmd_raw_ = *msg;
     cmd_cur_ = controller_->toHeadFollowingCommand(*msg);
     last_cmd_time_ = node_->now();
     const auto now = std::chrono::steady_clock::now();
     if (now - last_robot_cmd_log_ >= std::chrono::seconds(1)) {
       last_robot_cmd_log_ = now;
       SPDLOG_INFO(
-        "robot_cmd limited -> v={:.3f} pitch={:.3f} yaw={:.3f}", cmd_cur_.vel.linear.x,
-        cmd_cur_.vel.angular.y, cmd_cur_.vel.angular.z);
+        "robot_cmd limited -> v={:.3f} pitch={:.3f} yaw={:.3f} pos=({:.3f},{:.3f},{:.3f}) flag={}",
+        cmd_cur_.vel.linear.x, cmd_cur_.vel.angular.y, cmd_cur_.vel.angular.z,
+        cmd_raw_.position.x, cmd_raw_.position.y, cmd_raw_.position.z,
+        static_cast<unsigned>(cmd_raw_.trajectory_flag));
     }
   }
 
@@ -279,6 +312,7 @@ private:
         2.0 * (qy * qz - qx * qw)},
       {2.0 * (qx * qz - qy * qw), 2.0 * (qy * qz + qx * qw),
         1.0 - 2.0 * (qx * qx + qy * qy)}}};
+    cmd_raw_ = asr_sdm_control_msgs::msg::RobotCommand();
     cmd_cur_ = asr_sdm_control_msgs::msg::RobotCommand();
     latest_joint_velocity_ = {};
     rotor_positions_.fill(0.0);
@@ -385,8 +419,22 @@ private:
     last_control_time_ = current_time;
 
     asr_sdm_control_msgs::msg::RobotCommand robot_cmd = cmd_cur_;
+    bool timed_out = false;
     if ((current_time - last_cmd_time_).seconds() > cmd_timeout_sec_) {
       robot_cmd = asr_sdm_control_msgs::msg::RobotCommand();
+      timed_out = true;
+    }
+    if (!timed_out && mpc_ && asr::HeadCommandMPC::hasPositionReference(cmd_raw_)) {
+      const auto compensated = mpc_->compensate(cmd_raw_, robot_cmd, state_);
+      robot_cmd = compensated.command;
+      const auto now = std::chrono::steady_clock::now();
+      if (compensated.applied && now - last_compensation_log_ >= std::chrono::seconds(1)) {
+        last_compensation_log_ = now;
+        SPDLOG_INFO(
+          "grampc compensation e=({:.3f},{:.3f},{:.3f}) v={:.3f} wy={:.3f} wz={:.3f}",
+          compensated.position_error.x, compensated.position_error.y, compensated.position_error.z,
+          robot_cmd.vel.linear.x, robot_cmd.vel.angular.y, robot_cmd.vel.angular.z);
+      }
     }
     robot_cmd = controller_->limitCommand(robot_cmd);
 
@@ -519,9 +567,12 @@ private:
   rclcpp::Node::SharedPtr node_;
   asr::AsrSdmKinematicModelParameters model_params_;
   asr::FrontUnitController3DParameters controller_params_;
+  asr::HeadCommandMPCParameters mpc_params_;
   std::unique_ptr<asr::AsrSdmKinematicModel> model_;
   std::unique_ptr<asr::FrontUnitFollowingController3D> controller_;
+  std::unique_ptr<asr::HeadCommandMPC> mpc_;
   asr::SimulationState3D state_;
+  asr_sdm_control_msgs::msg::RobotCommand cmd_raw_{};
   asr_sdm_control_msgs::msg::RobotCommand cmd_cur_{};
   asr::JointVelocity3D latest_joint_velocity_{};
   std::array<double, kRotorJointNames.size()> rotor_positions_{};
@@ -545,6 +596,7 @@ private:
   double initial_yaw_{0.0};
   int control_period_ms_{20};
   double cmd_timeout_sec_{0.3};
+  bool enable_grampc_compensation_{true};
   double screw_velocity_scale_{21.277};
   bool publish_control_cmd_{false};
   double joint_angle_scale_{1.0};
@@ -553,6 +605,7 @@ private:
   rclcpp::Time last_cmd_time_{0, 0, RCL_ROS_TIME};
   rclcpp::Time last_control_time_{0, 0, RCL_ROS_TIME};
   std::chrono::steady_clock::time_point last_robot_cmd_log_{};
+  std::chrono::steady_clock::time_point last_compensation_log_{};
   rclcpp::Subscription<asr_sdm_control_msgs::msg::RobotCommand>::SharedPtr sub_robot_cmd_;
   rclcpp::Subscription<geometry_msgs::msg::PoseWithCovarianceStamped>::SharedPtr sub_initialpose_;
   rclcpp::Publisher<std_msgs::msg::Float64MultiArray>::SharedPtr pub_controller_state_;

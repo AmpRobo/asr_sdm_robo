@@ -27,6 +27,7 @@ find_package(asr_sdm_control_msgs REQUIRED)
 find_package(asr_sdm_kinematic_dynamic_model REQUIRED)
 find_package(asr_sdm_head_following_control REQUIRED)
 find_package(asr_sdm_log_collector REQUIRED)
+find_package(grampc REQUIRED)
 
 add_executable(asr_sdm_control_manager
   src/asr_sdm_control_manager_node.cpp
@@ -34,6 +35,7 @@ add_executable(asr_sdm_control_manager
 target_link_libraries(asr_sdm_control_manager PUBLIC
   asr_sdm_kinematic_dynamic_model::asr_sdm_kinematic_model
   asr_sdm_head_following_control::front_unit_following_controller_3d_core
+  asr_sdm_head_following_control::head_command_mpc
   asr_sdm_log_collector::asr_sdm_log_client
   ${asr_sdm_control_msgs_TARGETS}
   ${geometry_msgs_TARGETS}

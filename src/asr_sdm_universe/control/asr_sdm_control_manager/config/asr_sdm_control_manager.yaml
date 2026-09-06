@@ -45,6 +45,19 @@
     # r ≈ 0.047 m (rotor visual radius). At 0.2 m/s ≈ 41 rpm.
     screw_velocity_scale: 21.277
 
+    # GRAMPC head-pose MPC. Uses robot_cmd pos/vel/acc when
+    # trajectory_flag is READY (planning). Teleop is unchanged.
+    grampc_compensation:
+      enable: true
+      Thor: 0.4
+      Nhor: 20
+      max_grad_iter: 4
+      q_position: 8.0
+      q_heading: 1.5
+      r_linear: 0.2
+      r_angular: 0.05
+      terminal_position_scale: 4.0
+
     publish_control_cmd: false
     joint_angle_scale: 1.0
     joint_angle_limit: 2147483647
