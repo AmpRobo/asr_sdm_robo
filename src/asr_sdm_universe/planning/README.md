@@ -16,8 +16,9 @@ by those nodes.
 
 | Package | Responsibility | Main products |
 |---|---|---|
+| [`asr_sdm_guidance_planner`](asr_sdm_guidance_planner/) | Fast-Planner grid A* front-end path search | library `Astar` |
 | [`asr_sdm_guidance_planner_dev`](asr_sdm_guidance_planner_dev/) | 3D A* + sphere corridor + L-BFGS guidance waypoints | library `GuidancePlanner`; test node `rviz_astar_lbfgs_planner` |
-| [`asr_sdm_local_path_modifier`](asr_sdm_local_path_modifier/) | Fast-Planner A* / TopologyPRM, plus a TopologyPRM-style local detour library | libraries `Astar`, `TopologyPRM`, `TopoPathModifier`; test node `local_path_modifier_test` |
+| [`asr_sdm_local_path_modifier`](asr_sdm_local_path_modifier/) | Fast-Planner TopologyPRM, plus a TopologyPRM-style local detour library | libraries `TopologyPRM`, `TopoPathModifier`; test node `local_path_modifier_test` |
 | [`asr_sdm_trajectory_optimizer`](asr_sdm_trajectory_optimizer/) | L-BFGS B-spline optimization: nonholonomic heading costs and an ANCHOR term that holds a refined detour on the selected topological shape | library only |
 | [`asr_sdm_trajectory_generator`](asr_sdm_trajectory_generator/) | Closed-form minimum-snap polynomial trajectory | library only; the legacy `traj_generator` node is not built |
 | [`asr_sdm_trajectory_visualizer`](asr_sdm_trajectory_visualizer/) | RViz markers for goals, paths, B-splines, heading | library used by `planning_manager_node` |
@@ -27,7 +28,8 @@ Production dependencies are one-way:
 
 ```text
 asr_sdm_esdf_map ------------------+
-asr_sdm_local_path_modifier -------+  (Astar, TopologyPRM)
+asr_sdm_guidance_planner ----------+  (Astar)
+asr_sdm_local_path_modifier -------+  (TopologyPRM)
 asr_sdm_trajectory_generator ------+
 asr_sdm_trajectory_optimizer ------+--> asr_sdm_planning_manager
 asr_sdm_trajectory_visualizer -----+
@@ -181,6 +183,7 @@ candidates.
 - `asr_sdm_trajectory_optimizer`: B-spline optimizer library (L-BFGS)
 - `asr_sdm_trajectory_generator`: min-snap polynomial library; the standalone
   `traj_generator` demo is intentionally not built
+- `asr_sdm_guidance_planner`: grid A* front-end search library
 - Library parts of `asr_sdm_guidance_planner_dev` and `asr_sdm_local_path_modifier`:
   called by the manager or test nodes
 
@@ -255,8 +258,9 @@ source install/setup.bash
 twist 字段。
 
 `GuidancePlanner` 和 `TopoPathModifier` 还没有接到 `planning_manager`；
-它们目前只在各自的测试节点里跑。`planning_manager` 用的是同一包里的
-`Astar` / `TopologyPRM`。
+它们目前只在各自的测试节点里跑。`planning_manager` 用的是
+`asr_sdm_guidance_planner` 的 `Astar` 和 `asr_sdm_local_path_modifier` 的
+`TopologyPRM`。
 
 `planning_simulator` 可用 `planning:=enable` 拉起这条正式链。
 
@@ -377,6 +381,7 @@ launch 同时 remap 进程内 ESDF 地图输入（`/esdf_map/odom`、`/esdf_map/
 
 - `asr_sdm_trajectory_optimizer`：B-spline 优化库（L-BFGS）
 - `asr_sdm_trajectory_generator`：min-snap 多项式库；独立 `traj_generator` 演示节点故意不编译
+- `asr_sdm_guidance_planner`：栅格 A* 前端搜索库
 - `asr_sdm_guidance_planner_dev` / `asr_sdm_local_path_modifier` 的库部分：被 manager 或测试节点调用
 
 ### 正式栈对外接口

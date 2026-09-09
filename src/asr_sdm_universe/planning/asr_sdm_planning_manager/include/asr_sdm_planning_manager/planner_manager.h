@@ -8,7 +8,7 @@
 #include <asr_sdm_planning_manager/plan_container.hpp>
 #include <rclcpp/rclcpp.hpp>
 
-#include <asr_sdm_local_path_modifier/astar.h>
+#include <asr_sdm_guidance_planner/astar.h>
 #include <asr_sdm_local_path_modifier/topo_prm.h>
 #include <asr_sdm_trajectory_optimizer/bspline_optimizer.h>
 #include <bspline/non_uniform_bspline.h>

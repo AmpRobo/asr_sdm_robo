@@ -39,7 +39,8 @@ This package contains the implementation of __Fast-Planner__ (in folder __fast_p
 quadrotor simulator (in __planning_simulator__). Key components are:
 
 - __plan_env__: The online mapping algorithms. It takes in depth image (or point cloud) and camera pose (odometry) pairs as input, do raycasting to update a probabilistic volumetric map, and build an Euclidean signed distance filed (ESDF) for the planning system. 
-- __asr_sdm_local_path_modifier__: Front-end path searching algorithms. Currently it includes a kinodynamic version of A* algorithm that respects the dynamics of quadrotors. The standard A* is also available. 
+- __asr_sdm_guidance_planner__: Front-end path searching algorithms. Currently it provides the standard grid A*; a kinodynamic version of A* that respects the dynamics of quadrotors is kept there as uncompiled reference code.
+- __asr_sdm_local_path_modifier__: Topological path generation (TopologyPRM) and the local detour modifier used for replanning around blocked segments. 
 - __asr_sdm_trajectory_optimizer__: The gradient-based trajectory optimization based on B-spline trajectory representation.
 - __asr_sdm_planning_manager__: High-level modules that schedule and call the mapping and planning algorithms. Interfaces for launching the whole system, as well as the configuration files are contained here.
 

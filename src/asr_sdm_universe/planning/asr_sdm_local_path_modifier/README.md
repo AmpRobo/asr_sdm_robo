@@ -41,7 +41,7 @@ The modifier header is intentionally flat under `include/`.
 4. If the input path is collision-free, the original path is returned unchanged.
 5. If the input path collides, only the blocked local segment is modified. The modifier builds a Fast-Planner `TopologyPRM`-style guard/connector roadmap, searches raw paths, shortcuts them, prunes topologically equivalent paths, applies `selectShortPaths`, and splices the selected local detour back into the original waypoints.
 
-Non-uniform B-spline optimization is intentionally not included yet. The current scope is the `path_searching` / topo path logic only.
+Non-uniform B-spline optimization is intentionally not included yet. The current scope is the topo path logic only. The grid A* front-end search that used to live here now has its own package, [`asr_sdm_guidance_planner`](../asr_sdm_guidance_planner/).
 
 ## Launch
 
