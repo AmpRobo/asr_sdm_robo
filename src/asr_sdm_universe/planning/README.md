@@ -16,7 +16,7 @@ by those nodes.
 
 | Package | Responsibility | Main products |
 |---|---|---|
-| [`asr_sdm_guidance_planner`](asr_sdm_guidance_planner/) | 3D A* + sphere corridor + L-BFGS guidance waypoints | library `GuidancePlanner`; test node `rviz_astar_lbfgs_planner` |
+| [`asr_sdm_guidance_planner_dev`](asr_sdm_guidance_planner_dev/) | 3D A* + sphere corridor + L-BFGS guidance waypoints | library `GuidancePlanner`; test node `rviz_astar_lbfgs_planner` |
 | [`asr_sdm_local_path_modifier`](asr_sdm_local_path_modifier/) | Fast-Planner A* / TopologyPRM, plus a TopologyPRM-style local detour library | libraries `Astar`, `TopologyPRM`, `TopoPathModifier`; test node `local_path_modifier_test` |
 | [`asr_sdm_trajectory_optimizer`](asr_sdm_trajectory_optimizer/) | L-BFGS B-spline optimization: nonholonomic heading costs and an ANCHOR term that holds a refined detour on the selected topological shape | library only |
 | [`asr_sdm_trajectory_generator`](asr_sdm_trajectory_generator/) | Closed-form minimum-snap polynomial trajectory | library only; the legacy `traj_generator` node is not built |
@@ -129,7 +129,7 @@ The command fills Cartesian `position` / `velocity` / `acceleration` and `yaw` /
 With no namespace the last two visualization topics resolve to
 `/planning/position_cmd_vis` and `/planning/travel_traj`.
 
-#### 3. `rviz_astar_lbfgs_planner` (`asr_sdm_guidance_planner` test node)
+#### 3. `rviz_astar_lbfgs_planner` (`asr_sdm_guidance_planner_dev` test node)
 
 The library does not publish. The RViz test node does.
 
@@ -181,7 +181,7 @@ candidates.
 - `asr_sdm_trajectory_optimizer`: B-spline optimizer library (L-BFGS)
 - `asr_sdm_trajectory_generator`: min-snap polynomial library; the standalone
   `traj_generator` demo is intentionally not built
-- Library parts of `asr_sdm_guidance_planner` and `asr_sdm_local_path_modifier`:
+- Library parts of `asr_sdm_guidance_planner_dev` and `asr_sdm_local_path_modifier`:
   called by the manager or test nodes
 
 ### Production interfaces
@@ -204,7 +204,7 @@ ros2 launch asr_sdm_planning_manager asr_sdm_planning_manager.launch.py
 ros2 launch planning_simulator planning_simulator.launch.py planning:=enable
 
 # Guidance planner test (RViz start/goal clicks)
-ros2 launch asr_sdm_guidance_planner astar_lbfgs_planner.launch.py
+ros2 launch asr_sdm_guidance_planner_dev astar_lbfgs_planner.launch.py
 
 # Local path modifier test (usually after guidance)
 ros2 launch asr_sdm_local_path_modifier local_path_modifier_test.launch.py
@@ -219,7 +219,7 @@ Launch arguments for the production chain: `odom_topic` (default
 cd ~/asr_sdm_robo
 source /opt/ros/jazzy/setup.bash
 colcon build \
-  --packages-up-to asr_sdm_planning_manager asr_sdm_guidance_planner asr_sdm_local_path_modifier \
+  --packages-up-to asr_sdm_planning_manager asr_sdm_guidance_planner_dev asr_sdm_local_path_modifier \
   --symlink-install
 source install/setup.bash
 ```
@@ -329,7 +329,7 @@ launch 同时 remap 进程内 ESDF 地图输入（`/esdf_map/odom`、`/esdf_map/
 
 #### 3. `rviz_astar_lbfgs_planner`（guidance 测试节点）
 
-包：`asr_sdm_guidance_planner`。库本身不发 topic；测试节点发。
+包：`asr_sdm_guidance_planner_dev`。库本身不发 topic；测试节点发。
 
 **Subscribe**
 
@@ -377,7 +377,7 @@ launch 同时 remap 进程内 ESDF 地图输入（`/esdf_map/odom`、`/esdf_map/
 
 - `asr_sdm_trajectory_optimizer`：B-spline 优化库（L-BFGS）
 - `asr_sdm_trajectory_generator`：min-snap 多项式库；独立 `traj_generator` 演示节点故意不编译
-- `asr_sdm_guidance_planner` / `asr_sdm_local_path_modifier` 的库部分：被 manager 或测试节点调用
+- `asr_sdm_guidance_planner_dev` / `asr_sdm_local_path_modifier` 的库部分：被 manager 或测试节点调用
 
 ### 正式栈对外接口
 
@@ -396,7 +396,7 @@ ros2 launch asr_sdm_planning_manager asr_sdm_planning_manager.launch.py
 ros2 launch planning_simulator planning_simulator.launch.py planning:=enable
 
 # guidance 测试（RViz 点选起终点）
-ros2 launch asr_sdm_guidance_planner astar_lbfgs_planner.launch.py
+ros2 launch asr_sdm_guidance_planner_dev astar_lbfgs_planner.launch.py
 
 # 局部改路测试（通常接在 guidance 之后）
 ros2 launch asr_sdm_local_path_modifier local_path_modifier_test.launch.py
@@ -411,7 +411,7 @@ ros2 launch asr_sdm_local_path_modifier local_path_modifier_test.launch.py
 cd ~/asr_sdm_robo
 source /opt/ros/jazzy/setup.bash
 colcon build \
-  --packages-up-to asr_sdm_planning_manager asr_sdm_guidance_planner asr_sdm_local_path_modifier \
+  --packages-up-to asr_sdm_planning_manager asr_sdm_guidance_planner_dev asr_sdm_local_path_modifier \
   --symlink-install
 source install/setup.bash
 ```

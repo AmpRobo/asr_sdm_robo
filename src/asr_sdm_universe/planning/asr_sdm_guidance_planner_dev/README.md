@@ -1,4 +1,4 @@
-# asr_sdm_guidance_planner
+# asr_sdm_guidance_planner_dev
 
 ROS 2 3D A* + Bubble-Planner-style sphere corridor + L-BFGS waypoint planner for a fixed inflated occupancy map and an externally computed ESDF map.
 
@@ -24,7 +24,7 @@ pt.intensity = dist;  // real ESDF distance, not normalized
 
 ## Package structure
 
-`asr_sdm_guidance_planner` is organized as a C++ planning library plus an RViz test executable.
+`asr_sdm_guidance_planner_dev` is organized as a C++ planning library plus an RViz test executable.
 The installed public library exposes `GuidancePlanner` through:
 
 ```cpp
@@ -49,8 +49,8 @@ In the full planning stack, `planning_manager` should link against this package 
 Put the two binary files in the test asset directory before building/installing the package:
 
 ```text
-asr_sdm_guidance_planner/maps/occupancy.bin
-asr_sdm_guidance_planner/maps/esdf.bin
+asr_sdm_guidance_planner_dev/maps/occupancy.bin
+asr_sdm_guidance_planner_dev/maps/esdf.bin
 ```
 
 The default config uses a package-relative directory:
@@ -64,7 +64,7 @@ binary_map.esdf_filename: "esdf.bin"
 After installation, this resolves to:
 
 ```text
-install/asr_sdm_guidance_planner/share/asr_sdm_guidance_planner/maps
+install/asr_sdm_guidance_planner_dev/share/asr_sdm_guidance_planner_dev/maps
 ```
 
 If you use `colcon build --symlink-install`, copying the `.bin` files into the source package `maps/` directory is usually enough. Without `--symlink-install`, rebuild or reinstall after copying the files.
@@ -122,9 +122,9 @@ published and still receive the most recent guidance waypoints.
 ```bash
 cd <your_ros2_workspace>
 source /opt/ros/jazzy/setup.bash
-colcon build --packages-up-to asr_sdm_guidance_planner --symlink-install
+colcon build --packages-up-to asr_sdm_guidance_planner_dev --symlink-install
 source install/setup.bash
-ros2 launch asr_sdm_guidance_planner astar_lbfgs_planner.launch.py
+ros2 launch asr_sdm_guidance_planner_dev astar_lbfgs_planner.launch.py
 ```
 
 In RViz2, use `Publish Point: Start/Goal` twice:

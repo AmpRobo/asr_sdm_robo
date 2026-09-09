@@ -1,6 +1,6 @@
 <?xml version="1.0"?>
 <package format="3">
-  <name>asr_sdm_guidance_planner</name>
+  <name>asr_sdm_guidance_planner_dev</name>
   <version>0.1.0</version>
   <description>C++ guidance planner library plus RViz test node for global start/goal waypoint generation.</description>
   <maintainer email="carveyrtrail@163.com">Willianms</maintainer>

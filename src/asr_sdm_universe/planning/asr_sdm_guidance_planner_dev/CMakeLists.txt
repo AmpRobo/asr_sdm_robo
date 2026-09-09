@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.8)
-project(asr_sdm_guidance_planner)
+project(asr_sdm_guidance_planner_dev)
 
 # Keep third-party CMake package discovery quiet on Ubuntu 24.04 / ROS 2 Jazzy.
 # PCL may call FindFLANN through exported dependencies; setting the policy defaults

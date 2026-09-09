@@ -48,7 +48,7 @@ Non-uniform B-spline optimization is intentionally not included yet. The current
 Usually start guidance first so it opens the shared RViz page:
 
 ```bash
-ros2 launch asr_sdm_guidance_planner astar_lbfgs_planner.launch.py
+ros2 launch asr_sdm_guidance_planner_dev astar_lbfgs_planner.launch.py
 ```
 
 Then start this modifier without opening a second RViz window:
