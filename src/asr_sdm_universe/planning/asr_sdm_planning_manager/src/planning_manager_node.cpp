@@ -451,28 +451,12 @@ void PlanningManager::refineTraj(fast_planner::NonUniformBspline & best_traj, do
   SPDLOG_INFO("ratio: {}", ratio);
 
   Eigen::MatrixXd ctrl_pts;
-  vector<Eigen::Vector3d> point_set;
-  reparamBspline(best_traj, ratio, ctrl_pts, dt, t_inc, point_set);
+  reparamBspline(best_traj, ratio, ctrl_pts, dt, t_inc);
   time_inc += t_inc;
 
   /* Refinement only reallocates time and trims the clearance; which way to go
-   * around an obstacle was already decided by the topological candidate. The
-   * distance cost has no gradient beyond dist0, so in free space the jerk cost
-   * is the only force left and it pulls the control polygon straight, undoing
-   * the detour. Anchoring on the samples the reparameterization was fitted to
-   * holds the shape, and absorbs the residual of refitting a lengthened,
-   * no longer uniform spline at a single interval. */
-  vector<Eigen::Vector3d> anchors;
-  vector<int> anchor_idx;
-  const int seg_num = static_cast<int>(ctrl_pts.rows()) - 3;
-  for (int i = 1; i < seg_num && i < static_cast<int>(point_set.size()); ++i) {
-    anchors.push_back(point_set[i]);
-    anchor_idx.push_back(i);
-  }
-  bspline_optimizers_[0]->setWaypoints(anchors, anchor_idx);
-
-  const int cost_function = localCostFunction() | BsplineOptimizer::ANCHOR;
-  ctrl_pts = bspline_optimizers_[0]->BsplineOptimizeTraj(ctrl_pts, dt, cost_function, 1, 1);
+   * around an obstacle was already decided by the topological candidate. */
+  ctrl_pts = bspline_optimizers_[0]->BsplineOptimizeTraj(ctrl_pts, dt, localCostFunction(), 1, 1);
   best_traj = fast_planner::NonUniformBspline(ctrl_pts, 3, dt);
   SPDLOG_WARN(
     "[Refine]: cost {} seconds, time change is: {}", (node_->now() - t1).seconds(), time_inc);
@@ -489,7 +473,7 @@ void PlanningManager::updateTrajInfo()
 
 void PlanningManager::reparamBspline(
   fast_planner::NonUniformBspline & bspline, double ratio, Eigen::MatrixXd & ctrl_pts, double & dt,
-  double & time_inc, vector<Eigen::Vector3d> & point_set)
+  double & time_inc)
 {
   double time_origin = bspline.getTimeSum();
   int seg_num = bspline.getControlPoint().rows() - 3;
@@ -510,7 +494,7 @@ void PlanningManager::reparamBspline(
   dt = duration / double(seg_num);
   time_inc = duration - time_origin;
 
-  point_set.clear();
+  vector<Eigen::Vector3d> point_set;
   point_set.reserve(static_cast<size_t>(seg_num) + 1);
   for (int i = 0; i <= seg_num; ++i) {
     point_set.push_back(bspline.evaluateDeBoorT(static_cast<double>(i) * dt));

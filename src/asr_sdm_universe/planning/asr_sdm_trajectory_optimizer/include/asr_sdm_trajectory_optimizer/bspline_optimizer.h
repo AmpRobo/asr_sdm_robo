@@ -29,7 +29,6 @@ public:
   static const int GUIDE;
   static const int WAYPOINTS;
   static const int NONHOLONOMIC;
-  static const int ANCHOR;
 
   static const int GUIDE_PHASE;
   static const int NORMAL_PHASE;
@@ -59,7 +58,6 @@ public:
   void setGuidePath(const vector<Eigen::Vector3d> & guide_pt);
   // Positions the trajectory should pass through, one index per position: the
   // index selects the knot, so waypts[i] is the position at knot waypt_idx[i].
-  // Consumed by both WAYPOINTS and ANCHOR.
   void setWaypoints(
     const vector<Eigen::Vector3d> & waypts,
     const vector<int> & waypt_idx);  // N-2 constraints at most
@@ -99,7 +97,6 @@ private:
   double lambda6_;                // visibility cost weight
   double lambda7_;                // waypoints cost weight
   double lambda8_;                // acc smoothness
-  double lambda_anchor_;          // weight holding a traj on a decided shape
   double lambda_yaw_rate_;        // yaw rate feasibility weight
   double lambda_pitch_rate_;      // pitch rate feasibility weight
   double lambda_min_vel_;         // minimum forward speed weight

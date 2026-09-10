@@ -89,11 +89,9 @@ private:
   // Returns the index of the chosen candidate in plan_data_.topo_traj_pos2_.
   int selectBestTraj(fast_planner::NonUniformBspline & traj);
   void refineTraj(fast_planner::NonUniformBspline & best_traj, double & time_inc);
-  // point_set receives the samples the reparameterization was fitted to, which
-  // describe the shape the refinement has to preserve.
   void reparamBspline(
     fast_planner::NonUniformBspline & bspline, double ratio, Eigen::MatrixXd & ctrl_pts, double & dt,
-    double & time_inc, vector<Eigen::Vector3d> & point_set);
+    double & time_inc);
 
   // heading planning
   void calcNextYaw(const double & last_yaw, double & yaw);

@@ -73,8 +73,8 @@
       # trajectory tangent, so their limits constrain the position trajectory.
       nonholonomic: true
       # Mirror the rate limits enforced by asr_sdm_control_manager.
-      max_yaw_rate: 0.5
-      max_pitch_rate: 0.5
+      max_yaw_rate: 0.8
+      max_pitch_rate: 0.8
       min_vel: 0.1
       # Largest factor by which refinement may stretch the duration of a local
       # segment. A topological detour is longer than the segment it replaces but
@@ -107,10 +107,6 @@
       lambda5: 1.5
       lambda6: 10.0
       lambda7: 20.0
-      # Holds the refined trajectory on the shape the selected topological
-      # candidate converged to. Raise it if the refinement still cuts the corner
-      # of a detour, lower it if the refinement can no longer open up clearance.
-      lambda_anchor: 2.0
       # Nonholonomic heading penalties on the position trajectory. Each weight
       # pairs with the limit of the same name above and each penalty is
       # normalized by that limit, so the weights are directly comparable to
@@ -120,7 +116,6 @@
       lambda_pitch_rate: 10.0
       lambda_min_vel: 1.0
       dist0: 0.4
-      dist1: 0.0
       # Budgets for the L-BFGS solver. max_iteration_num* bounds the number of
       # cost evaluations and max_iteration_time* the wall-clock time; both are
       # checked once per solver iteration. Index 1 is the path-guided phase,
@@ -130,11 +125,6 @@
       max_iteration_time1: 0.0001
       max_iteration_time2: 0.005
       order: 3
-
-    bspline:
-      limit_vel: 3.0
-      limit_acc: 2.0
-      limit_ratio: 1.1
 
     heading_planner:
       yaw_diff: 0.08726646
