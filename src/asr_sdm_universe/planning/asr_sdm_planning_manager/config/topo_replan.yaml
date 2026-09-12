@@ -21,8 +21,8 @@
     esdf_map:
       resolution: 0.1
       map_size_x: 40.0
-      map_size_y: 20.0
-      map_size_z: 5.0
+      map_size_y: 40.0
+      map_size_z: 10.0
       local_update_range_x: 5.5
       local_update_range_y: 5.5
       local_update_range_z: 4.5
@@ -86,8 +86,8 @@
 
     topo_prm:
       sample_inflate_x: 1.0
-      sample_inflate_y: 3.5
-      sample_inflate_z: 1.0
+      sample_inflate_y: 3.0
+      sample_inflate_z: 3.0
       clearance: 0.3
       max_sample_time: 0.005
       max_sample_num: 2000
