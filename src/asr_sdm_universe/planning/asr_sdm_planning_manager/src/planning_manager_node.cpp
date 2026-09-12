@@ -118,6 +118,24 @@ void PlanningManager::setGlobalWaypoints(vector<Eigen::Vector3d> & waypoints)
   plan_data_.global_waypoints_ = waypoints;
 }
 
+void PlanningManager::resetPlan()
+{
+  plan_data_.clearTopoPaths();
+  plan_data_.global_waypoints_.clear();
+  plan_data_.path_yaw_.clear();
+  plan_data_.path_pitch_.clear();
+  global_data_.local_traj_.clear();
+  global_data_.global_duration_ = 0.0;
+  global_data_.local_start_time_ = -1.0;
+  global_data_.local_end_time_ = -1.0;
+  local_data_.duration_ = 0.0;
+  goal_heading_.setZero();
+  start_vel_plan_.setZero();
+  start_acc_plan_.setZero();
+  start_yaw_.setZero();
+  start_pitch_.setZero();
+}
+
 void PlanningManager::setGoalHeading(const Eigen::Vector3d & heading)
 {
   goal_heading_ = heading.squaredNorm() > 1.0e-12 ? heading.normalized() : Eigen::Vector3d::Zero();

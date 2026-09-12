@@ -75,6 +75,7 @@ come from `asr_sdm_planning_manager/config/topo_replan.yaml`.
 |---|---|---|
 | `/goal_pose` | `geometry_msgs/msg/PoseStamped` | RViz goal. Position is the target; orientation +x is the arrival heading |
 | `/waypoint_generator/waypoints` | `nav_msgs/msg/Path` | Waypoint list. Arrival heading is left unspecified |
+| `/control/initial_pose` | `geometry_msgs/msg/PoseWithCovarianceStamped` | RViz 2D Pose Estimate. Drops the current plan and waits for the next goal |
 | `odom` | `nav_msgs/msg/Odometry` | Robot pose. Remapped to `/visual_slam/odom` in `asr_sdm_planning_manager.launch.py` |
 
 Launch also remaps the in-process ESDF map inputs (`/esdf_map/odom`,
@@ -85,8 +86,9 @@ Launch also remaps the in-process ESDF map inputs (`/esdf_map/odom`,
 | Topic | Type | Role |
 |---|---|---|
 | `/planning/bspline` | `asr_sdm_planning_manager/msg/Bspline` | Local B-spline after a successful plan: position control points, knots, yaw, pitch |
-| `/planning/replan` | `std_msgs/msg/Empty` | Replan trigger; tells `traj_server` to drop the current trajectory |
+| `/planning/replan` | `std_msgs/msg/Empty` | Replan trigger; tells `traj_server` to truncate the current trajectory |
 | `/planning/new` | `std_msgs/msg/Empty` | New trajectory is ready |
+| `/planning/stop` | `std_msgs/msg/Empty` | After a pose reset: halt execution and allow the next B-spline |
 
 Visualization is published through `asr_sdm_trajectory_visualizer`:
 
@@ -110,6 +112,8 @@ Subscribes to `/planning/bspline` and samples it at 100 Hz.
 | `planning/bspline` | `asr_sdm_planning_manager/msg/Bspline` | Trajectory to execute (resolves to `/planning/bspline` with no namespace) |
 | `planning/replan` | `std_msgs/msg/Empty` | Truncate the current trajectory |
 | `planning/new` | `std_msgs/msg/Empty` | Clear travelled-path visualization |
+| `planning/stop` | `std_msgs/msg/Empty` | Full stop after a pose reset; later B-splines are accepted again |
+| `/control/initial_pose` | `geometry_msgs/msg/PoseWithCovarianceStamped` | Same RViz 2D Pose Estimate as the controller; stops immediately |
 | `odom` | `nav_msgs/msg/Odometry` | Same remap as the planner |
 
 **Publish**
@@ -191,9 +195,10 @@ candidates.
 The topics that matter for the production stack:
 
 1. `/goal_pose` — operator goal (RViz)
-2. `/planning/bspline` — planning output (position + yaw + pitch)
-3. `/planning/replan` and `/planning/new` — trajectory lifetime
-4. `/position_cmd` (launch remaps to `/control/asr_sdm/robot_cmd`) — command for
+2. `/control/initial_pose` — RViz 2D Pose Estimate; resets planning and the controller
+3. `/planning/bspline` — planning output (position + yaw + pitch)
+4. `/planning/replan`, `/planning/new`, `/planning/stop` — trajectory lifetime
+5. `/position_cmd` (launch remaps to `/control/asr_sdm/robot_cmd`) — command for
    `asr_sdm_control_manager`
 
 ### Launch
@@ -275,6 +280,7 @@ twist 字段。
 |---|---|---|
 | `/goal_pose` | `geometry_msgs/msg/PoseStamped` | RViz 目标。位置是终点；姿态 +x 是到达朝向 |
 | `/waypoint_generator/waypoints` | `nav_msgs/msg/Path` | 航点列表。不指定到达朝向 |
+| `/control/initial_pose` | `geometry_msgs/msg/PoseWithCovarianceStamped` | RViz 2D Pose Estimate。丢掉当前规划，等待下一个目标 |
 | `odom` | `nav_msgs/msg/Odometry` | 机器人位姿。launch 默认 remap 成 `/visual_slam/odom` |
 
 launch 同时 remap 进程内 ESDF 地图输入（`/esdf_map/odom`、`/esdf_map/cloud`、
@@ -285,8 +291,9 @@ launch 同时 remap 进程内 ESDF 地图输入（`/esdf_map/odom`、`/esdf_map/
 | Topic | 类型 | 内容 |
 |---|---|---|
 | `/planning/bspline` | `asr_sdm_planning_manager/msg/Bspline` | 规划成功后的局部 B-spline：控制点、knots、yaw、pitch |
-| `/planning/replan` | `std_msgs/msg/Empty` | 触发重规划，通知 `traj_server` 丢掉当前轨迹 |
+| `/planning/replan` | `std_msgs/msg/Empty` | 触发重规划，通知 `traj_server` 截断当前轨迹 |
 | `/planning/new` | `std_msgs/msg/Empty` | 新轨迹生成完成 |
+| `/planning/stop` | `std_msgs/msg/Empty` | 位姿复位后：停止执行，并允许下一条 B-spline |
 
 可视化通过库 `asr_sdm_trajectory_visualizer` 发出：
 
@@ -310,6 +317,8 @@ launch 同时 remap 进程内 ESDF 地图输入（`/esdf_map/odom`、`/esdf_map/
 | `planning/bspline` | `asr_sdm_planning_manager/msg/Bspline` | 待执行轨迹（无 namespace 时即 `/planning/bspline`） |
 | `planning/replan` | `std_msgs/msg/Empty` | 截断当前轨迹 |
 | `planning/new` | `std_msgs/msg/Empty` | 清空已飞轨迹可视化 |
+| `planning/stop` | `std_msgs/msg/Empty` | 位姿复位后完全停止；之后的 B-spline 重新接受 |
+| `/control/initial_pose` | `geometry_msgs/msg/PoseWithCovarianceStamped` | 与控制器同一路 RViz 2D Pose Estimate；立即停轨迹 |
 | `odom` | `nav_msgs/msg/Odometry` | 与规划节点同一 remap |
 
 **Publish**
@@ -385,9 +394,10 @@ launch 同时 remap 进程内 ESDF 地图输入（`/esdf_map/odom`、`/esdf_map/
 ### 正式栈对外接口
 
 1. `/goal_pose`：操作员目标（RViz）
-2. `/planning/bspline`：规划输出（位置 + yaw + pitch）
-3. `/planning/replan` / `/planning/new`：轨迹生命周期
-4. `/position_cmd`（launch 后为 `/control/asr_sdm/robot_cmd`）：给 `asr_sdm_control_manager` 的指令
+2. `/control/initial_pose`：RViz 2D Pose Estimate，同时复位规划和控制器
+3. `/planning/bspline`：规划输出（位置 + yaw + pitch）
+4. `/planning/replan` / `/planning/new` / `/planning/stop`：轨迹生命周期
+5. `/position_cmd`（launch 后为 `/control/asr_sdm/robot_cmd`）：给 `asr_sdm_control_manager` 的指令
 
 ### Launch
 

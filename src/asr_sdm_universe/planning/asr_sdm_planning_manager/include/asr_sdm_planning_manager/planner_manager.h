@@ -36,6 +36,7 @@ public:
     const Eigen::Vector3d & start_yaw, const Eigen::Vector3d & start_pitch);
 
   void initPlanModules(const std::shared_ptr<rclcpp::Node> & nh);
+  void resetPlan();
   void setGlobalWaypoints(vector<Eigen::Vector3d> & waypoints);
   // Body axis the robot should hold on arrival. A zero vector means no heading
   // was requested and the trajectory ends at rest, as it did before.

@@ -2,6 +2,8 @@
   ros__parameters:
     fsm:
       flight_type: "MANUAL_TARGET"
+      # Same topic as asr_sdm_control_manager: RViz 2D Pose Estimate resets both.
+      initialpose_topic: /control/initial_pose
       thresh_replan: 0.5
       thresh_no_replan: 2.0
       waypoint_num: 2
@@ -138,3 +140,4 @@
       ros__parameters:
         traj_server:
           time_forward: 1.5
+          initialpose_topic: /control/initial_pose

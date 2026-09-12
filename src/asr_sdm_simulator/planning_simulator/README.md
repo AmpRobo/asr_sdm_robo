@@ -90,7 +90,7 @@ This file documents the topic names used by the launch. Initial pose and control
 | `/control/asr_sdm/odom` | Odometry published by the controller; model pose source with `odom_source:=control`. Planning and map sensing also use this topic so a new goal starts from the current robot pose |
 | `/localization/video_inertial_navigation_systems/odometry` | VINS odometry; model pose source with `odom_source:=vins` |
 | `/control/joint_states` | Joint states for `robot_state_publisher` |
-| `/control/initial_pose` | Reset controller pose (RViz 2D Pose Estimate) |
+| `/control/initial_pose` | RViz 2D Pose Estimate: reset controller pose and drop the current plan |
 | `/simulator/planning_simulator/add_static_obstacle` | Click-to-add pillar obstacles (RViz Static Obstacle tool) |
 
 Without a gamepad, publish a RobotCommand (using `vel`) to exercise the controller:
@@ -225,7 +225,7 @@ config/planning_simulator.yaml
 | `/control/asr_sdm/odom` | 控制器发布的里程计；`odom_source:=control` 时作为模型位姿来源。规划与地图感知也订阅该话题，第二次设目标会从当前机器人位置开始 |
 | `/localization/video_inertial_navigation_systems/odometry` | VINS 里程计；`odom_source:=vins` 时作为模型位姿来源 |
 | `/control/joint_states` | 控制器发布的关节状态，供给 `robot_state_publisher` |
-| `/control/initial_pose` | 重置控制器位姿（RViz 2D Pose Estimate） |
+| `/control/initial_pose` | RViz 2D Pose Estimate：重置控制器位姿并丢掉当前规划 |
 | `/simulator/planning_simulator/add_static_obstacle` | RViz Static Obstacle 工具点击加点柱障碍 |
 
 无手柄时可用 topic 直接发速度测试控制器：

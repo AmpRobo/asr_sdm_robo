@@ -16,6 +16,11 @@ This page covers what this package actually optimizes.
   -> /planning/bspline
   -> traj_server (100 Hz)
   -> /control/asr_sdm/robot_cmd
+
+/control/initial_pose (RViz 2D Pose Estimate)
+  -> control manager: reset pose
+  -> TopoReplanFSM: drop target, WAIT_TARGET
+  -> traj_server: stop publishing robot_cmd
 ```
 
 ## Nodes
