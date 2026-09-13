@@ -11,14 +11,20 @@ if(CMAKE_COMPILER_IS_GNUCXX OR CMAKE_CXX_COMPILER_ID MATCHES "Clang")
 endif()
 
 find_package(ament_cmake REQUIRED)
+find_package(Eigen3 REQUIRED)
 
 add_library(${PROJECT_NAME} SHARED
   src/reeds_shepp.cpp
+  src/spatial_reeds_shepp.cpp
 )
 
 target_include_directories(${PROJECT_NAME} PUBLIC
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
   $<INSTALL_INTERFACE:include>
+)
+
+target_link_libraries(${PROJECT_NAME} PUBLIC
+  Eigen3::Eigen
 )
 
 install(
@@ -40,8 +46,19 @@ if(BUILD_TESTING)
   set(ament_cmake_copyright_FOUND TRUE)
   set(ament_cmake_cpplint_FOUND TRUE)
   ament_lint_auto_find_test_dependencies()
+
+  add_executable(spatial_reeds_shepp_test
+    test/spatial_reeds_shepp_test.cpp
+  )
+  target_link_libraries(spatial_reeds_shepp_test
+    ${PROJECT_NAME}
+  )
+  install(TARGETS spatial_reeds_shepp_test
+    DESTINATION lib/${PROJECT_NAME}
+  )
 endif()
 
 ament_export_targets(export_${PROJECT_NAME} HAS_LIBRARY_TARGET)
 ament_export_include_directories(include)
+ament_export_dependencies(Eigen3)
 ament_package()
