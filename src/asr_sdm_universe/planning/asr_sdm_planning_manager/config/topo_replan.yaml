@@ -65,7 +65,7 @@
       max_acc: 0.4
       max_jerk: 0.2
       dynamic_environment: 0
-      local_segment_length: 7.0
+      local_segment_length: 6.0
       clearance_threshold: 0.2
       control_points_distance: 0.3
       use_geometric_path: false
