@@ -99,35 +99,22 @@
       parallel_shortcut: true
 
     optimization:
-      lambda1: 10.0
-      lambda2: 5.0
-      # Velocity and acceleration feasibility. This has to stay above zero now
-      # that a detour is allowed to ask for more time than it inherited:
-      # max_time_lengthen_ratio bounds the stretch, this term does the rest.
-      lambda3: 1.0
-      lambda4: 0.001
-      lambda5: 1.5
-      lambda6: 10.0
-      lambda7: 20.0
-      # Nonholonomic heading penalties on the position trajectory. Each weight
-      # pairs with the limit of the same name above and each penalty is
-      # normalized by that limit, so the weights are directly comparable to
-      # lambda1 and to each other. Yaw rate and pitch rate are evaluated
-      # equivalently, so they share the same weight by default.
-      lambda_yaw_rate: 15.0
-      lambda_pitch_rate: 15.0
-      lambda_min_vel: 1.0
-      dist0: 0.4
-      # Budgets for the L-BFGS solver. max_iteration_num* bounds the number of
-      # cost evaluations and max_iteration_time* the wall-clock time; both are
-      # checked once per solver iteration. Index 1 is the path-guided phase
-      # (now includes yaw / pitch rate when nonholonomic), index 2 the full
-      # optimization.
-      max_iteration_num1: 30
-      max_iteration_num2: 300
-      max_iteration_time1: 0.003
-      max_iteration_time2: 0.005
-      order: 3
+      lambda1: 10.0              # smoothness
+      lambda2: 5.0               # clearance
+      lambda3: 1.0               # vel / acc feasibility
+      lambda4: 0.001             # unused (endpoint)
+      lambda5: 1.5               # topo guide
+      lambda6: 10.0              # unused (visibility)
+      lambda7: 20.0              # waypoints / refine anchor
+      lambda_yaw_rate: 15.0      # with manager.max_yaw_rate
+      lambda_pitch_rate: 15.0    # with manager.max_pitch_rate
+      lambda_min_vel: 1.0        # with manager.min_vel
+      dist0: 0.4                 # clearance hinge [m]
+      max_iteration_num1: 30     # guide-phase eval budget
+      max_iteration_num2: 300    # full / refine eval budget
+      max_iteration_time1: 0.003 # guide-phase time [s]
+      max_iteration_time2: 0.005 # full / refine time [s]
+      order: 3                   # B-spline degree
 
     heading_planner:
       yaw_diff: 0.08726646
