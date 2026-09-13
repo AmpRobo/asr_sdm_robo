@@ -329,16 +329,23 @@ PolynomialTraj PlanningManager::fitGlobalMinSnapTraj(const vector<Eigen::Vector3
   for (int i = 0; i < pt_num; ++i) pos.row(i) = points[i];
 
   Eigen::Vector3d zero(0, 0, 0);
+  const double max_vel = std::max(pp_.max_vel_, 1.0e-6);
   Eigen::VectorXd time(pt_num - 1);
   for (int i = 0; i < pt_num - 1; ++i) {
-    time(i) = (pos.row(i + 1) - pos.row(i)).norm() / (pp_.max_vel_);
+    time(i) = (pos.row(i + 1) - pos.row(i)).norm() / max_vel;
   }
 
   // Slow down the first and last segments for smoother start/stop.
   time(0) *= 2.0;
-  time(0) = std::max(1.0, time(0));
   time(time.rows() - 1) *= 2.0;
-  time(time.rows() - 1) = std::max(1.0, time(time.rows() - 1));
+
+  // Floor every segment, not only the first and last. Quintic min-snap
+  // coefficients scale as 1/T^k; a near-zero middle duration produces
+  // km/s velocities that fold a local radius window into tens of km of
+  // arc and OOM the dense B-spline fit.
+  for (int i = 0; i < time.rows(); ++i) {
+    time(i) = std::max(1.0, time(i));
+  }
 
   const Eigen::Vector3d start_vel = pp_.nonholonomic_ ? start_vel_plan_ : zero;
   const Eigen::Vector3d start_acc = pp_.nonholonomic_ ? start_acc_plan_ : zero;
