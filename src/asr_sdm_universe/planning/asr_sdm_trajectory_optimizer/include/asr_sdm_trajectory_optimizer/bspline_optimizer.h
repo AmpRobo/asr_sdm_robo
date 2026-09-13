@@ -31,6 +31,7 @@ public:
   static const int NONHOLONOMIC;
 
   static const int GUIDE_PHASE;
+  static const int GUIDE_NONHOLONOMIC_PHASE;
   static const int NORMAL_PHASE;
   static const int NONHOLONOMIC_PHASE;
 

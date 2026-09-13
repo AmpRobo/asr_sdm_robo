@@ -33,6 +33,27 @@ Eigen::Vector3d headingBodyX(double yaw, double pitch)
     std::cos(pitch) * std::cos(yaw), std::cos(pitch) * std::sin(yaw), -std::sin(pitch));
 }
 
+constexpr double kMinHeadingSpeed = 0.02;
+
+double wrapToPi(double angle)
+{
+  while (angle > M_PI) angle -= 2.0 * M_PI;
+  while (angle < -M_PI) angle += 2.0 * M_PI;
+  return angle;
+}
+
+bool headingFromVelocity(const Eigen::Vector3d & v, double & yaw, double & pitch)
+{
+  const double sxy2 = v(0) * v(0) + v(1) * v(1);
+  const double v2 = sxy2 + v(2) * v(2);
+  const double min_speed2 = kMinHeadingSpeed * kMinHeadingSpeed;
+  if (sxy2 < min_speed2 || v2 < min_speed2) return false;
+
+  yaw = std::atan2(v(1), v(0));
+  pitch = std::atan2(-v(2), std::sqrt(sxy2));
+  return true;
+}
+
 }  // namespace
 
 // SECTION interfaces for setup and query
@@ -363,7 +384,7 @@ bool PlanningManager::topoReplan(bool collide)
   local_data_.start_time_ = time_now;
 
   if (!collide) {  // simply truncate the segment and do nothing
-    refineTraj(init_traj, time_inc);
+    // refineTraj(init_traj, time_inc);
     local_data_.position_traj_ = init_traj;
     global_data_.setLocalTraj(init_traj, t_now, local_traj_duration + time_inc + t_now, time_inc);
 
@@ -417,7 +438,7 @@ bool PlanningManager::topoReplan(bool collide)
       const int best_id = selectBestTraj(best_traj);
       SPDLOG_INFO(
         "[planner]: candidate {} of {} selected", best_id, static_cast<int>(select_paths.size()));
-      refineTraj(best_traj, time_inc);
+      // refineTraj(best_traj, time_inc);
 
       local_data_.position_traj_ = best_traj;
       global_data_.setLocalTraj(
@@ -428,20 +449,21 @@ bool PlanningManager::topoReplan(bool collide)
   return true;
 }
 
-/* Pick the candidate of least jerk. The candidates share their index with
- * plan_data_.topo_select_paths_ and are drawn in that order, so they are
- * searched in place rather than sorted: reordering them loses which
- * topological path the refined trajectory came from. */
+/* Pick the candidate of least jerk, scaled by how far its tangent exceeds the
+ * yaw / pitch rate limits. A taut detour can have a smaller jerk and still be
+ * untrackable; the ratio keeps those knife-edge corners from winning. The
+ * candidates share their index with plan_data_.topo_select_paths_ and are
+ * searched in place rather than sorted. */
 int PlanningManager::selectBestTraj(fast_planner::NonUniformBspline & traj)
 {
   vector<fast_planner::NonUniformBspline> & trajs = plan_data_.topo_traj_pos2_;
 
   int best = 0;
-  double best_jerk = trajs[0].getJerk();
+  double best_score = trajs[0].getJerk() * headingRateRatio(trajs[0]);
   for (size_t i = 1; i < trajs.size(); ++i) {
-    const double jerk = trajs[i].getJerk();
-    if (jerk < best_jerk) {
-      best_jerk = jerk;
+    const double score = trajs[i].getJerk() * headingRateRatio(trajs[i]);
+    if (score < best_score) {
+      best_score = score;
       best = static_cast<int>(i);
     }
   }
@@ -458,6 +480,46 @@ int PlanningManager::localCostFunction() const
   return pp_.nonholonomic_ ? BsplineOptimizer::NONHOLONOMIC_PHASE : BsplineOptimizer::NORMAL_PHASE;
 }
 
+int PlanningManager::topoGuideCostFunction() const
+{
+  return pp_.nonholonomic_ ? BsplineOptimizer::GUIDE_NONHOLONOMIC_PHASE
+                           : BsplineOptimizer::GUIDE_PHASE;
+}
+
+double PlanningManager::headingRateRatio(fast_planner::NonUniformBspline & pos) const
+{
+  if (!pp_.nonholonomic_) return 1.0;
+
+  fast_planner::NonUniformBspline vel = pos.getDerivative();
+  double tm = 0.0, tmp = 0.0;
+  vel.getTimeSpan(tm, tmp);
+  const double dt = std::max(1.0e-3, pos.getInterval());
+
+  double last_yaw = 0.0, last_pitch = 0.0;
+  bool have_heading = false;
+  double ratio = 1.0;
+
+  for (double t = tm; t <= tmp + 1.0e-9; t += dt) {
+    const Eigen::VectorXd v = vel.evaluateDeBoor(t);
+    if (v.size() < 3) continue;
+    double yaw = 0.0, pitch = 0.0;
+    if (!headingFromVelocity(Eigen::Vector3d(v.head<3>()), yaw, pitch)) continue;
+
+    if (have_heading) {
+      const double yaw_rate = std::fabs(wrapToPi(yaw - last_yaw)) / dt;
+      const double pitch_rate = std::fabs(pitch - last_pitch) / dt;
+      if (pp_.max_yaw_rate_ > 0.0) ratio = std::max(ratio, yaw_rate / pp_.max_yaw_rate_);
+      if (pp_.max_pitch_rate_ > 0.0) ratio = std::max(ratio, pitch_rate / pp_.max_pitch_rate_);
+    }
+
+    last_yaw = yaw;
+    last_pitch = pitch;
+    have_heading = true;
+  }
+
+  return ratio;
+}
+
 void PlanningManager::refineTraj(fast_planner::NonUniformBspline & best_traj, double & time_inc)
 {
   rclcpp::Time t1 = node_->now();
@@ -466,14 +528,16 @@ void PlanningManager::refineTraj(fast_planner::NonUniformBspline & best_traj, do
 
   best_traj.setPhysicalLimits(pp_.max_vel_, pp_.max_acc_);
   double ratio = best_traj.checkRatio();
+  if (pp_.nonholonomic_) ratio = std::max(ratio, headingRateRatio(best_traj));
   SPDLOG_INFO("ratio: {}", ratio);
 
   Eigen::MatrixXd ctrl_pts;
   reparamBspline(best_traj, ratio, ctrl_pts, dt, t_inc);
   time_inc += t_inc;
 
-  /* Refinement only reallocates time and trims the clearance; which way to go
-   * around an obstacle was already decided by the topological candidate. */
+  /* Refinement reallocates time (vel / acc / heading rate) and trims the
+   * clearance; which way to go around an obstacle was already decided by the
+   * topological candidate. */
   ctrl_pts = bspline_optimizers_[0]->BsplineOptimizeTraj(ctrl_pts, dt, localCostFunction(), 1, 1);
   best_traj = fast_planner::NonUniformBspline(ctrl_pts, 3, dt);
   SPDLOG_WARN(
@@ -498,14 +562,14 @@ void PlanningManager::reparamBspline(
   // double length = bspline.getLength(0.1);
   // int seg_num = ceil(length / pp_.ctrl_pt_dist);
 
-  /* checkRatio() reports how far the segment exceeds the velocity and
-   * acceleration limits, so only lengthening restores feasibility. A ratio
-   * below one says the segment is already feasible, and shrinking it there
-   * would push the robot past the speed the global trajectory asked for and
-   * undo the deliberately slow first and last global segments. The upper bound
-   * matters because lengthenTime() leaves the leading and trailing knot spans
-   * untouched, so the larger the stretch the less a single-interval refit can
-   * represent the result. */
+  /* checkRatio() / headingRateRatio() report how far the segment exceeds the
+   * velocity, acceleration and heading-rate limits, so only lengthening
+   * restores feasibility. A ratio below one says the segment is already
+   * feasible, and shrinking it there would push the robot past the speed the
+   * global trajectory asked for and undo the deliberately slow first and last
+   * global segments. The upper bound matters because lengthenTime() leaves the
+   * leading and trailing knot spans untouched, so the larger the stretch the
+   * less a single-interval refit can represent the result. */
   ratio = std::max(1.0, std::min(pp_.max_time_lengthen_ratio_, ratio));
   bspline.lengthenTime(ratio);
   double duration = bspline.getTimeSum();
@@ -531,11 +595,21 @@ void PlanningManager::optimizeTopoBspline(
   t1 = node_->now();
 
   // parameterize B-spline according to the length of guide path
-  int seg_num = topo_prm_->pathLength(guide_path) / pp_.ctrl_pt_dist;
+  const double guide_len = topo_prm_->pathLength(guide_path);
+  int seg_num = guide_len / pp_.ctrl_pt_dist;
   Eigen::MatrixXd ctrl_pts;
   double dt;
 
   ctrl_pts = reparamLocalTraj(start_t, duration, seg_num, dt);
+  // A detour is longer than the blocked window it replaces but inherits that
+  // window's duration, so heading rates start far above the hinge saturation
+  // knee. Stretch the knot span (capped) so the yaw / pitch terms can still
+  // shape the corner instead of sitting at cost ≈ 1 with a vanishing gradient.
+  if (pp_.nonholonomic_ && duration > 1.0e-6 && pp_.max_vel_ > 1.0e-6) {
+    const double stretch =
+      std::min(pp_.max_time_lengthen_ratio_, std::max(1.0, guide_len / (pp_.max_vel_ * duration)));
+    dt *= stretch;
+  }
   // std::cout << "ctrl pt num: " << ctrl_pts.rows() << std::endl;
 
   // discretize the guide path and align it with B-spline control points
@@ -558,7 +632,7 @@ void PlanningManager::optimizeTopoBspline(
 
   bspline_optimizers_[traj_id]->setGuidePath(guide_pt);
   Eigen::MatrixXd opt_ctrl_pts1 = bspline_optimizers_[traj_id]->BsplineOptimizeTraj(
-    ctrl_pts, dt, BsplineOptimizer::GUIDE_PHASE, 0, 1);
+    ctrl_pts, dt, topoGuideCostFunction(), 0, 1);
 
   plan_data_.topo_traj_pos1_[traj_id] = fast_planner::NonUniformBspline(opt_ctrl_pts1, 3, dt);
 

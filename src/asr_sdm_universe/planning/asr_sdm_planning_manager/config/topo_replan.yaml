@@ -29,7 +29,7 @@
       obstacles_inflation: 0.099
       local_bound_inflate: 0.5
       local_map_margin: 50
-      ground_height: -1.0
+      ground_height: -5.0
       cx: 321.04638671875
       cy: 243.44969177246094
       fx: 387.229248046875
@@ -75,8 +75,8 @@
       # trajectory tangent, so their limits constrain the position trajectory.
       nonholonomic: true
       # Mirror the rate limits enforced by asr_sdm_control_manager.
-      max_yaw_rate: 0.8
-      max_pitch_rate: 0.8
+      max_yaw_rate: 0.5
+      max_pitch_rate: 0.5
       min_vel: 0.1
       # Largest factor by which refinement may stretch the duration of a local
       # segment. A topological detour is longer than the segment it replaces but
@@ -85,9 +85,9 @@
       max_time_lengthen_ratio: 1.5
 
     topo_prm:
-      sample_inflate_x: 1.0
-      sample_inflate_y: 3.0
-      sample_inflate_z: 3.0
+      sample_inflate_x: 2.0
+      sample_inflate_y: 3.5
+      sample_inflate_z: 3.5
       clearance: 0.3
       max_sample_time: 0.005
       max_sample_num: 2000
@@ -114,17 +114,18 @@
       # normalized by that limit, so the weights are directly comparable to
       # lambda1 and to each other. Yaw rate and pitch rate are evaluated
       # equivalently, so they share the same weight by default.
-      lambda_yaw_rate: 10.0
-      lambda_pitch_rate: 10.0
+      lambda_yaw_rate: 15.0
+      lambda_pitch_rate: 15.0
       lambda_min_vel: 1.0
       dist0: 0.4
       # Budgets for the L-BFGS solver. max_iteration_num* bounds the number of
       # cost evaluations and max_iteration_time* the wall-clock time; both are
-      # checked once per solver iteration. Index 1 is the path-guided phase,
-      # index 2 the full optimization.
-      max_iteration_num1: 2
+      # checked once per solver iteration. Index 1 is the path-guided phase
+      # (now includes yaw / pitch rate when nonholonomic), index 2 the full
+      # optimization.
+      max_iteration_num1: 30
       max_iteration_num2: 300
-      max_iteration_time1: 0.0001
+      max_iteration_time1: 0.003
       max_iteration_time2: 0.005
       order: 3
 

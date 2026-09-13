@@ -87,25 +87,32 @@ well defined. A vanishing velocity is skipped rather than penalized.
 ### Composite phases
 
 ```text
-GUIDE_PHASE         = SMOOTHNESS | GUIDE
-NORMAL_PHASE        = SMOOTHNESS | DISTANCE | FEASIBILITY
-NONHOLONOMIC_PHASE  = NORMAL_PHASE | NONHOLONOMIC
+GUIDE_PHASE                = SMOOTHNESS | GUIDE
+GUIDE_NONHOLONOMIC_PHASE   = GUIDE_PHASE | NONHOLONOMIC
+NORMAL_PHASE               = SMOOTHNESS | DISTANCE | FEASIBILITY
+NONHOLONOMIC_PHASE         = NORMAL_PHASE | NONHOLONOMIC
 ```
 
 | Stage | Code | Mask | Solver budget |
 |---|---|---|---|
-| Topo candidate, phase 1 | `optimizeTopoBspline` | `GUIDE_PHASE` | `max_iteration_num1` / `max_iteration_time1` |
+| Topo candidate, phase 1 | `optimizeTopoBspline` | `topoGuideCostFunction()` | `max_iteration_num1` / `max_iteration_time1` |
 | Topo candidate, phase 2 | `optimizeTopoBspline` | `localCostFunction()` | `max_iteration_num2` / `max_iteration_time2` |
 | Refine (collision or not) | `refineTraj` | `localCostFunction()` | same as phase 2 |
 | Yaw / pitch fit | `fitAngleBspline` | `SMOOTHNESS \| WAYPOINTS` | same as phase 2 |
 
-`localCostFunction()` is `NONHOLONOMIC_PHASE` when `manager.nonholonomic` is
-true, otherwise `NORMAL_PHASE`.
+`topoGuideCostFunction()` is `GUIDE_NONHOLONOMIC_PHASE` when
+`manager.nonholonomic` is true, otherwise `GUIDE_PHASE`.
+`localCostFunction()` is `NONHOLONOMIC_PHASE` or `NORMAL_PHASE` the same way.
 
-Phase 1 starts from the *colliding* local segment and has only a few
-iterations. `lambda5` has to outweigh `lambda1` there, or the polygon never
-reaches the detour homotopy and phase 2 cannot recover it from ESDF gradient
-alone.
+Phase 1 starts from the *colliding* local segment. `lambda5` has to outweigh
+`lambda1` there, or the polygon never reaches the detour homotopy. The yaw /
+pitch hinges keep that first pull from locking onto a knife-edge corner of the
+TopologyPRM polyline. Phase 2 then adds clearance and feasibility.
+
+A detour is longer than the window it replaces but inherits that window's
+duration, which saturates the heading hinges. `optimizeTopoBspline` therefore
+stretches the knot span by `guide_len / (max_vel · duration)`, capped at
+`max_time_lengthen_ratio`, before either phase runs.
 
 ### Costs outside L-BFGS
 
@@ -114,12 +121,8 @@ These are used by the manager but are not `lambda*` terms:
 | Stage | What is minimized |
 |---|---|
 | Global reference | Closed-form **minimum snap** (`minSnapTraj`) through densified waypoints |
-| Candidate pick | \(\int \mathrm{jerk}^2\,dt\) via `NonUniformBspline::getJerk()`; lowest wins |
-| Refine timing | `checkRatio()` vs. `max_vel` / `max_acc`, then duration stretch capped by `max_time_lengthen_ratio` |
-
-L-BFGS does **not** change \(\Delta t\). A longer topological detour that
-inherits the blocked segment's duration is first lengthened in `refineTraj`,
-then the phase-2 costs run at the new knot span.
+| Candidate pick | `getJerk() * headingRateRatio()`; lowest wins. The ratio is the peak tangent yaw / pitch rate over the matching limit (1.0 if already feasible). |
+| Refine timing | `max(checkRatio(), headingRateRatio())`, then duration stretch capped by `max_time_lengthen_ratio` |
 
 ### Default weights (`topo_replan.yaml`)
 
@@ -181,12 +184,15 @@ ros2 launch asr_sdm_planning_manager asr_sdm_planning_manager.launch.py
 
 | 阶段 | 掩码 |
 |---|---|
-| 拓扑候选第一阶段 | `GUIDE_PHASE` = 平滑 + 引导 |
+| 拓扑候选第一阶段 | `GUIDE_NONHOLONOMIC_PHASE`（默认）= 平滑 + 引导 + 非完整 |
 | 拓扑候选第二阶段、精修 | `NONHOLONOMIC_PHASE`（默认）= 平滑 + 距离 + 可行性 + 非完整 |
 | 航向拟合 | 平滑 + 路点 |
 
-第一阶段迭代很少，且初值仍在碰撞段上。这里 `lambda5` 必须压过 `lambda1`，
-否则多边形到不了绕障同伦，第二阶段单靠 ESDF 梯度拉不回来。
+第一阶段初值仍在碰撞段上。`lambda5` 必须压过 `lambda1`，否则到不了绕障同伦。
+偏航/俯仰铰链避免第一阶段把控制点焊在 TopologyPRM 折线的尖角上。绕障段比
+原窗口长却继承原时长，铰链会饱和，因此 `optimizeTopoBspline` 会按
+`guide_len / (max_vel · duration)` 拉长 knot span（不超过
+`max_time_lengthen_ratio`）。
 
 空旷主要靠 `lambda1`；密障应加大 `lambda2`/`lambda5`、减小 `lambda1`，
 航向限幅权重要低于间隙项，避免把弯抹平穿障。
@@ -194,5 +200,5 @@ ros2 launch asr_sdm_planning_manager asr_sdm_planning_manager.launch.py
 ### L-BFGS 之外
 
 - 全局参考：闭式 **minimum snap**
-- 多条拓扑候选：选 `getJerk()` 最小的一条
-- 精修：按速度/加速度超限比拉长时间，再优化间隙
+- 多条拓扑候选：选 `getJerk() * headingRateRatio()` 最小的一条
+- 精修：按速度/加速度/航向角速度超限比拉长时间，再优化间隙

@@ -84,6 +84,10 @@ private:
   void optimizeTopoBspline(
     double start_t, double duration, vector<Eigen::Vector3d> guide_path, int traj_id);
   int localCostFunction() const;
+  int topoGuideCostFunction() const;
+  // Peak |yaw|/|pitch| rate of the position spline, divided by the matching
+  // manager limit. 1.0 means the heading already stays inside the limits.
+  double headingRateRatio(fast_planner::NonUniformBspline & pos) const;
   Eigen::MatrixXd reparamLocalTraj(double start_t, double & dt, double & duration);
   Eigen::MatrixXd reparamLocalTraj(double start_t, double duration, int seg_num, double & dt);
 

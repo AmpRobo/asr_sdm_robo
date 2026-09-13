@@ -184,7 +184,8 @@ struct PlanParameters
   double clearance_;
   int dynamic_;
   // Largest factor by which refinement may stretch the duration of a local
-  // segment to bring it back inside the velocity and acceleration limits.
+  // segment to bring it back inside the velocity, acceleration and heading-rate
+  // limits.
   double max_time_lengthen_ratio_;
   /* nonholonomic robot: the body axis follows the trajectory tangent, so the
    * heading limits below are enforced by the position optimization itself */

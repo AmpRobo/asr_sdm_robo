@@ -22,6 +22,8 @@ const int BsplineOptimizer::WAYPOINTS = (1 << 6);
 const int BsplineOptimizer::NONHOLONOMIC = (1 << 7);
 
 const int BsplineOptimizer::GUIDE_PHASE = BsplineOptimizer::SMOOTHNESS | BsplineOptimizer::GUIDE;
+const int BsplineOptimizer::GUIDE_NONHOLONOMIC_PHASE =
+  BsplineOptimizer::GUIDE_PHASE | BsplineOptimizer::NONHOLONOMIC;
 const int BsplineOptimizer::NORMAL_PHASE =
   BsplineOptimizer::SMOOTHNESS | BsplineOptimizer::DISTANCE | BsplineOptimizer::FEASIBILITY;
 const int BsplineOptimizer::NONHOLONOMIC_PHASE =
