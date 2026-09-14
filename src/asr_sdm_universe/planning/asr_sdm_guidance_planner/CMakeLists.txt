@@ -31,6 +31,7 @@ find_package(ament_cmake REQUIRED)
 find_package(Eigen3 REQUIRED)
 find_package(Boost REQUIRED)
 find_package(asr_sdm_esdf_map REQUIRED)
+find_package(shortest_curve_path REQUIRED)
 find_package(rclcpp REQUIRED)
 find_package(geometry_msgs REQUIRED)
 find_package(visualization_msgs REQUIRED)
@@ -39,6 +40,7 @@ find_package(OpenCV REQUIRED)
 
 add_library(${PROJECT_NAME} SHARED
   src/astar.cpp
+  src/spatial_reeds_shepp_wrap.cpp
 )
 
 target_include_directories(${PROJECT_NAME} PUBLIC
@@ -67,6 +69,7 @@ ament_target_dependencies(${PROJECT_NAME}
 target_link_libraries(${PROJECT_NAME}
   Eigen3::Eigen
   Boost::boost
+  shortest_curve_path::shortest_curve_path
 )
 
 # The legacy Astar sources call into EDTEnvironment / SDFMap, which live in the
@@ -108,6 +111,7 @@ ament_export_dependencies(
   Eigen3
   Boost
   asr_sdm_esdf_map
+  shortest_curve_path
   rclcpp
   geometry_msgs
   visualization_msgs

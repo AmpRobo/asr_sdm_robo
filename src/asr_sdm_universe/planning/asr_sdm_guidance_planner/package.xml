@@ -12,6 +12,7 @@
   <depend>eigen</depend>
   <depend>boost</depend>
   <depend>asr_sdm_esdf_map</depend>
+  <depend>shortest_curve_path</depend>
   <depend>rclcpp</depend>
 
   <!-- Pulled in transitively by the asr_sdm_esdf_map environment headers. -->
