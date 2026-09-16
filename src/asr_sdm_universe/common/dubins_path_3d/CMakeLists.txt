@@ -14,6 +14,8 @@ find_package(ament_cmake REQUIRED)
 find_package(eigen3_cmake_module REQUIRED)
 find_package(Eigen3 REQUIRED)
 find_package(Threads REQUIRED)
+find_package(asr_sdm_control_msgs REQUIRED)
+find_package(geometry_msgs REQUIRED)
 
 add_library(${PROJECT_NAME} SHARED
   src/types.cpp
@@ -34,6 +36,17 @@ target_include_directories(${PROJECT_NAME} PRIVATE src)
 target_link_libraries(${PROJECT_NAME} PUBLIC Eigen3::Eigen PRIVATE Threads::Threads)
 target_compile_features(${PROJECT_NAME} PUBLIC cxx_std_17)
 
+add_library(${PROJECT_NAME}_conversions INTERFACE)
+target_include_directories(${PROJECT_NAME}_conversions INTERFACE
+  "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>"
+  "$<INSTALL_INTERFACE:include/${PROJECT_NAME}>"
+)
+target_link_libraries(${PROJECT_NAME}_conversions INTERFACE
+  ${PROJECT_NAME}
+  ${asr_sdm_control_msgs_TARGETS}
+  ${geometry_msgs_TARGETS}
+)
+
 install(
   DIRECTORY include/
   DESTINATION include/${PROJECT_NAME}
@@ -45,6 +58,10 @@ install(
   LIBRARY DESTINATION lib
   RUNTIME DESTINATION bin
 )
+install(
+  TARGETS ${PROJECT_NAME}_conversions
+  EXPORT export_${PROJECT_NAME}
+)
 
 if(BUILD_TESTING)
   find_package(ament_cmake_gtest REQUIRED)
@@ -55,13 +72,22 @@ if(BUILD_TESTING)
   set(AMENT_LINT_AUTO_EXCLUDE ament_cmake_copyright)
   ament_lint_auto_find_test_dependencies()
 
-  foreach(test_name planar_dubins sphere_dubins cylinder_dubins planner)
+  foreach(test_name planar_dubins sphere_dubins cylinder_dubins planner msg_conversions)
     ament_add_gtest(test_${test_name} test/test_${test_name}.cpp)
-    target_link_libraries(test_${test_name} ${PROJECT_NAME})
+    if(test_name STREQUAL msg_conversions)
+      target_link_libraries(test_${test_name} ${PROJECT_NAME}_conversions)
+    else()
+      target_link_libraries(test_${test_name} ${PROJECT_NAME})
+    endif()
   endforeach()
 endif()
 
 ament_export_targets(export_${PROJECT_NAME} HAS_LIBRARY_TARGET)
-ament_export_dependencies(Eigen3 eigen3_cmake_module)
+ament_export_dependencies(
+  Eigen3
+  eigen3_cmake_module
+  asr_sdm_control_msgs
+  geometry_msgs
+)
 
 ament_package()

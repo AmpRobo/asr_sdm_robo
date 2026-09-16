@@ -3,9 +3,10 @@
 3D Dubins path planning for a vehicle with bounded pitch and yaw rates, packaged
 as a standalone `ament_cmake` library.
 
-The package contains nothing but the library: no node, no messages, no launch
-files. Eigen is its only dependency, so it can be linked from a ROS 2 package or
-from plain CMake.
+The planner library itself has no node and no launch files. Eigen is its only
+algorithmic dependency. ROS 2 message and service definitions live in
+`asr_sdm_control_msgs` (`Configuration`, `PathSample`, `DubinsPath`, `PlanPath`);
+convert to and from the C++ types with `dubins_path_3d/msg_conversions.hpp`.
 
 ## The method
 
@@ -44,6 +45,8 @@ and to `CMakeLists.txt`:
 ```cmake
 find_package(dubins_path_3d REQUIRED)
 target_link_libraries(your_target dubins_path_3d::dubins_path_3d)
+# Optional: ROS message conversions
+# target_link_libraries(your_target dubins_path_3d::dubins_path_3d_conversions)
 ```
 
 Then plan:
@@ -84,6 +87,7 @@ between threads.
 | --- | --- |
 | `planner.hpp` | `DubinsPath3D`, the entry point |
 | `types.hpp` | `Configuration`, `PathSample`, `Path3D`, `PlannerOptions`, `PlanningResult`, Euler conversions |
+| `msg_conversions.hpp` | conversions to `asr_sdm_control_msgs` (`Configuration`, `PathSample`, `DubinsPath`, `PlanPath`) |
 | `surface_connections.hpp` | the SCS / SPS / SSS constructions, to run one in isolation |
 | `planar_dubins.hpp` | planar Dubins paths (CSC and CCC families) |
 | `sphere_dubins.hpp` | Dubins paths on a sphere (3 to 5 segments) |
@@ -112,7 +116,7 @@ that grows with their product.
 ## Build and test
 
 ```bash
-colcon build --packages-select dubins_path_3d
+colcon build --packages-up-to dubins_path_3d
 colcon test --packages-select dubins_path_3d
 ```
 

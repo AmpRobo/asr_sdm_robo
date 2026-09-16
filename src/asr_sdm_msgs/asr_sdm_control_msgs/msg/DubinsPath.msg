@@ -8,4 +8,4 @@ string path_type
 float64 length
 
 # Samples along the path, ordered from the initial to the final configuration.
-dubins_path_msgs/PathSample[] samples
+asr_sdm_control_msgs/PathSample[] samples

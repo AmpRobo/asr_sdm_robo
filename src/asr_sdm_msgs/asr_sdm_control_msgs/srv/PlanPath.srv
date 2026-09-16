@@ -1,8 +1,8 @@
 # Plan a feasible 3D Dubins path between two configurations subject to bounded
 # pitch and yaw rates.
 
-dubins_path_msgs/Configuration initial
-dubins_path_msgs/Configuration final
+asr_sdm_control_msgs/Configuration initial
+asr_sdm_control_msgs/Configuration final
 
 # Radius of the sphere reached when the pitch rate is maximal and the yaw rate is
 # zero. Non-positive means "use the node parameter".
@@ -28,7 +28,7 @@ float64 sample_spacing
 ---
 bool success
 string message
-dubins_path_msgs/DubinsPath path
+asr_sdm_control_msgs/DubinsPath path
 
 # Length of the best path found for every candidate construction, in the same
 # order as candidate_types. Infinite entries mean the construction is infeasible.
