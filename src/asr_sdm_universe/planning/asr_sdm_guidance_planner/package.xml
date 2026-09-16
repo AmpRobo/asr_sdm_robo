@@ -3,7 +3,7 @@
 <package format="3">
   <name>asr_sdm_guidance_planner</name>
   <version>0.1.0</version>
-  <description>Front-end guidance path search library. Provides the grid-based A* search used by the planning manager to generate a geometric guide path.</description>
+  <description>Front-end guidance path search library. Provides grid-based A* and a 3D Dubins guidance planner used to generate a geometric guide path.</description>
   <maintainer email="carveyrtrail@163.com">Willianms</maintainer>
   <license>MIT</license>
 
@@ -12,7 +12,7 @@
   <depend>eigen</depend>
   <depend>boost</depend>
   <depend>asr_sdm_esdf_map</depend>
-  <depend>shortest_curve_path</depend>
+  <depend>dubins_path_3d</depend>
   <depend>rclcpp</depend>
 
   <!-- Pulled in transitively by the asr_sdm_esdf_map environment headers. -->

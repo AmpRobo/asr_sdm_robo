@@ -185,19 +185,20 @@ int Astar::search(Eigen::Vector3d start_pt, Eigen::Vector3d end_pt, bool dynamic
   return NO_PATH;
 }
 
-void Astar::setParam(const std::shared_ptr<rclcpp::Node> & nh)
+void Astar::setParam(const std::shared_ptr<rclcpp::Node> & nh, const std::string & ns)
 {
   node_ = nh;
-  node_->declare_parameter("astar.resolution_astar", -1.0);
-  node_->declare_parameter("astar.time_resolution", -1.0);
-  node_->declare_parameter("astar.lambda_heu", -1.0);
-  node_->declare_parameter("astar.margin", -1.0);
-  node_->declare_parameter("astar.allocate_num", -1);
-  resolution_ = node_->get_parameter("astar.resolution_astar").as_double();
-  time_resolution_ = node_->get_parameter("astar.time_resolution").as_double();
-  lambda_heu_ = node_->get_parameter("astar.lambda_heu").as_double();
-  margin_ = node_->get_parameter("astar.margin").as_double();
-  allocate_num_ = node_->get_parameter("astar.allocate_num").as_int();
+  const std::string p = ns + ".";
+  node_->declare_parameter(p + "resolution_astar", -1.0);
+  node_->declare_parameter(p + "time_resolution", -1.0);
+  node_->declare_parameter(p + "lambda_heu", -1.0);
+  node_->declare_parameter(p + "margin", -1.0);
+  node_->declare_parameter(p + "allocate_num", -1);
+  resolution_ = node_->get_parameter(p + "resolution_astar").as_double();
+  time_resolution_ = node_->get_parameter(p + "time_resolution").as_double();
+  lambda_heu_ = node_->get_parameter(p + "lambda_heu").as_double();
+  margin_ = node_->get_parameter(p + "margin").as_double();
+  allocate_num_ = node_->get_parameter(p + "allocate_num").as_int();
   tie_breaker_ = 1.0 + 1.0 / 10000;
 
   cout << "margin:" << margin_ << endl;

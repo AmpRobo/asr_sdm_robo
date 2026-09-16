@@ -68,7 +68,7 @@
       local_segment_length: 6.0
       clearance_threshold: 0.2
       control_points_distance: 0.3
-      use_geometric_path: false
+      use_guidance_planner: true
       use_topo_path: true
       use_optimization: true
       # The head is driven as a nonholonomic body: yaw and pitch follow the
@@ -83,6 +83,20 @@
       # inherits its duration, so it starts out over-speed and needs the extra
       # time. Set to 1.01 to leave the timing almost untouched.
       max_time_lengthen_ratio: 1.5
+
+    # 3D Dubins front end used when manager.use_guidance_planner is true.
+    # Turning radii match max_vel / max_yaw_rate and max_vel / max_pitch_rate.
+    guidance_planner:
+      dubins_path_3d:
+        yaw_radius: 1.0
+        pitch_radius: 1.0
+        sample_ds: 0.1
+        margin: 0.2
+        position_tol: 0.05
+        tight_turn_radius: -1.0
+        location_samples: 15
+        heading_samples: 15
+        num_threads: 0
 
     topo_prm:
       sample_inflate_x: 2.0

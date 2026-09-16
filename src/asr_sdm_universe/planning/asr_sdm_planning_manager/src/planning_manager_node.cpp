@@ -54,6 +54,32 @@ bool headingFromVelocity(const Eigen::Vector3d & v, double & yaw, double & pitch
   return true;
 }
 
+bool headingFromBodyX(const Eigen::Vector3d & dir, double & yaw, double & pitch)
+{
+  if (dir.squaredNorm() < 1.0e-12) return false;
+  yaw = std::atan2(dir.y(), dir.x());
+  pitch = std::atan2(-dir.z(), std::hypot(dir.x(), dir.y()));
+  return true;
+}
+
+vector<Eigen::Vector3d> downsamplePolyline(const vector<Eigen::Vector3d> & path, double ds)
+{
+  if (path.size() <= 2 || ds <= 1.0e-6) return path;
+
+  vector<Eigen::Vector3d> out;
+  out.reserve(path.size());
+  out.push_back(path.front());
+  for (size_t i = 1; i + 1 < path.size(); ++i) {
+    if ((path[i] - out.back()).norm() >= ds) out.push_back(path[i]);
+  }
+  if ((path.back() - out.back()).squaredNorm() > 1.0e-12) {
+    out.push_back(path.back());
+  } else {
+    out.back() = path.back();
+  }
+  return out;
+}
+
 }  // namespace
 
 // SECTION interfaces for setup and query
@@ -98,10 +124,10 @@ void PlanningManager::initPlanModules(const std::shared_ptr<rclcpp::Node> & nh)
   pp_.max_time_lengthen_ratio_ =
     std::max(1.0, node_->get_parameter("manager.max_time_lengthen_ratio").as_double());
 
-  node_->declare_parameter("manager.use_geometric_path", false);
+  node_->declare_parameter("manager.use_guidance_planner", false);
   node_->declare_parameter("manager.use_topo_path", false);
   node_->declare_parameter("manager.use_optimization", false);
-  bool use_geometric_path = node_->get_parameter("manager.use_geometric_path").as_bool();
+  bool use_guidance_planner = node_->get_parameter("manager.use_guidance_planner").as_bool();
   bool use_topo_path = node_->get_parameter("manager.use_topo_path").as_bool();
   bool use_optimization = node_->get_parameter("manager.use_optimization").as_bool();
 
@@ -111,11 +137,11 @@ void PlanningManager::initPlanModules(const std::shared_ptr<rclcpp::Node> & nh)
   edt_environment_.reset(new EDTEnvironment);
   edt_environment_->setMap(esdf_map_);
 
-  if (use_geometric_path) {
-    geo_path_finder_.reset(new Astar);
-    geo_path_finder_->setParam(node_);
-    geo_path_finder_->setEnvironment(edt_environment_);
-    geo_path_finder_->init();
+  if (use_guidance_planner) {
+    guidance_planner_.reset(new GuidancePlanner);
+    guidance_planner_->setParam(node_);
+    guidance_planner_->setEnvironment(edt_environment_);
+    guidance_planner_->init();
   }
 
   if (use_optimization) {
@@ -222,14 +248,109 @@ bool PlanningManager::planGlobalTraj(const Eigen::Vector3d & start_pos)
   // Clear any previous topological search results before building a new global reference.
   plan_data_.clearTopoPaths();
 
-  // Densify waypoints, fit a min-snap polynomial, then truncate the first local segment.
-  vector<Eigen::Vector3d> points = buildGlobalWaypoints(start_pos);
+  // Guidance planner (3D Dubins) supplies the global polyline when it is enabled
+  // and finds a feasible curve; otherwise densify the configured waypoints.
+  // Min-snap then fits that polyline and the first local segment is truncated
+  // from it.
+  vector<Eigen::Vector3d> points;
+  if (!buildGuidanceGlobalWaypoints(start_pos, points)) {
+    points = buildGlobalWaypoints(start_pos);
+  }
   PolynomialTraj global_traj = fitGlobalMinSnapTraj(points);
   auto time_now = node_->now();
   global_data_.setGlobalTraj(global_traj, time_now);
 
   initLocalTrajFromGlobal(time_now);
   updateTrajInfo();
+  return true;
+}
+
+bool PlanningManager::buildGuidanceGlobalWaypoints(
+  const Eigen::Vector3d & start_pos, vector<Eigen::Vector3d> & points)
+{
+  points.clear();
+  if (!guidance_planner_) return false;
+
+  const vector<Eigen::Vector3d> & anchors = plan_data_.global_waypoints_;
+  if (anchors.empty()) {
+    SPDLOG_WARN("no global waypoints!");
+    return false;
+  }
+
+  double yaw = start_yaw_(0);
+  double pitch = start_pitch_(0);
+  Eigen::Vector3d curr = start_pos;
+  // sample_ds is for collision checking; min-snap needs a coarser polyline so
+  // segment times stay around dist / max_vel instead of hitting the 1 s floor.
+  const double ds = std::max(1.0, pp_.ctrl_pt_dist);
+  int sample_count = 1;
+  double path_length = 0.0;
+  points.push_back(curr);
+
+  for (size_t i = 0; i < anchors.size(); ++i) {
+    const Eigen::Vector3d & goal = anchors[i];
+    if ((goal - curr).norm() < 1.0e-3) continue;
+
+    double end_yaw = yaw;
+    double end_pitch = pitch;
+    const bool last = (i + 1 == anchors.size());
+    if (last) {
+      if (!headingFromBodyX(goal_heading_, end_yaw, end_pitch)) {
+        headingFromBodyX(goal - curr, end_yaw, end_pitch);
+      }
+    } else if (!headingFromBodyX(anchors[i + 1] - goal, end_yaw, end_pitch)) {
+      headingFromBodyX(goal - curr, end_yaw, end_pitch);
+    }
+
+    const int status = guidance_planner_->search(curr, yaw, pitch, goal, end_yaw, end_pitch);
+    if (status != GuidancePlanner::REACH_END) {
+      SPDLOG_WARN(
+        "guidance planner failed between ({:.2f},{:.2f},{:.2f}) and ({:.2f},{:.2f},{:.2f})",
+        curr.x(), curr.y(), curr.z(), goal.x(), goal.y(), goal.z());
+      points.clear();
+      return false;
+    }
+
+    const vector<Eigen::Vector3d> seg = guidance_planner_->getPath();
+    const vector<double> yaw_seg = guidance_planner_->getYawPath();
+    const vector<double> pitch_seg = guidance_planner_->getPitchPath();
+    if (seg.size() < 2 || yaw_seg.size() != seg.size() || pitch_seg.size() != seg.size()) {
+      SPDLOG_WARN("guidance planner returned an empty curve");
+      points.clear();
+      return false;
+    }
+
+    const vector<Eigen::Vector3d> sparse = downsamplePolyline(seg, ds);
+    const size_t before = points.size();
+    if ((sparse.front() - points.back()).squaredNorm() < 1.0e-12) {
+      points.insert(points.end(), sparse.begin() + 1, sparse.end());
+    } else {
+      points.insert(points.end(), sparse.begin(), sparse.end());
+    }
+    if (points.size() == before) {
+      points.push_back(goal);
+    } else {
+      points.back() = goal;
+    }
+
+    curr = goal;
+    yaw = yaw_seg.back();
+    pitch = pitch_seg.back();
+    sample_count += static_cast<int>(seg.size()) - 1;
+    path_length += guidance_planner_->getPathLength();
+  }
+
+  if (points.size() == 2) {
+    points.insert(points.begin() + 1, 0.5 * (points[0] + points[1]));
+  }
+  if (points.size() < 3) {
+    points.clear();
+    return false;
+  }
+
+  SPDLOG_INFO(
+    "guidance global path: {} samples -> {} waypoints, length {:.2f} m", sample_count,
+    static_cast<int>(points.size()), path_length);
   return true;
 }
 

@@ -156,7 +156,7 @@ public:
   enum { REACH_END = 1, NO_PATH = 2 };
 
   /* main API */
-  void setParam(const std::shared_ptr<rclcpp::Node> & nh);
+  void setParam(const std::shared_ptr<rclcpp::Node> & nh, const std::string & ns = "astar");
   void init();
   void reset();
   int search(

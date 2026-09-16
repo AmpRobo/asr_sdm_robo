@@ -1,8 +1,8 @@
 // Copyright (c) Amphibious Robotics.
-// Spatial Reeds-Shepp guidance path interface.
+// Guidance path planner interface.
 
-#ifndef _SPATIAL_REEDS_SHEPP_WRAP_H
-#define _SPATIAL_REEDS_SHEPP_WRAP_H
+#ifndef _GUIDANCE_PLANNER_H
+#define _GUIDANCE_PLANNER_H
 
 #include <Eigen/Eigen>
 #include <rclcpp/rclcpp.hpp>
@@ -15,7 +15,7 @@
 namespace amprobo
 {
 
-class SpatialReedsShepp
+class GuidancePlanner
 {
 private:
   /* ---------- record data ---------- */
@@ -34,6 +34,10 @@ private:
   double sample_ds_;
   double margin_;
   double position_tol_;
+  double tight_turn_radius_;
+  int location_samples_;
+  int heading_samples_;
+  int num_threads_;
 
   /* map */
   Eigen::Vector3d origin_, map_size_3d_, map_max_;
@@ -45,8 +49,8 @@ private:
   bool collisionFree(const Eigen::Vector3d & pt) const;
 
 public:
-  SpatialReedsShepp() {};
-  ~SpatialReedsShepp() {};
+  GuidancePlanner() {};
+  ~GuidancePlanner() {};
 
   enum { REACH_END = 1, NO_PATH = 2 };
 
@@ -66,7 +70,7 @@ public:
   double getPathLength() const { return path_length_; }
   double getPositionError() const { return position_error_; }
 
-  typedef std::shared_ptr<SpatialReedsShepp> Ptr;
+  typedef std::shared_ptr<GuidancePlanner> Ptr;
 };
 
 }  // namespace amprobo

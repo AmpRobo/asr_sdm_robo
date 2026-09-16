@@ -8,7 +8,7 @@
 #include <asr_sdm_planning_manager/plan_container.hpp>
 #include <rclcpp/rclcpp.hpp>
 
-#include <asr_sdm_guidance_planner/astar.h>
+#include <asr_sdm_guidance_planner/guidance_planner.h>
 #include <asr_sdm_local_path_modifier/topo_prm.h>
 #include <asr_sdm_trajectory_optimizer/bspline_optimizer.h>
 #include <bspline/non_uniform_bspline.h>
@@ -57,7 +57,7 @@ private:
   /* main planning algorithms & modules */
   ESDFMap::Ptr esdf_map_;
 
-  unique_ptr<Astar> geo_path_finder_;
+  unique_ptr<GuidancePlanner> guidance_planner_;
   unique_ptr<TopologyPRM> topo_prm_;
   vector<BsplineOptimizer::Ptr> bspline_optimizers_;
 
@@ -71,6 +71,8 @@ private:
 
   /* global trajectory helpers */
   vector<Eigen::Vector3d> buildGlobalWaypoints(const Eigen::Vector3d & start_pos);
+  bool buildGuidanceGlobalWaypoints(
+    const Eigen::Vector3d & start_pos, vector<Eigen::Vector3d> & points);
   void insertNonholonomicStartArc(vector<Eigen::Vector3d> & points);
   PolynomialTraj fitGlobalMinSnapTraj(const vector<Eigen::Vector3d> & points);
   void initLocalTrajFromGlobal(const rclcpp::Time & time_now);
