@@ -11,6 +11,7 @@
 
   <depend>eigen</depend>
   <depend>boost</depend>
+  <depend>libpcl-all-dev</depend>
   <depend>asr_sdm_esdf_map</depend>
   <depend>dubins_path_3d</depend>
   <depend>rclcpp</depend>

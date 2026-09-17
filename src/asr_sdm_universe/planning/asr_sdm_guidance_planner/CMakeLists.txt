@@ -1,23 +1,6 @@
 cmake_minimum_required(VERSION 3.8)
 project(asr_sdm_guidance_planner)
 
-# Keep third-party CMake package discovery quiet on Ubuntu 24.04 / ROS 2 Jazzy.
-# PCL may call FindFLANN through exported dependencies; setting the policy defaults
-# here prevents CMP0074/CMP0144 developer warnings without changing planner logic.
-if(POLICY CMP0074)
-  cmake_policy(SET CMP0074 NEW)
-  set(CMAKE_POLICY_DEFAULT_CMP0074 NEW)
-endif()
-
-if(POLICY CMP0144)
-  cmake_policy(SET CMP0144 NEW)
-  set(CMAKE_POLICY_DEFAULT_CMP0144 NEW)
-endif()
-
-unset(FLANN_ROOT CACHE)
-unset(FLANN_ROOT)
-set(CMAKE_SUPPRESS_DEVELOPER_WARNINGS 1 CACHE BOOL "Suppress CMake developer warnings from third-party packages" FORCE)
-
 if(NOT CMAKE_CXX_STANDARD)
   set(CMAKE_CXX_STANDARD 17)
   set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -30,6 +13,7 @@ endif()
 find_package(ament_cmake REQUIRED)
 find_package(Eigen3 REQUIRED)
 find_package(Boost REQUIRED)
+find_package(PCL REQUIRED)
 find_package(asr_sdm_esdf_map REQUIRED)
 find_package(dubins_path_3d REQUIRED)
 find_package(rclcpp REQUIRED)
@@ -52,7 +36,7 @@ if(DEFINED asr_sdm_esdf_map_INCLUDE_DIRS)
   target_include_directories(${PROJECT_NAME} PUBLIC ${asr_sdm_esdf_map_INCLUDE_DIRS})
 endif()
 
-target_include_directories(${PROJECT_NAME} PUBLIC ${OpenCV_INCLUDE_DIRS})
+target_include_directories(${PROJECT_NAME} PUBLIC ${OpenCV_INCLUDE_DIRS} ${PCL_INCLUDE_DIRS})
 
 # NOTE:
 # asr_sdm_esdf_map exports a broken imported target (asr_sdm_esdf_map::obj_generator),
@@ -70,6 +54,7 @@ target_link_libraries(${PROJECT_NAME}
   Eigen3::Eigen
   Boost::boost
   dubins_path_3d::dubins_path_3d
+  ${PCL_LIBRARIES}
 )
 
 # The legacy Astar sources call into EDTEnvironment / SDFMap, which live in the
@@ -110,6 +95,7 @@ ament_export_include_directories(include)
 ament_export_dependencies(
   Eigen3
   Boost
+  PCL
   asr_sdm_esdf_map
   dubins_path_3d
   rclcpp
