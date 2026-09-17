@@ -33,7 +33,7 @@ Eigen::Vector3d headingBodyX(double yaw, double pitch)
     std::cos(pitch) * std::cos(yaw), std::cos(pitch) * std::sin(yaw), -std::sin(pitch));
 }
 
-constexpr double kMinHeadingSpeed = 0.02;
+constexpr double MIN_HEADING_SPEED = 0.02;
 
 double wrapToPi(double angle)
 {
@@ -46,7 +46,7 @@ bool headingFromVelocity(const Eigen::Vector3d & v, double & yaw, double & pitch
 {
   const double sxy2 = v(0) * v(0) + v(1) * v(1);
   const double v2 = sxy2 + v(2) * v(2);
-  const double min_speed2 = kMinHeadingSpeed * kMinHeadingSpeed;
+  const double min_speed2 = MIN_HEADING_SPEED * MIN_HEADING_SPEED;
   if (sxy2 < min_speed2 || v2 < min_speed2) return false;
 
   yaw = std::atan2(v(1), v(0));
@@ -476,9 +476,9 @@ PolynomialTraj PlanningManager::fitGlobalMinSnapTraj(const vector<Eigen::Vector3
   // facing whichever way the fit happened to curl in from. minSnapTraj imposes
   // the terminal velocity as an equality constraint, so any nonzero speed pins
   // the direction exactly; keep it small enough that the robot still stops.
-  constexpr double kMinArrivalSpeed = 1.0e-2;
+  constexpr double MIN_ARRIVAL_SPEED = 1.0e-2;
   const Eigen::Vector3d end_vel = goal_heading_.squaredNorm() > 1.0e-12
-                                    ? std::max(pp_.min_vel_, kMinArrivalSpeed) * goal_heading_
+                                    ? std::max(pp_.min_vel_, MIN_ARRIVAL_SPEED) * goal_heading_
                                     : zero;
 
   return minSnapTraj(pos, start_vel, end_vel, start_acc, zero, time);
@@ -882,10 +882,10 @@ void PlanningManager::findCollisionRange(
 
 bool PlanningManager::tangentAtTime(double t, double dt, Eigen::Vector3d & dir)
 {
-  constexpr double kMinTangent = 1.0e-4;
+  constexpr double MIN_TANGENT = 1.0e-4;
 
   dir = local_data_.velocity_traj_.evaluateDeBoorT(t);
-  if (dir.norm() > kMinTangent) return true;
+  if (dir.norm() > MIN_TANGENT) return true;
 
   // The segment starts and ends at rest, where the velocity carries no
   // direction; fall back to the chord spanning one heading sample.
@@ -894,7 +894,7 @@ bool PlanningManager::tangentAtTime(double t, double dt, Eigen::Vector3d & dir)
   const double t0 = max(0.0, min(t, duration - dt));
   dir = pos.evaluateDeBoorT(min(duration, t0 + dt)) - pos.evaluateDeBoorT(t0);
 
-  return dir.norm() > kMinTangent;
+  return dir.norm() > MIN_TANGENT;
 }
 
 fast_planner::NonUniformBspline PlanningManager::fitAngleBspline(

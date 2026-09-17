@@ -19,8 +19,6 @@ namespace amprobo
 namespace
 {
 
-const std::string kDubinsNs = "guidance_planner.dubins_path_3d.";
-
 // ASR heading is R = Rz(yaw) * Ry(pitch), so body +x has z = -sin(pitch).
 // dubins_path_3d treats pitch as positive nose-up (tangent.z = +sin(pitch)).
 dubins_path_3d::Configuration poseToConfig(
@@ -34,24 +32,25 @@ dubins_path_3d::Configuration poseToConfig(
 void GuidancePlanner::setParam(const std::shared_ptr<rclcpp::Node> & nh)
 {
   node_ = nh;
-  node_->declare_parameter(kDubinsNs + "yaw_radius", 1.0);
-  node_->declare_parameter(kDubinsNs + "pitch_radius", 1.0);
-  node_->declare_parameter(kDubinsNs + "sample_ds", 0.1);
-  node_->declare_parameter(kDubinsNs + "margin", 0.2);
-  node_->declare_parameter(kDubinsNs + "position_tol", 0.05);
-  node_->declare_parameter(kDubinsNs + "tight_turn_radius", -1.0);
-  node_->declare_parameter(kDubinsNs + "location_samples", 15);
-  node_->declare_parameter(kDubinsNs + "heading_samples", 15);
-  node_->declare_parameter(kDubinsNs + "num_threads", 0);
-  yaw_radius_ = node_->get_parameter(kDubinsNs + "yaw_radius").as_double();
-  pitch_radius_ = node_->get_parameter(kDubinsNs + "pitch_radius").as_double();
-  sample_ds_ = node_->get_parameter(kDubinsNs + "sample_ds").as_double();
-  margin_ = node_->get_parameter(kDubinsNs + "margin").as_double();
-  position_tol_ = node_->get_parameter(kDubinsNs + "position_tol").as_double();
-  tight_turn_radius_ = node_->get_parameter(kDubinsNs + "tight_turn_radius").as_double();
-  location_samples_ = static_cast<int>(node_->get_parameter(kDubinsNs + "location_samples").as_int());
-  heading_samples_ = static_cast<int>(node_->get_parameter(kDubinsNs + "heading_samples").as_int());
-  num_threads_ = static_cast<int>(node_->get_parameter(kDubinsNs + "num_threads").as_int());
+  const std::string p = "guidance_planner.dubins_path_3d.";
+  node_->declare_parameter(p + "yaw_radius", 1.0);
+  node_->declare_parameter(p + "pitch_radius", 1.0);
+  node_->declare_parameter(p + "sample_ds", 0.1);
+  node_->declare_parameter(p + "margin", 0.2);
+  node_->declare_parameter(p + "position_tol", 0.05);
+  node_->declare_parameter(p + "tight_turn_radius", -1.0);
+  node_->declare_parameter(p + "location_samples", 15);
+  node_->declare_parameter(p + "heading_samples", 15);
+  node_->declare_parameter(p + "num_threads", 0);
+  yaw_radius_ = node_->get_parameter(p + "yaw_radius").as_double();
+  pitch_radius_ = node_->get_parameter(p + "pitch_radius").as_double();
+  sample_ds_ = node_->get_parameter(p + "sample_ds").as_double();
+  margin_ = node_->get_parameter(p + "margin").as_double();
+  position_tol_ = node_->get_parameter(p + "position_tol").as_double();
+  tight_turn_radius_ = node_->get_parameter(p + "tight_turn_radius").as_double();
+  location_samples_ = static_cast<int>(node_->get_parameter(p + "location_samples").as_int());
+  heading_samples_ = static_cast<int>(node_->get_parameter(p + "heading_samples").as_int());
+  num_threads_ = static_cast<int>(node_->get_parameter(p + "num_threads").as_int());
 
   cout << "3d dubins yaw radius:" << yaw_radius_ << endl;
   cout << "3d dubins pitch radius:" << pitch_radius_ << endl;
@@ -176,15 +175,15 @@ std::vector<double> GuidancePlanner::getPitchPath()
 bool GuidancePlanner::headingFromDelta(
   const Eigen::Vector3d & delta, double & yaw, double & pitch) const
 {
-  const double sxy = std::hypot(delta.x(), delta.y());
-  const double range = delta.norm();
-  if (range < 1.0e-6) {
+  const double dist_xy = std::hypot(delta.x(), delta.y());
+  const double dist = delta.norm();
+  if (dist < 1.0e-6) {
     yaw = 0.0;
     pitch = 0.0;
     return false;
   }
   yaw = std::atan2(delta.y(), delta.x());
-  pitch = std::atan2(-delta.z(), std::max(sxy, 1.0e-9));
+  pitch = std::atan2(-delta.z(), std::max(dist_xy, 1.0e-9));
   return true;
 }
 
