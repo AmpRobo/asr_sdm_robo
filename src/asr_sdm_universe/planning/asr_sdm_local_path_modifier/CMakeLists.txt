@@ -34,6 +34,7 @@ option(BUILD_LOCAL_PATH_MODIFIER_TEST_NODE "Build RViz test node for local path 
 find_package(ament_cmake REQUIRED)
 find_package(Eigen3 REQUIRED)
 find_package(asr_sdm_esdf_map REQUIRED)
+find_package(asr_sdm_log_collector REQUIRED)
 find_package(rclcpp REQUIRED)
 find_package(geometry_msgs REQUIRED)
 find_package(visualization_msgs REQUIRED)
@@ -71,6 +72,7 @@ ament_target_dependencies(${PROJECT_NAME}
 
 target_link_libraries(${PROJECT_NAME}
   Eigen3::Eigen
+  asr_sdm_log_collector::asr_sdm_log_client
 )
 
 # The legacy TopologyPRM sources call into EDTEnvironment / SDFMap / RayCaster, which live
@@ -149,5 +151,6 @@ endif()
 
 ament_export_targets(export_${PROJECT_NAME} HAS_LIBRARY_TARGET)
 ament_export_include_directories(include)
-ament_export_dependencies(Eigen3 asr_sdm_esdf_map rclcpp geometry_msgs visualization_msgs)
+ament_export_dependencies(
+  Eigen3 asr_sdm_esdf_map asr_sdm_log_collector rclcpp geometry_msgs visualization_msgs)
 ament_package()
