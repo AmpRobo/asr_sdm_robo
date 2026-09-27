@@ -109,6 +109,7 @@ private:
   Eigen::Vector3d sample_r_;
   Eigen::Vector3d translation_;
   Eigen::Matrix3d rotation_;
+  int removed_quadrant_;
 
   // roadmap data structure, 0:start, 1:goal, 2-n: others
   list<GraphNode::Ptr> graph_;
@@ -128,11 +129,14 @@ private:
   int short_cut_num_;
   Eigen::Vector3d sample_inflate_;
   double resolution_;
+  double quadrant_dist_cap_;
+  double quadrant_eval_step_;
 
   double ratio_to_short_;
   int reserve_num_;
 
   bool parallel_shortcut_;
+  bool prune_quadrant_;
 
   /* create topological roadmap */
   /* path searching, shortening, pruning and merging */
@@ -145,6 +149,8 @@ private:
 
   /* ---------- helper ---------- */
   inline Eigen::Vector3d getSample();
+  static int quadrantOf(const Eigen::Vector3d & local_pt);
+  int lowestEsdfQuadrant();
   vector<GraphNode::Ptr> findVisibGuard(Eigen::Vector3d pt);  // find pairs of visibile guard
   bool needConnection(
     GraphNode::Ptr g1, GraphNode::Ptr g2,

@@ -5,6 +5,8 @@
 
 #include <asr_sdm_log_collector/log_client.hpp>
 
+#include <algorithm>
+#include <cmath>
 #include <thread>
 
 namespace amprobo
@@ -37,6 +39,9 @@ void TopologyPRM::init(const std::shared_ptr<rclcpp::Node> & nh)
   node_->declare_parameter("topo_prm.max_raw_path", -1);
   node_->declare_parameter("topo_prm.max_raw_path2", -1);
   node_->declare_parameter("topo_prm.parallel_shortcut", false);
+  node_->declare_parameter("topo_prm.prune_quadrant", true);
+  node_->declare_parameter("topo_prm.quadrant_dist_cap", 1.0);
+  node_->declare_parameter("topo_prm.quadrant_eval_step", 0.2);
 
   sample_inflate_(0) = node_->get_parameter("topo_prm.sample_inflate_x").as_double();
   sample_inflate_(1) = node_->get_parameter("topo_prm.sample_inflate_y").as_double();
@@ -50,6 +55,10 @@ void TopologyPRM::init(const std::shared_ptr<rclcpp::Node> & nh)
   max_raw_path_ = node_->get_parameter("topo_prm.max_raw_path").as_int();
   max_raw_path2_ = node_->get_parameter("topo_prm.max_raw_path2").as_int();
   parallel_shortcut_ = node_->get_parameter("topo_prm.parallel_shortcut").as_bool();
+  prune_quadrant_ = node_->get_parameter("topo_prm.prune_quadrant").as_bool();
+  quadrant_dist_cap_ = node_->get_parameter("topo_prm.quadrant_dist_cap").as_double();
+  quadrant_eval_step_ = node_->get_parameter("topo_prm.quadrant_eval_step").as_double();
+  removed_quadrant_ = -1;
   resolution_ = edt_environment_->esdf_map_->getResolution();
   offset_ = Eigen::Vector3d(0.5, 0.5, 0.5) - edt_environment_->esdf_map_->getOrigin() / resolution_;
 
@@ -146,6 +155,8 @@ list<GraphNode::Ptr> TopologyPRM::createGraph(Eigen::Vector3d start, Eigen::Vect
   rotation_.col(0) = xtf;
   rotation_.col(1) = ytf;
   rotation_.col(2) = ztf;
+
+  removed_quadrant_ = prune_quadrant_ ? lowestEsdfQuadrant() : -1;
 
   int node_id = 1;
 
@@ -264,12 +275,68 @@ Eigen::Vector3d TopologyPRM::getSample()
   /* sampling */
   Eigen::Vector3d pt;
   pt(0) = rand_pos_(eng_) * sample_r_(0);
-  pt(1) = rand_pos_(eng_) * sample_r_(1);
-  pt(2) = rand_pos_(eng_) * sample_r_(2);
+  pt(1) = std::fabs(rand_pos_(eng_)) * sample_r_(1);
+  pt(2) = std::fabs(rand_pos_(eng_)) * sample_r_(2);
+
+  // The quadrants have equal volume, so a uniform pick among the kept ones
+  // followed by a uniform point inside it is uniform over their union.
+  const int kept = removed_quadrant_ < 0 ? 4 : 3;
+  int quadrant = std::uniform_int_distribution<int>(0, kept - 1)(eng_);
+  if (removed_quadrant_ >= 0 && quadrant >= removed_quadrant_) ++quadrant;
+  if (quadrant & 1) pt(1) = -pt(1);
+  if (quadrant & 2) pt(2) = -pt(2);
 
   pt = rotation_ * pt + translation_;
 
   return pt;
+}
+
+/* The sample box is split by its local x-y and x-z planes, both of which
+ * contain the start -> end axis, so every quadrant still spans the whole
+ * blocked window. Bit 0 marks local y < 0 (right of the heading), bit 1 marks
+ * local z < 0 (below it). */
+int TopologyPRM::quadrantOf(const Eigen::Vector3d & local_pt)
+{
+  return (local_pt(1) < 0.0 ? 1 : 0) + (local_pt(2) < 0.0 ? 2 : 0);
+}
+
+int TopologyPRM::lowestEsdfQuadrant()
+{
+  const ESDFMap::Ptr & map = edt_environment_->esdf_map_;
+  const double step = std::max(quadrant_eval_step_, resolution_);
+
+  // Even cell counts on y and z keep every cell centre off the splitting
+  // planes, so all four quadrants receive the same number of cells.
+  const int nx = std::max(1, static_cast<int>(std::ceil(2.0 * sample_r_(0) / step)));
+  const int ny = 2 * std::max(1, static_cast<int>(std::ceil(sample_r_(1) / step)));
+  const int nz = 2 * std::max(1, static_cast<int>(std::ceil(sample_r_(2) / step)));
+  const Eigen::Vector3d cell(
+    2.0 * sample_r_(0) / nx, 2.0 * sample_r_(1) / ny, 2.0 * sample_r_(2) / nz);
+
+  double sums[4] = {0.0, 0.0, 0.0, 0.0};
+  Eigen::Vector3d local, world;
+  for (int i = 0; i < nx; ++i) {
+    local(0) = -sample_r_(0) + (i + 0.5) * cell(0);
+    for (int j = 0; j < ny; ++j) {
+      local(1) = -sample_r_(1) + (j + 0.5) * cell(1);
+      for (int k = 0; k < nz; ++k) {
+        local(2) = -sample_r_(2) + (k + 0.5) * cell(2);
+        world = rotation_ * local + translation_;
+        // getDistance() clamps an out-of-map index onto the border voxel.
+        if (!map->isInMap(world)) continue;
+        // Voxels no ESDF update has reached hold 10000, and an update whose box
+        // held no obstacle leaves about 1e153, so without the cap a single such
+        // voxel decides the comparison.
+        sums[quadrantOf(local)] += std::min(map->getDistance(world), quadrant_dist_cap_);
+      }
+    }
+  }
+
+  const int lowest = static_cast<int>(std::min_element(sums, sums + 4) - sums);
+  SPDLOG_INFO(
+    "[Topo]: quadrant esdf sum: {:.1f} {:.1f} {:.1f} {:.1f}, removed {}", sums[0], sums[1],
+    sums[2], sums[3], lowest);
+  return lowest;
 }
 
 bool TopologyPRM::lineVisib(

@@ -68,7 +68,7 @@
       local_segment_length: 6.0
       clearance_threshold: 0.2
       control_points_distance: 0.3
-      use_guidance_planner: true
+      use_guidance_planner: false
       use_topo_path: true
       use_optimization: true
       # The head is driven as a nonholonomic body: yaw and pitch follow the
@@ -111,6 +111,14 @@
       reserve_num: 6
       ratio_to_short: 5.5
       parallel_shortcut: true
+      # With prune_quadrant, the sample box is split into four quadrants around
+      # the start -> end axis and the one with the lowest ESDF sum is not
+      # sampled; false samples the whole box. Each voxel's distance is capped at
+      # quadrant_dist_cap [m] before summing, and the box is evaluated on a grid
+      # of quadrant_eval_step [m].
+      prune_quadrant: true
+      quadrant_dist_cap: 1.0
+      quadrant_eval_step: 0.2
 
     optimization:
       lambda1: 10.0              # smoothness
