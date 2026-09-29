@@ -76,6 +76,7 @@ void ESDFMap::initMap(const std::shared_ptr<rclcpp::Node> & nh)
   /* get parameter — ROS 2 dotted names correspond to esdf_map/ros1 slash keys */
   double x_size, y_size, z_size;
   node_->declare_parameter("esdf_map.resolution", -1.0);
+  node_->declare_parameter("esdf_map.region_valuation_resolution", -1.0);
   node_->declare_parameter("esdf_map.map_size_x", -1.0);
   node_->declare_parameter("esdf_map.map_size_y", -1.0);
   node_->declare_parameter("esdf_map.map_size_z", -1.0);
@@ -127,6 +128,8 @@ void ESDFMap::initMap(const std::shared_ptr<rclcpp::Node> & nh)
   node_->declare_parameter("esdf_map.preload_source_resolution", -1.0);
 
   mp_.resolution_ = node_->get_parameter("esdf_map.resolution").as_double();
+  mp_.region_valuation_resolution_ =
+    node_->get_parameter("esdf_map.region_valuation_resolution").as_double();
   x_size = node_->get_parameter("esdf_map.map_size_x").as_double();
   y_size = node_->get_parameter("esdf_map.map_size_y").as_double();
   z_size = node_->get_parameter("esdf_map.map_size_z").as_double();
@@ -181,9 +184,14 @@ void ESDFMap::initMap(const std::shared_ptr<rclcpp::Node> & nh)
   if (!std::isfinite(mp_.resolution_) || mp_.resolution_ <= 0.0) {
     throw std::invalid_argument("esdf_map.resolution must be finite and positive.");
   }
+  if (!std::isfinite(mp_.region_valuation_resolution_) || mp_.region_valuation_resolution_ <= 0.0) {
+    throw std::invalid_argument(
+      "esdf_map.region_valuation_resolution must be finite and positive.");
+  }
 
   mp_.local_bound_inflate_ = max(mp_.resolution_, mp_.local_bound_inflate_);
   mp_.resolution_inv_ = 1 / mp_.resolution_;
+  mp_.region_valuation_resolution_inv_ = 1 / mp_.region_valuation_resolution_;
   mp_.map_origin_ = Eigen::Vector3d(-x_size / 2.0, -y_size / 2.0, mp_.ground_height_);
   mp_.map_size_ = Eigen::Vector3d(x_size, y_size, z_size);
 
@@ -200,8 +208,11 @@ void ESDFMap::initMap(const std::shared_ptr<rclcpp::Node> & nh)
   RCLCPP_INFO(node_->get_logger(), "max: %f", mp_.clamp_max_log_);
   RCLCPP_INFO(node_->get_logger(), "thresh log: %f", mp_.min_occupancy_log_);
 
-  for (int i = 0; i < 3; ++i)
+  for (int i = 0; i < 3; ++i) {
     mp_.map_voxel_num_(i) = ceil(mp_.map_size_(i) / mp_.resolution_);
+    mp_.region_valuation_voxel_num_(i) =
+      ceil(mp_.map_size_(i) / mp_.region_valuation_resolution_);
+  }
 
   mp_.map_min_boundary_ = mp_.map_origin_;
   mp_.map_max_boundary_ = mp_.map_origin_ + mp_.map_size_;
@@ -212,6 +223,9 @@ void ESDFMap::initMap(const std::shared_ptr<rclcpp::Node> & nh)
 
   int buffer_size =
     mp_.map_voxel_num_(0) * mp_.map_voxel_num_(1) * mp_.map_voxel_num_(2);
+  int region_valuation_buffer_size =
+    mp_.region_valuation_voxel_num_(0) * mp_.region_valuation_voxel_num_(1) *
+    mp_.region_valuation_voxel_num_(2);
 
   md_.occupancy_buffer_ = vector<double>(buffer_size, mp_.clamp_min_log_ - mp_.unknown_flag_);
   md_.occupancy_buffer_neg = vector<char>(buffer_size, 0);
@@ -219,6 +233,7 @@ void ESDFMap::initMap(const std::shared_ptr<rclcpp::Node> & nh)
   md_.distance_buffer_ = vector<double>(buffer_size, 10000);
   md_.distance_buffer_neg_ = vector<double>(buffer_size, 10000);
   md_.distance_buffer_all_ = vector<double>(buffer_size, 10000);
+  md_.region_valuation_buffer_ = vector<double>(region_valuation_buffer_size, 10000);
   md_.count_hit_and_miss_ = vector<short>(buffer_size, 0);
   md_.count_hit_ = vector<short>(buffer_size, 0);
   md_.flag_rayend_ = vector<char>(buffer_size, -1);

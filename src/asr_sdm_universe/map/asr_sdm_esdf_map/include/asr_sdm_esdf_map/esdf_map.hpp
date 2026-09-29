@@ -40,6 +40,8 @@ struct MappingParameters {
   Eigen::Vector3i map_min_idx_, map_max_idx_;
   Eigen::Vector3d local_update_range_;
   double resolution_, resolution_inv_;
+  double region_valuation_resolution_, region_valuation_resolution_inv_;
+  Eigen::Vector3i region_valuation_voxel_num_;
   double obstacles_inflation_;
 
   /* input topics and input mode */
@@ -92,6 +94,7 @@ struct MappingData {
   vector<double> distance_buffer_;
   vector<double> distance_buffer_neg_;
   vector<double> distance_buffer_all_;
+  vector<double> region_valuation_buffer_;
   vector<double> tmp_buffer1_;
   vector<double> tmp_buffer2_;
 
