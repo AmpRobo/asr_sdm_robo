@@ -3,6 +3,7 @@
 
 #include <asr_sdm_planning_manager/topo_replan_fsm.h>
 #include <asr_sdm_log_collector/log_client.hpp>
+#include <sensor_msgs/point_cloud2_iterator.hpp>
 
 #include <chrono>
 #include <functional>
@@ -59,6 +60,9 @@ void TopoReplanFSM::init(const std::shared_ptr<rclcpp::Node> & nh)
     std::chrono::duration<double>(0.01), std::bind(&TopoReplanFSM::execFSMCallback, this));
   safety_timer_ = node_->create_wall_timer(
     std::chrono::duration<double>(0.05), std::bind(&TopoReplanFSM::checkCollisionCallback, this));
+  vis_timer_ = node_->create_wall_timer(
+    std::chrono::duration<double>(0.5),
+    std::bind(&TopoReplanFSM::regionValuationVisCallback, this));
 
   waypoint_sub_ = node_->create_subscription<nav_msgs::msg::Path>(
     "/waypoint_generator/waypoints", 1,
@@ -76,6 +80,8 @@ void TopoReplanFSM::init(const std::shared_ptr<rclcpp::Node> & nh)
   stop_pub_ = node_->create_publisher<std_msgs::msg::Empty>("/planning/stop", 20);
   bspline_pub_ =
     node_->create_publisher<asr_sdm_planning_manager::msg::Bspline>("/planning/bspline", 20);
+  region_valuation_pub_ = node_->create_publisher<sensor_msgs::msg::PointCloud2>(
+    "/planning_vis/region_valuation", 1);
 }
 
 void TopoReplanFSM::resetPlanning(const std::string & pos_call)
@@ -557,6 +563,40 @@ bool TopoReplanFSM::callTopologicalTraj(int step)
   } else {
     return false;
   }
+}
+
+void TopoReplanFSM::regionValuationVisCallback()
+{
+  if (region_valuation_pub_->get_subscription_count() == 0) return;
+
+  vector<Eigen::Vector3d> centers;
+  vector<double> scores;
+  planning_manager_->edt_environment_->esdf_map_->getRegionValuation(centers, scores);
+
+  sensor_msgs::msg::PointCloud2 cloud;
+  cloud.header.stamp = node_->now();
+  cloud.header.frame_id = "world";
+
+  sensor_msgs::PointCloud2Modifier modifier(cloud);
+  modifier.setPointCloud2Fields(
+    4, "x", 1, sensor_msgs::msg::PointField::FLOAT32, "y", 1,
+    sensor_msgs::msg::PointField::FLOAT32, "z", 1, sensor_msgs::msg::PointField::FLOAT32,
+    "intensity", 1, sensor_msgs::msg::PointField::FLOAT32);
+  modifier.resize(centers.size());
+
+  sensor_msgs::PointCloud2Iterator<float> iter_x(cloud, "x");
+  sensor_msgs::PointCloud2Iterator<float> iter_y(cloud, "y");
+  sensor_msgs::PointCloud2Iterator<float> iter_z(cloud, "z");
+  sensor_msgs::PointCloud2Iterator<float> iter_intensity(cloud, "intensity");
+  for (size_t i = 0; i < centers.size();
+       ++i, ++iter_x, ++iter_y, ++iter_z, ++iter_intensity) {
+    *iter_x = static_cast<float>(centers[i].x());
+    *iter_y = static_cast<float>(centers[i].y());
+    *iter_z = static_cast<float>(centers[i].z());
+    *iter_intensity = static_cast<float>(scores[i]);
+  }
+
+  region_valuation_pub_->publish(cloud);
 }
 // TopoReplanFSM::
 }  // namespace amprobo

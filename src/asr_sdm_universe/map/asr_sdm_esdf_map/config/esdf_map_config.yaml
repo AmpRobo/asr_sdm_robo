@@ -10,6 +10,9 @@ esdf_map:
       # Cell size of region_valuation_buffer_. The buffer covers the same map
       # extent as distance_buffer_, on its own grid.
       region_valuation_resolution: 0.5
+      # Distance scale sigma_d [m] of the per-voxel region valuation weight
+      # omega_i = exp(-max(d_i, 0) / sigma_d), where d_i is the voxel's signed ESDF distance.
+      region_valuation_sigma_d: 0.5
       map_size_x: 120.0
       map_size_y: 120.0
       map_size_z: 6.0

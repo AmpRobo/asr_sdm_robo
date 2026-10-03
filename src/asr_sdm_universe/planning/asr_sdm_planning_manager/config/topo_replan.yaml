@@ -21,6 +21,7 @@
     esdf_map:
       resolution: 0.1
       region_valuation_resolution: 0.5
+      region_valuation_sigma_d: 3.0
       map_size_x: 40.0
       map_size_y: 40.0
       map_size_z: 10.0
@@ -67,6 +68,13 @@
       max_jerk: 0.2
       dynamic_environment: 0
       local_segment_length: 6.0
+      # The last control points of the local window are pinned to the global
+      # trajectory, so topo replanning cannot move a collision that ends there.
+      # If the last point within topo_prm.clearance of an obstacle is less than
+      # window_end_margin (arc length) from the window end, the window radius
+      # grows in 0.5 m steps, by at most max_window_extension, until it is not.
+      window_end_margin: 1.0
+      max_window_extension: 3.0
       clearance_threshold: 0.2
       control_points_distance: 0.3
       use_guidance_planner: false
@@ -109,17 +117,10 @@
       max_raw_path: 300
       max_raw_path2: 25
       short_cut_num: 1
+      select_shortcut_iter: 5
       reserve_num: 6
       ratio_to_short: 5.5
       parallel_shortcut: true
-      # With prune_quadrant, the sample box is split into four quadrants around
-      # the start -> end axis and the one with the lowest ESDF sum is not
-      # sampled; false samples the whole box. Each voxel's distance is capped at
-      # quadrant_dist_cap [m] before summing, and the box is evaluated on a grid
-      # of quadrant_eval_step [m].
-      prune_quadrant: true
-      quadrant_dist_cap: 1.0
-      quadrant_eval_step: 0.2
 
     optimization:
       lambda1: 10.0              # smoothness

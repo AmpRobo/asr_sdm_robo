@@ -25,6 +25,7 @@ find_package(rclcpp REQUIRED)
 find_package(std_msgs REQUIRED)
 find_package(geometry_msgs REQUIRED)
 find_package(nav_msgs REQUIRED)
+find_package(sensor_msgs REQUIRED)
 find_package(visualization_msgs REQUIRED)
 find_package(builtin_interfaces REQUIRED)
 find_package(cv_bridge REQUIRED)
@@ -55,6 +56,7 @@ set(asr_sdm_planning_manager_dependencies
   std_msgs
   geometry_msgs
   nav_msgs
+  sensor_msgs
   visualization_msgs
   builtin_interfaces
   cv_bridge

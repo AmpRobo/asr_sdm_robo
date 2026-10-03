@@ -112,7 +112,17 @@ TopologyPRM polyline. Phase 2 then adds clearance and feasibility.
 A detour is longer than the window it replaces but inherits that window's
 duration, which saturates the heading hinges. `optimizeTopoBspline` therefore
 stretches the knot span by `guide_len / (max_vel · duration)`, capped at
-`max_time_lengthen_ratio`, before either phase runs.
+`max_time_lengthen_ratio`, before either phase runs. The fixed leading and
+trailing control points are recomputed for the new span, so the segment keeps
+the start and end velocity of the window. `topoReplan` records the extra time
+as `time_inc`, which delays the global trajectory after the segment by the
+same amount; without it the reference jumps where the segment hands over to
+the global trajectory, and the next cut bends sharply back onto it.
+
+A replan without collision cuts `local_segment_length` again. If the current
+local segment reaches further (a topo detour over a grown window), the cut
+radius grows in 0.5 m steps, by at most `max_window_extension`, until it
+covers that segment, so the detour tail is not dropped.
 
 ### Costs outside L-BFGS
 
@@ -192,7 +202,14 @@ ros2 launch asr_sdm_planning_manager asr_sdm_planning_manager.launch.py
 偏航/俯仰铰链避免第一阶段把控制点焊在 TopologyPRM 折线的尖角上。绕障段比
 原窗口长却继承原时长，铰链会饱和，因此 `optimizeTopoBspline` 会按
 `guide_len / (max_vel · duration)` 拉长 knot span（不超过
-`max_time_lengthen_ratio`）。
+`max_time_lengthen_ratio`）。首尾固定的控制点按新的 knot span 重算，起点和终点速度
+保持与原窗口一致。`topoReplan` 把多出的时间记为 `time_inc`，局部段之后的全局轨迹
+整体推迟同样的时间；否则局部段交回全局轨迹的地方参考轨迹会跳变，下一次截取会在那里
+急弯回到全局轨迹。
+
+无碰撞的重规划仍按 `local_segment_length` 截取。如果当前局部段更长（扩大窗口后的
+拓扑绕行），截取半径按 0.5 m 一步加大，最多加 `max_window_extension`，直到覆盖当前
+局部段，避免丢掉绕行段的尾部。
 
 空旷主要靠 `lambda1`；密障应加大 `lambda2`/`lambda5`、减小 `lambda1`，
 航向限幅权重要低于间隙项，避免把弯抹平穿障。

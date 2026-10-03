@@ -14,6 +14,7 @@
 #include <algorithm>
 #include <chrono>
 #include <cmath>
+#include <limits>
 #include <memory>
 #include <thread>
 namespace backward
@@ -80,6 +81,32 @@ vector<Eigen::Vector3d> downsamplePolyline(const vector<Eigen::Vector3d> & path,
   return out;
 }
 
+/* The three leading and trailing control points of a uniform cubic B-spline
+ * encode the position, velocity and acceleration at either end, and the
+ * optimizer keeps them fixed. Changing the knot span from dt to new_dt alone
+ * would scale those velocities by dt / new_dt, so they are recomputed for
+ * new_dt from the boundary states the spline had at dt. */
+void retimeBoundaryCtrlPts(Eigen::MatrixXd & ctrl_pts, double dt, double new_dt)
+{
+  const int n = static_cast<int>(ctrl_pts.rows());
+  if (n < 6 || dt <= 0.0 || new_dt <= 0.0) return;
+
+  for (const int first : {0, n - 3}) {
+    const Eigen::RowVectorXd q0 = ctrl_pts.row(first);
+    const Eigen::RowVectorXd q1 = ctrl_pts.row(first + 1);
+    const Eigen::RowVectorXd q2 = ctrl_pts.row(first + 2);
+
+    const Eigen::RowVectorXd p = (q0 + 4.0 * q1 + q2) / 6.0;
+    const Eigen::RowVectorXd v = (q2 - q0) / (2.0 * dt);
+    const Eigen::RowVectorXd a = (q0 - 2.0 * q1 + q2) / (dt * dt);
+
+    const double dt2 = new_dt * new_dt;
+    ctrl_pts.row(first) = p - new_dt * v + (dt2 / 3.0) * a;
+    ctrl_pts.row(first + 1) = p - (dt2 / 6.0) * a;
+    ctrl_pts.row(first + 2) = p + new_dt * v + (dt2 / 3.0) * a;
+  }
+}
+
 }  // namespace
 
 // SECTION interfaces for setup and query
@@ -104,6 +131,8 @@ void PlanningManager::initPlanModules(const std::shared_ptr<rclcpp::Node> & nh)
   node_->declare_parameter("manager.dynamic_environment", -1);
   node_->declare_parameter("manager.clearance_threshold", -1.0);
   node_->declare_parameter("manager.local_segment_length", -1.0);
+  node_->declare_parameter("manager.window_end_margin", 1.0);
+  node_->declare_parameter("manager.max_window_extension", 3.0);
   node_->declare_parameter("manager.control_points_distance", -1.0);
   node_->declare_parameter("manager.nonholonomic", false);
   node_->declare_parameter("manager.max_yaw_rate", 0.35);
@@ -116,6 +145,10 @@ void PlanningManager::initPlanModules(const std::shared_ptr<rclcpp::Node> & nh)
   pp_.dynamic_ = node_->get_parameter("manager.dynamic_environment").as_int();
   pp_.clearance_ = node_->get_parameter("manager.clearance_threshold").as_double();
   pp_.local_traj_len_ = node_->get_parameter("manager.local_segment_length").as_double();
+  pp_.window_end_margin_ =
+    std::max(0.0, node_->get_parameter("manager.window_end_margin").as_double());
+  pp_.max_window_extension_ =
+    std::max(0.0, node_->get_parameter("manager.max_window_extension").as_double());
   pp_.ctrl_pt_dist = node_->get_parameter("manager.control_points_distance").as_double();
   pp_.nonholonomic_ = node_->get_parameter("manager.nonholonomic").as_bool();
   pp_.max_yaw_rate_ = node_->get_parameter("manager.max_yaw_rate").as_double();
@@ -488,7 +521,7 @@ void PlanningManager::initLocalTrajFromGlobal(const rclcpp::Time & time_now)
 {
   // Truncate a local B-spline segment from the global polynomial for immediate execution.
   double dt, duration;
-  Eigen::MatrixXd ctrl_pts = reparamLocalTraj(0.0, dt, duration);
+  Eigen::MatrixXd ctrl_pts = reparamLocalTraj(0.0, pp_.local_traj_len_, dt, duration);
   fast_planner::NonUniformBspline bspline(ctrl_pts, 3, dt);
 
   global_data_.setLocalTraj(bspline, 0.0, duration, 0.0);
@@ -507,16 +540,19 @@ bool PlanningManager::topoReplan(bool collide)
   double local_traj_dt, local_traj_duration;
   double time_inc = 0.0;
 
-  Eigen::MatrixXd ctrl_pts = reparamLocalTraj(t_now, local_traj_dt, local_traj_duration);
+  Eigen::MatrixXd ctrl_pts =
+    reparamLocalTraj(t_now, pp_.local_traj_len_, local_traj_dt, local_traj_duration);
   fast_planner::NonUniformBspline init_traj(ctrl_pts, 3, local_traj_dt);
   local_data_.start_time_ = time_now;
 
   if (!collide) {  // simply truncate the segment and do nothing
     // refineTraj(init_traj, time_inc);
+    extendWindowToLocalEnd(t_now, init_traj, local_traj_dt, local_traj_duration);
     local_data_.position_traj_ = init_traj;
     global_data_.setLocalTraj(init_traj, t_now, local_traj_duration + time_inc + t_now, time_inc);
 
   } else {
+    extendWindowPastCollision(t_now, init_traj, local_traj_dt, local_traj_duration);
     plan_data_.initial_local_segment_ = init_traj;
     vector<Eigen::Vector3d> colli_start, colli_end, start_pts, end_pts;
     findCollisionRange(colli_start, colli_end, start_pts, end_pts);
@@ -567,6 +603,12 @@ bool PlanningManager::topoReplan(bool collide)
       SPDLOG_INFO(
         "[planner]: candidate {} of {} selected", best_id, static_cast<int>(select_paths.size()));
       // refineTraj(best_traj, time_inc);
+      // optimizeTopoBspline may have stretched the candidate past the window
+      // duration; the global trajectory after it has to be delayed to match.
+      time_inc = best_traj.getTimeSum() - local_traj_duration;
+      SPDLOG_INFO(
+        "[planner]: window duration {:.2f} s, candidate {:.2f} s, time increase {:.2f} s",
+        local_traj_duration, best_traj.getTimeSum(), time_inc);
 
       local_data_.position_traj_ = best_traj;
       global_data_.setLocalTraj(
@@ -733,9 +775,12 @@ void PlanningManager::optimizeTopoBspline(
   // window's duration, so heading rates start far above the hinge saturation
   // knee. Stretch the knot span (capped) so the yaw / pitch terms can still
   // shape the corner instead of sitting at cost ≈ 1 with a vanishing gradient.
+  // The fixed boundary points are retimed so the segment still leaves the
+  // current trajectory and joins the global one at their speed.
   if (pp_.nonholonomic_ && duration > 1.0e-6 && pp_.max_vel_ > 1.0e-6) {
     const double stretch =
       std::min(pp_.max_time_lengthen_ratio_, std::max(1.0, guide_len / (pp_.max_vel_ * duration)));
+    retimeBoundaryCtrlPts(ctrl_pts, dt, dt * stretch);
     dt *= stretch;
   }
   // std::cout << "ctrl pt num: " << ctrl_pts.rows() << std::endl;
@@ -778,7 +823,8 @@ void PlanningManager::optimizeTopoBspline(
   SPDLOG_INFO("optimization {} cost {}, {}, {} seconds.", traj_id, tm1, tm2, tm3);
 }
 
-Eigen::MatrixXd PlanningManager::reparamLocalTraj(double start_t, double & dt, double & duration)
+Eigen::MatrixXd PlanningManager::reparamLocalTraj(
+  double start_t, double radius, double & dt, double & duration)
 {
   /* get the sample points local traj within radius */
 
@@ -786,7 +832,7 @@ Eigen::MatrixXd PlanningManager::reparamLocalTraj(double start_t, double & dt, d
   vector<Eigen::Vector3d> start_end_derivative;
 
   global_data_.getTrajByRadius(
-    start_t, pp_.local_traj_len_, pp_.ctrl_pt_dist, point_set, start_end_derivative, dt, duration);
+    start_t, radius, pp_.ctrl_pt_dist, point_set, start_end_derivative, dt, duration);
 
   /* parameterization of B-spline */
 
@@ -875,6 +921,88 @@ void PlanningManager::findCollisionRange(
     }
   } else {
     end_pts.push_back(initial_traj->evaluateDeBoor(t_mp));
+  }
+}
+
+double PlanningManager::safeTailLength(fast_planner::NonUniformBspline & traj)
+{
+  double t_m, t_mp;
+  traj.getTimeSpan(t_m, t_mp);
+
+  double length = 0.0;
+  Eigen::Vector3d next = traj.evaluateDeBoor(t_mp);
+  for (double tc = t_mp; tc >= t_m - 1e-4; tc -= 0.05) {
+    Eigen::Vector3d ptc = traj.evaluateDeBoor(tc);
+    if (edt_environment_->evaluateCoarseEDT(ptc, -1.0) < topo_prm_->clearance_) return length;
+    length += (next - ptc).norm();
+    next = ptc;
+  }
+  return std::numeric_limits<double>::infinity();
+}
+
+/* The last order control points of the window are pinned to the global
+ * trajectory and get no clearance cost, so every topo candidate keeps a
+ * collision that ends there. Grow the window until it leaves the obstacle
+ * window_end_margin behind, stopping at the goal or the extension cap. */
+void PlanningManager::extendWindowPastCollision(
+  double start_t, fast_planner::NonUniformBspline & traj, double & dt, double & duration)
+{
+  constexpr double kRadiusStep = 0.5;
+  const double max_radius = pp_.local_traj_len_ + pp_.max_window_extension_;
+
+  const double tail0 = safeTailLength(traj);
+  double tail = tail0;
+  double radius = pp_.local_traj_len_;
+  while (tail < pp_.window_end_margin_ && radius < max_radius - 1e-6 &&
+         start_t + duration < global_data_.global_duration_ - 1e-3) {
+    radius = std::min(max_radius, radius + kRadiusStep);
+    Eigen::MatrixXd ctrl_pts = reparamLocalTraj(start_t, radius, dt, duration);
+    traj = fast_planner::NonUniformBspline(ctrl_pts, 3, dt);
+    tail = safeTailLength(traj);
+  }
+
+  if (radius <= pp_.local_traj_len_) return;
+  if (tail < pp_.window_end_margin_) {
+    SPDLOG_WARN(
+      "[Topo]: collision {:.2f} m before window end, still {:.2f} m after extending radius "
+      "{:.1f} -> {:.1f} m",
+      tail0, tail, pp_.local_traj_len_, radius);
+  } else {
+    SPDLOG_INFO(
+      "[Topo]: collision {:.2f} m before window end, radius {:.1f} -> {:.1f} m, now {:.2f} m",
+      tail0, pp_.local_traj_len_, radius, tail);
+  }
+}
+
+/* Only one local segment is kept, and past its end the reference falls back to
+ * the global trajectory. A detour planned over a grown window can reach beyond
+ * a plain local_traj_len_ cut, and dropping its tail would send the next cut
+ * back onto the global path through the obstacle it went around. */
+void PlanningManager::extendWindowToLocalEnd(
+  double start_t, fast_planner::NonUniformBspline & traj, double & dt, double & duration)
+{
+  constexpr double kRadiusStep = 0.5;
+  const double max_radius = pp_.local_traj_len_ + pp_.max_window_extension_;
+  const double local_end = global_data_.local_end_time_;
+
+  double radius = pp_.local_traj_len_;
+  while (start_t + duration < local_end - 1e-3 && radius < max_radius - 1e-6 &&
+         start_t + duration < global_data_.global_duration_ - 1e-3) {
+    radius = std::min(max_radius, radius + kRadiusStep);
+    Eigen::MatrixXd ctrl_pts = reparamLocalTraj(start_t, radius, dt, duration);
+    traj = fast_planner::NonUniformBspline(ctrl_pts, 3, dt);
+  }
+
+  if (radius <= pp_.local_traj_len_) return;
+  if (start_t + duration < local_end - 1e-3) {
+    SPDLOG_WARN(
+      "[planner]: window radius {:.1f} -> {:.1f} m still ends {:.2f} s before the last local "
+      "segment",
+      pp_.local_traj_len_, radius, local_end - start_t - duration);
+  } else {
+    SPDLOG_INFO(
+      "[planner]: window radius {:.1f} -> {:.1f} m to cover the last local segment",
+      pp_.local_traj_len_, radius);
   }
 }
 

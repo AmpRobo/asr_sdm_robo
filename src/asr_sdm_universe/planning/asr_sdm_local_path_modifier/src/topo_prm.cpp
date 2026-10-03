@@ -32,6 +32,7 @@ void TopologyPRM::init(const std::shared_ptr<rclcpp::Node> & nh)
   node_->declare_parameter("topo_prm.sample_inflate_z", -1.0);
   node_->declare_parameter("topo_prm.clearance", -1.0);
   node_->declare_parameter("topo_prm.short_cut_num", -1);
+  node_->declare_parameter("topo_prm.select_shortcut_iter", -1);
   node_->declare_parameter("topo_prm.reserve_num", -1);
   node_->declare_parameter("topo_prm.ratio_to_short", -1.0);
   node_->declare_parameter("topo_prm.max_sample_num", -1);
@@ -39,15 +40,13 @@ void TopologyPRM::init(const std::shared_ptr<rclcpp::Node> & nh)
   node_->declare_parameter("topo_prm.max_raw_path", -1);
   node_->declare_parameter("topo_prm.max_raw_path2", -1);
   node_->declare_parameter("topo_prm.parallel_shortcut", false);
-  node_->declare_parameter("topo_prm.prune_quadrant", true);
-  node_->declare_parameter("topo_prm.quadrant_dist_cap", 1.0);
-  node_->declare_parameter("topo_prm.quadrant_eval_step", 0.2);
 
   sample_inflate_(0) = node_->get_parameter("topo_prm.sample_inflate_x").as_double();
   sample_inflate_(1) = node_->get_parameter("topo_prm.sample_inflate_y").as_double();
   sample_inflate_(2) = node_->get_parameter("topo_prm.sample_inflate_z").as_double();
   clearance_ = node_->get_parameter("topo_prm.clearance").as_double();
   short_cut_num_ = node_->get_parameter("topo_prm.short_cut_num").as_int();
+  select_shortcut_iter_ = node_->get_parameter("topo_prm.select_shortcut_iter").as_int();
   reserve_num_ = node_->get_parameter("topo_prm.reserve_num").as_int();
   ratio_to_short_ = node_->get_parameter("topo_prm.ratio_to_short").as_double();
   max_sample_num_ = node_->get_parameter("topo_prm.max_sample_num").as_int();
@@ -55,10 +54,6 @@ void TopologyPRM::init(const std::shared_ptr<rclcpp::Node> & nh)
   max_raw_path_ = node_->get_parameter("topo_prm.max_raw_path").as_int();
   max_raw_path2_ = node_->get_parameter("topo_prm.max_raw_path2").as_int();
   parallel_shortcut_ = node_->get_parameter("topo_prm.parallel_shortcut").as_bool();
-  prune_quadrant_ = node_->get_parameter("topo_prm.prune_quadrant").as_bool();
-  quadrant_dist_cap_ = node_->get_parameter("topo_prm.quadrant_dist_cap").as_double();
-  quadrant_eval_step_ = node_->get_parameter("topo_prm.quadrant_eval_step").as_double();
-  removed_quadrant_ = -1;
   resolution_ = edt_environment_->esdf_map_->getResolution();
   offset_ = Eigen::Vector3d(0.5, 0.5, 0.5) - edt_environment_->esdf_map_->getOrigin() / resolution_;
 
@@ -156,7 +151,7 @@ list<GraphNode::Ptr> TopologyPRM::createGraph(Eigen::Vector3d start, Eigen::Vect
   rotation_.col(1) = ytf;
   rotation_.col(2) = ztf;
 
-  removed_quadrant_ = prune_quadrant_ ? lowestEsdfQuadrant() : -1;
+  buildSampleDistribution();
 
   int node_id = 1;
 
@@ -270,73 +265,90 @@ bool TopologyPRM::needConnection(GraphNode::Ptr g1, GraphNode::Ptr g2, Eigen::Ve
   return true;
 }
 
+/* An ESDF voxel i lands the sample with probability P_i = (1 - v_i) / sum_j (1 - v_j),
+ * v_i being the region value of the voxel. v_i is constant over a region cell, so
+ * a cell is picked with weight 1 - v and the point is uniform inside it; points
+ * outside the box or the map are redrawn, which keeps the density at 1 - v there
+ * for cells that only partly overlap it. */
 Eigen::Vector3d TopologyPRM::getSample()
+{
+  if (sample_weight_cdf_.empty()) return getUniformSample();
+
+  std::uniform_real_distribution<double> rand_weight(0.0, sample_weight_cdf_.back());
+  const ESDFMap::Ptr & map = edt_environment_->esdf_map_;
+  for (int attempt = 0; attempt < 100; ++attempt) {
+    const size_t index = std::min(
+      static_cast<size_t>(
+        std::upper_bound(sample_weight_cdf_.begin(), sample_weight_cdf_.end(), rand_weight(eng_)) -
+        sample_weight_cdf_.begin()),
+      sample_cells_.size() - 1);
+
+    Eigen::Vector3d pt;
+    for (int i = 0; i < 3; ++i) {
+      pt(i) = sample_cells_[index](i) + 0.5 * sample_cell_size_ * rand_pos_(eng_);
+    }
+
+    const Eigen::Vector3d local = rotation_.transpose() * (pt - translation_);
+    if ((local.cwiseAbs() - sample_r_).maxCoeff() > 0.0) continue;
+    if (!map->isInMap(pt)) continue;
+    return pt;
+  }
+  return getUniformSample();
+}
+
+/* Unevaluated cells (-1) weigh like a score of 0. */
+void TopologyPRM::buildSampleDistribution()
+{
+  const rclcpp::Time t1 = node_->now();
+  const ESDFMap::Ptr & map = edt_environment_->esdf_map_;
+
+  sample_cells_.clear();
+  sample_weight_cdf_.clear();
+  sample_cell_size_ = map->getRegionValuationResolution();
+
+  const Eigen::Vector3d half_extent = rotation_.cwiseAbs() * sample_r_;
+  Eigen::Vector3i min_id, max_id;
+  map->posToRegionIndex(translation_ - half_extent, min_id);
+  map->posToRegionIndex(translation_ + half_extent, max_id);
+
+  // Every point of a cell is within half its diagonal of the cell center.
+  const double reach = 0.5 * std::sqrt(3.0) * sample_cell_size_;
+  const Eigen::Vector3d origin = map->getOrigin();
+  const Eigen::Matrix3d world_to_local = rotation_.transpose();
+  double weight_sum = 0.0;
+  Eigen::Vector3i id;
+  for (id(0) = min_id(0); id(0) <= max_id(0); ++id(0))
+    for (id(1) = min_id(1); id(1) <= max_id(1); ++id(1))
+      for (id(2) = min_id(2); id(2) <= max_id(2); ++id(2)) {
+        const Eigen::Vector3d center =
+          origin + (id.cast<double>() + Eigen::Vector3d::Constant(0.5)) * sample_cell_size_;
+        const Eigen::Vector3d local = world_to_local * (center - translation_);
+        if ((local.cwiseAbs() - sample_r_).maxCoeff() > reach) continue;
+
+        const double weight = 1.0 - std::clamp(map->getRegionValue(id), 0.0, 1.0);
+        if (weight <= 0.0) continue;
+
+        weight_sum += weight;
+        sample_cells_.push_back(center);
+        sample_weight_cdf_.push_back(weight_sum);
+      }
+
+  SPDLOG_INFO(
+    "[Topo]: region sampling cells: {}, weight sum: {:.1f}, build time: {:.4f}",
+    sample_cells_.size(), weight_sum, (node_->now() - t1).seconds());
+}
+
+Eigen::Vector3d TopologyPRM::getUniformSample()
 {
   /* sampling */
   Eigen::Vector3d pt;
   pt(0) = rand_pos_(eng_) * sample_r_(0);
-  pt(1) = std::fabs(rand_pos_(eng_)) * sample_r_(1);
-  pt(2) = std::fabs(rand_pos_(eng_)) * sample_r_(2);
-
-  // The quadrants have equal volume, so a uniform pick among the kept ones
-  // followed by a uniform point inside it is uniform over their union.
-  const int kept = removed_quadrant_ < 0 ? 4 : 3;
-  int quadrant = std::uniform_int_distribution<int>(0, kept - 1)(eng_);
-  if (removed_quadrant_ >= 0 && quadrant >= removed_quadrant_) ++quadrant;
-  if (quadrant & 1) pt(1) = -pt(1);
-  if (quadrant & 2) pt(2) = -pt(2);
+  pt(1) = rand_pos_(eng_) * sample_r_(1);
+  pt(2) = rand_pos_(eng_) * sample_r_(2);
 
   pt = rotation_ * pt + translation_;
 
   return pt;
-}
-
-/* The sample box is split by its local x-y and x-z planes, both of which
- * contain the start -> end axis, so every quadrant still spans the whole
- * blocked window. Bit 0 marks local y < 0 (right of the heading), bit 1 marks
- * local z < 0 (below it). */
-int TopologyPRM::quadrantOf(const Eigen::Vector3d & local_pt)
-{
-  return (local_pt(1) < 0.0 ? 1 : 0) + (local_pt(2) < 0.0 ? 2 : 0);
-}
-
-int TopologyPRM::lowestEsdfQuadrant()
-{
-  const ESDFMap::Ptr & map = edt_environment_->esdf_map_;
-  const double step = std::max(quadrant_eval_step_, resolution_);
-
-  // Even cell counts on y and z keep every cell centre off the splitting
-  // planes, so all four quadrants receive the same number of cells.
-  const int nx = std::max(1, static_cast<int>(std::ceil(2.0 * sample_r_(0) / step)));
-  const int ny = 2 * std::max(1, static_cast<int>(std::ceil(sample_r_(1) / step)));
-  const int nz = 2 * std::max(1, static_cast<int>(std::ceil(sample_r_(2) / step)));
-  const Eigen::Vector3d cell(
-    2.0 * sample_r_(0) / nx, 2.0 * sample_r_(1) / ny, 2.0 * sample_r_(2) / nz);
-
-  double sums[4] = {0.0, 0.0, 0.0, 0.0};
-  Eigen::Vector3d local, world;
-  for (int i = 0; i < nx; ++i) {
-    local(0) = -sample_r_(0) + (i + 0.5) * cell(0);
-    for (int j = 0; j < ny; ++j) {
-      local(1) = -sample_r_(1) + (j + 0.5) * cell(1);
-      for (int k = 0; k < nz; ++k) {
-        local(2) = -sample_r_(2) + (k + 0.5) * cell(2);
-        world = rotation_ * local + translation_;
-        // getDistance() clamps an out-of-map index onto the border voxel.
-        if (!map->isInMap(world)) continue;
-        // Voxels no ESDF update has reached hold 10000, and an update whose box
-        // held no obstacle leaves about 1e153, so without the cap a single such
-        // voxel decides the comparison.
-        sums[quadrantOf(local)] += std::min(map->getDistance(world), quadrant_dist_cap_);
-      }
-    }
-  }
-
-  const int lowest = static_cast<int>(std::min_element(sums, sums + 4) - sums);
-  SPDLOG_INFO(
-    "[Topo]: quadrant esdf sum: {:.1f} {:.1f} {:.1f} {:.1f}, removed {}", sums[0], sums[1],
-    sums[2], sums[3], lowest);
-  return lowest;
 }
 
 bool TopologyPRM::lineVisib(
@@ -463,10 +475,21 @@ vector<vector<Eigen::Vector3d>> TopologyPRM::selectShortPaths(
     short_paths[i].insert(short_paths[i].begin(), start_pts_.begin(), start_pts_.end());
     short_paths[i].insert(short_paths[i].end(), end_pts_.begin(), end_pts_.end());
   }
-  for (size_t i = 0; i < short_paths.size(); ++i) {
-    shortcutPath(short_paths[i], i, 5);
-    short_paths[i] = short_paths_[i];
+  if (parallel_shortcut_) {
+    vector<thread> short_threads;
+    for (size_t i = 0; i < short_paths.size(); ++i) {
+      short_threads.push_back(
+        thread(&TopologyPRM::shortcutPath, this, short_paths[i], i, select_shortcut_iter_));
+    }
+    for (size_t i = 0; i < short_paths.size(); ++i) {
+      short_threads[i].join();
+    }
+  } else {
+    for (size_t i = 0; i < short_paths.size(); ++i) {
+      shortcutPath(short_paths[i], i, select_shortcut_iter_);
+    }
   }
+  for (size_t i = 0; i < short_paths.size(); ++i) short_paths[i] = short_paths_[i];
 
   short_paths = pruneEquivalent(short_paths);
 
@@ -604,7 +627,7 @@ void TopologyPRM::shortcutPath(vector<Eigen::Vector3d> path, int path_id, int it
     /* break if no shortcut */
     double len1 = pathLength(last_path);
     double len2 = pathLength(short_path);
-    if (len2 > len1) {
+    if (len2 >= len1 - 1e-3) {
       // ROS_WARN("pause shortcut, l1: %lf, l2: %lf, iter: %d", len1, len2, k +
       // 1);
       short_path = last_path;

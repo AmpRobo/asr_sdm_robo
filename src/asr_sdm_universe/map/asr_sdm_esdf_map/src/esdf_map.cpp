@@ -77,6 +77,7 @@ void ESDFMap::initMap(const std::shared_ptr<rclcpp::Node> & nh)
   double x_size, y_size, z_size;
   node_->declare_parameter("esdf_map.resolution", -1.0);
   node_->declare_parameter("esdf_map.region_valuation_resolution", -1.0);
+  node_->declare_parameter("esdf_map.region_valuation_sigma_d", -1.0);
   node_->declare_parameter("esdf_map.map_size_x", -1.0);
   node_->declare_parameter("esdf_map.map_size_y", -1.0);
   node_->declare_parameter("esdf_map.map_size_z", -1.0);
@@ -130,6 +131,8 @@ void ESDFMap::initMap(const std::shared_ptr<rclcpp::Node> & nh)
   mp_.resolution_ = node_->get_parameter("esdf_map.resolution").as_double();
   mp_.region_valuation_resolution_ =
     node_->get_parameter("esdf_map.region_valuation_resolution").as_double();
+  mp_.region_valuation_sigma_d_ =
+    node_->get_parameter("esdf_map.region_valuation_sigma_d").as_double();
   x_size = node_->get_parameter("esdf_map.map_size_x").as_double();
   y_size = node_->get_parameter("esdf_map.map_size_y").as_double();
   z_size = node_->get_parameter("esdf_map.map_size_z").as_double();
@@ -188,6 +191,9 @@ void ESDFMap::initMap(const std::shared_ptr<rclcpp::Node> & nh)
     throw std::invalid_argument(
       "esdf_map.region_valuation_resolution must be finite and positive.");
   }
+  if (!std::isfinite(mp_.region_valuation_sigma_d_) || mp_.region_valuation_sigma_d_ <= 0.0) {
+    throw std::invalid_argument("esdf_map.region_valuation_sigma_d must be finite and positive.");
+  }
 
   mp_.local_bound_inflate_ = max(mp_.resolution_, mp_.local_bound_inflate_);
   mp_.resolution_inv_ = 1 / mp_.resolution_;
@@ -233,7 +239,13 @@ void ESDFMap::initMap(const std::shared_ptr<rclcpp::Node> & nh)
   md_.distance_buffer_ = vector<double>(buffer_size, 10000);
   md_.distance_buffer_neg_ = vector<double>(buffer_size, 10000);
   md_.distance_buffer_all_ = vector<double>(buffer_size, 10000);
-  md_.region_valuation_buffer_ = vector<double>(region_valuation_buffer_size, 10000);
+  md_.region_valuation_buffer_ = vector<double>(region_valuation_buffer_size, -1.0);
+  md_.region_mean_gradient_ =
+    vector<Eigen::Vector3d>(region_valuation_buffer_size, Eigen::Vector3d::Zero());
+  md_.region_tensor_eigenvalues_ =
+    vector<Eigen::Vector3d>(region_valuation_buffer_size, Eigen::Vector3d::Zero());
+  md_.region_tensor_eigenvectors_ =
+    vector<Eigen::Matrix3d>(region_valuation_buffer_size, Eigen::Matrix3d::Identity());
   md_.count_hit_and_miss_ = vector<short>(buffer_size, 0);
   md_.count_hit_ = vector<short>(buffer_size, 0);
   md_.flag_rayend_ = vector<char>(buffer_size, -1);
@@ -775,6 +787,104 @@ void ESDFMap::updateESDF3d()
       }
 }
 
+void ESDFMap::updateRegionValuation()
+{
+  const Eigen::Vector3i & region_num = mp_.region_valuation_voxel_num_;
+  const double region_to_voxel = mp_.region_valuation_resolution_ * mp_.resolution_inv_;
+
+  // Region and voxel grids need not align: a voxel belongs to the region that
+  // contains its center (i + 0.5) * resolution.
+  auto regionStartVoxel = [&](int region, int axis) {
+    const int start = static_cast<int>(std::ceil(region * region_to_voxel - 0.5));
+    return std::clamp(start, 0, mp_.map_voxel_num_(axis));
+  };
+
+  // The trilinear gradient reads one neighbor voxel, so regions touching the
+  // updated ESDF box from outside can change too.
+  Eigen::Vector3i voxel_min = md_.local_bound_min_ - Eigen::Vector3i::Ones();
+  Eigen::Vector3i voxel_max = md_.local_bound_max_ + Eigen::Vector3i::Ones();
+  boundIndex(voxel_min);
+  boundIndex(voxel_max);
+
+  Eigen::Vector3i region_min, region_max;
+  for (int i = 0; i < 3; ++i) {
+    region_min(i) = std::clamp(
+      static_cast<int>(std::floor((voxel_min(i) + 0.5) / region_to_voxel)), 0, region_num(i) - 1);
+    region_max(i) = std::clamp(
+      static_cast<int>(std::floor((voxel_max(i) + 0.5) / region_to_voxel)), 0, region_num(i) - 1);
+  }
+
+  Eigen::Vector3i region_id, begin, end, id;
+  Eigen::Vector3d pos, grad;
+  for (region_id(0) = region_min(0); region_id(0) <= region_max(0); ++region_id(0))
+    for (region_id(1) = region_min(1); region_id(1) <= region_max(1); ++region_id(1))
+      for (region_id(2) = region_min(2); region_id(2) <= region_max(2); ++region_id(2)) {
+        for (int i = 0; i < 3; ++i) {
+          begin(i) = regionStartVoxel(region_id(i), i);
+          end(i) = region_id(i) + 1 == region_num(i) ? mp_.map_voxel_num_(i)
+                                                     : regionStartVoxel(region_id(i) + 1, i);
+        }
+
+        /* ========== accumulate weighted normalized gradients and direction tensors ========== */
+        Eigen::Vector3d gradient_sum = Eigen::Vector3d::Zero();
+        Eigen::Matrix3d tensor_sum = Eigen::Matrix3d::Zero();
+        double weight_sum = 0.0;
+        int valid_num = 0;
+
+        for (id(0) = begin(0); id(0) < end(0); ++id(0))
+          for (id(1) = begin(1); id(1) < end(1); ++id(1))
+            for (id(2) = begin(2); id(2) < end(2); ++id(2)) {
+              indexToPos(id, pos);
+              const double dist = getDistWithGradTrilinear(pos, grad);
+
+              const double norm = grad.norm();
+              if (!std::isfinite(norm) || norm < 1e-6) continue;
+
+              // dist is negative inside obstacles; clamping keeps weights in [0, 1].
+              // Far or unobserved voxels underflow to 0.
+              const double weight =
+                std::exp(-std::max(0.0, dist) / mp_.region_valuation_sigma_d_);
+
+              const Eigen::Vector3d direction = grad / norm;
+              gradient_sum += weight * direction;
+              tensor_sum += weight * direction * direction.transpose();
+              weight_sum += weight;
+              ++valid_num;
+            }
+
+        const int address = toRegionAddress(region_id);
+
+        if (weight_sum <= 0.0) {
+          md_.region_mean_gradient_[address].setZero();
+          md_.region_tensor_eigenvalues_[address].setZero();
+          md_.region_tensor_eigenvectors_[address].setIdentity();
+          md_.region_valuation_buffer_[address] = 0.0;
+          continue;
+        }
+
+        /* ========== mean gradient, mean region tensor and its eigen decomposition ========== */
+        const Eigen::Matrix3d region_tensor = tensor_sum / weight_sum;
+        const Eigen::SelfAdjointEigenSolver<Eigen::Matrix3d> solver(region_tensor);
+        const Eigen::Vector3d & eigenvalues = solver.eigenvalues();
+
+        md_.region_mean_gradient_[address] = gradient_sum / weight_sum;
+        md_.region_tensor_eigenvalues_[address] = eigenvalues;
+        md_.region_tensor_eigenvectors_[address] = solver.eigenvectors();
+
+        /* ========== region score: mean weight * normalized eigenvalue entropy ========== */
+        // The eigenvalues of T sum to 1; rounding can leave them slightly negative,
+        // and 0 * log(0) is taken as 0.
+        double entropy = 0.0;
+        for (int k = 0; k < 3; ++k) {
+          const double lambda = std::max(0.0, eigenvalues(k));
+          if (lambda > 0.0) entropy -= lambda * std::log(lambda);
+        }
+        entropy /= std::log(3.0);
+
+        md_.region_valuation_buffer_[address] = weight_sum / valid_num * entropy;
+      }
+}
+
 
 int ESDFMap::setCacheOccupancy(Eigen::Vector3d pos, int occ)
 {
@@ -1187,6 +1297,7 @@ void ESDFMap::updateESDFCallback()
   auto t1 = node_->now();
 
   updateESDF3d();
+  updateRegionValuation();
 
   auto t2 = node_->now();
 
@@ -1414,6 +1525,11 @@ Eigen::Vector3d ESDFMap::getOrigin()
   return mp_.map_origin_;
 }
 
+double ESDFMap::getRegionValuationResolution()
+{
+  return mp_.region_valuation_resolution_;
+}
+
 int ESDFMap::getVoxelNum()
 {
   return mp_.map_voxel_num_[0] * mp_.map_voxel_num_[1] * mp_.map_voxel_num_[2];
@@ -1422,6 +1538,27 @@ int ESDFMap::getVoxelNum()
 void ESDFMap::getRegion(Eigen::Vector3d & ori, Eigen::Vector3d & size)
 {
   ori = mp_.map_origin_, size = mp_.map_size_;
+}
+
+void ESDFMap::getRegionValuation(vector<Eigen::Vector3d> & centers, vector<double> & scores)
+{
+  centers.clear();
+  scores.clear();
+
+  const Eigen::Vector3i & region_num = mp_.region_valuation_voxel_num_;
+  Eigen::Vector3i region_id;
+  for (region_id(0) = 0; region_id(0) < region_num(0); ++region_id(0))
+    for (region_id(1) = 0; region_id(1) < region_num(1); ++region_id(1))
+      for (region_id(2) = 0; region_id(2) < region_num(2); ++region_id(2)) {
+        const double score = md_.region_valuation_buffer_[toRegionAddress(region_id)];
+        if (score < 0.0) continue;
+
+        centers.push_back(
+          mp_.map_origin_ +
+          (region_id.cast<double>() + Eigen::Vector3d::Constant(0.5)) *
+          mp_.region_valuation_resolution_);
+        scores.push_back(score);
+      }
 }
 
 void ESDFMap::getSurroundPts(
