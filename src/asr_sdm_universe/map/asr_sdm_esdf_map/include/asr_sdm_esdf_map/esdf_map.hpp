@@ -40,6 +40,9 @@ struct MappingParameters {
   Eigen::Vector3i map_min_idx_, map_max_idx_;
   Eigen::Vector3d local_update_range_;
   double resolution_, resolution_inv_;
+  double region_valuation_resolution_, region_valuation_resolution_inv_;
+  Eigen::Vector3i region_valuation_voxel_num_;
+  double region_valuation_sigma_d_;
   double obstacles_inflation_;
 
   /* input topics and input mode */
@@ -92,6 +95,14 @@ struct MappingData {
   vector<double> distance_buffer_;
   vector<double> distance_buffer_neg_;
   vector<double> distance_buffer_all_;
+  // Per region score in [0, 1]: normalized entropy of the eigenvalues of the
+  // region tensor. Regions never evaluated stay -1.
+  vector<double> region_valuation_buffer_;
+  // Per region: mean of normalized ESDF gradients, and eigen decomposition of the
+  // mean gradient direction tensor (eigenvalues ascending, eigenvectors as columns).
+  vector<Eigen::Vector3d> region_mean_gradient_;
+  vector<Eigen::Vector3d> region_tensor_eigenvalues_;
+  vector<Eigen::Matrix3d> region_tensor_eigenvectors_;
   vector<double> tmp_buffer1_;
   vector<double> tmp_buffer2_;
 
@@ -176,6 +187,7 @@ public:
     const Eigen::Vector3d & pos, Eigen::Vector3d pts[2][2][2], Eigen::Vector3d & diff);
 
   void updateESDF3d();
+  void updateRegionValuation();
   void getSliceESDF(
     const double height, const double res, const Eigen::Vector4d & range,
     vector<Eigen::Vector3d> & slice, vector<Eigen::Vector3d> & grad,
@@ -194,6 +206,16 @@ public:
   double getResolution();
   Eigen::Vector3d getOrigin();
   int getVoxelNum();
+
+  // Centers and scores of the evaluated cells of region_valuation_buffer_;
+  // cells still at -1 are skipped.
+  void getRegionValuation(vector<Eigen::Vector3d> & centers, vector<double> & scores);
+  double getRegionValuationResolution();
+  // Region cell containing pos, clamped to the region grid. The center of cell
+  // id is getOrigin() + (id + 0.5) * getRegionValuationResolution().
+  inline void posToRegionIndex(const Eigen::Vector3d & pos, Eigen::Vector3i & region_id);
+  // Score of a region cell; -1 if it was never evaluated.
+  inline double getRegionValue(const Eigen::Vector3i & region_id);
 
   typedef std::shared_ptr<ESDFMap> Ptr;
 
@@ -234,6 +256,7 @@ private:
     const Eigen::Vector3d & source_center, double source_resolution,
     std::size_t & inserted_target_voxels);
 
+  inline int toRegionAddress(const Eigen::Vector3i & region_id);
   inline void inflatePoint(const Eigen::Vector3i & pt, int step, vector<Eigen::Vector3i> & pts);
   int setCacheOccupancy(Eigen::Vector3d pos, int occ);
   Eigen::Vector3d closetPointInMap(
@@ -274,6 +297,23 @@ inline int ESDFMap::toAddress(const Eigen::Vector3i& id) {
 
 inline int ESDFMap::toAddress(const int x, const int y, const int z) {
   return x * mp_.map_voxel_num_(1) * mp_.map_voxel_num_(2) + y * mp_.map_voxel_num_(2) + z;
+}
+
+inline int ESDFMap::toRegionAddress(const Eigen::Vector3i& region_id) {
+  const Eigen::Vector3i& region_num = mp_.region_valuation_voxel_num_;
+  return (region_id(0) * region_num(1) + region_id(1)) * region_num(2) + region_id(2);
+}
+
+inline void ESDFMap::posToRegionIndex(const Eigen::Vector3d& pos, Eigen::Vector3i& region_id) {
+  for (int i = 0; i < 3; ++i) {
+    const int id =
+      static_cast<int>(floor((pos(i) - mp_.map_origin_(i)) * mp_.region_valuation_resolution_inv_));
+    region_id(i) = max(min(id, mp_.region_valuation_voxel_num_(i) - 1), 0);
+  }
+}
+
+inline double ESDFMap::getRegionValue(const Eigen::Vector3i& region_id) {
+  return md_.region_valuation_buffer_[toRegionAddress(region_id)];
 }
 
 inline void ESDFMap::boundIndex(Eigen::Vector3i& id) {

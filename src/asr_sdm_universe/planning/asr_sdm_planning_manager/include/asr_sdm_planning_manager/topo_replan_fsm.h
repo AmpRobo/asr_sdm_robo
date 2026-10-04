@@ -15,6 +15,7 @@
 #include <geometry_msgs/msg/pose_with_covariance_stamped.hpp>
 #include <nav_msgs/msg/odometry.hpp>
 #include <nav_msgs/msg/path.hpp>
+#include <sensor_msgs/msg/point_cloud2.hpp>
 #include <std_msgs/msg/empty.hpp>
 #include <visualization_msgs/msg/marker.hpp>
 
@@ -50,6 +51,7 @@ private:
   double waypoints_[50][3];
   int waypoint_num_;
   bool act_map_;
+  double region_valuation_vis_min_score_;
 
   /* planning data */
   bool trigger_, have_target_, have_odom_, collide_;
@@ -75,6 +77,7 @@ private:
   rclcpp::Subscription<nav_msgs::msg::Odometry>::SharedPtr odom_sub_;
   rclcpp::Publisher<std_msgs::msg::Empty>::SharedPtr replan_pub_, new_pub_, stop_pub_;
   rclcpp::Publisher<asr_sdm_planning_manager::msg::Bspline>::SharedPtr bspline_pub_;
+  rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr region_valuation_pub_;
 
   /* helper functions */
   bool callSearchAndOptimization();    // front-end and back-end method
@@ -90,6 +93,8 @@ private:
   /* ROS functions */
   void execFSMCallback();
   void checkCollisionCallback();
+  // Publish region_valuation_buffer_ as an XYZI cloud, intensity = region score.
+  void regionValuationVisCallback();
   // Take a new target. arrival_heading is the body axis to hold once there, or
   // zero when the caller has no orientation to offer.
   void acceptTarget(const nav_msgs::msg::Path & path, const Eigen::Vector3d & arrival_heading);

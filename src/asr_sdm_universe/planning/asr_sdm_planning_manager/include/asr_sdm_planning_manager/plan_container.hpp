@@ -83,7 +83,7 @@ public:
   Eigen::Vector3d getVelocity(double t)
   {
     if (t >= -1e-3 && t <= local_start_time_) {
-      return global_traj_.evaluateVel(t);
+      return global_traj_.evaluateVel(t - time_increase_ + last_time_inc_);
     } else if (t >= local_end_time_ && t <= global_duration_ + 1e-3) {
       return global_traj_.evaluateVel(t - time_increase_);
     } else {
@@ -96,7 +96,7 @@ public:
   Eigen::Vector3d getAcceleration(double t)
   {
     if (t >= -1e-3 && t <= local_start_time_) {
-      return global_traj_.evaluateAcc(t);
+      return global_traj_.evaluateAcc(t - time_increase_ + last_time_inc_);
     } else if (t >= local_end_time_ && t <= global_duration_ + 1e-3) {
       return global_traj_.evaluateAcc(t - time_increase_);
     } else {
@@ -195,6 +195,10 @@ struct PlanParameters
   /* planning algorithm parameters */
   double max_vel_, max_acc_, max_jerk_;  // physical limits
   double local_traj_len_;                // local replanning trajectory length
+  // A collision that ends closer than window_end_margin_ to the end of the
+  // local window is pushed back inside it by growing the window radius, by at
+  // most max_window_extension_ beyond local_traj_len_.
+  double window_end_margin_, max_window_extension_;
   double ctrl_pt_dist;                   // distance between adjacient B-spline
                                          // control points
   double clearance_;

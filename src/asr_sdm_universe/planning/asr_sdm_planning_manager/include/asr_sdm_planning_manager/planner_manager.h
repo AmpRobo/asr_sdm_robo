@@ -82,6 +82,15 @@ private:
   void findCollisionRange(
     vector<Eigen::Vector3d> & colli_start, vector<Eigen::Vector3d> & colli_end,
     vector<Eigen::Vector3d> & start_pts, vector<Eigen::Vector3d> & end_pts);
+  // Arc length from the last point of traj closer than topo_prm.clearance to
+  // an obstacle up to its end. Infinity if no point is that close.
+  double safeTailLength(fast_planner::NonUniformBspline & traj);
+  void extendWindowPastCollision(
+    double start_t, fast_planner::NonUniformBspline & traj, double & dt, double & duration);
+  // Grow the window radius, by at most max_window_extension, until the cut
+  // reaches the end of the current local segment.
+  void extendWindowToLocalEnd(
+    double start_t, fast_planner::NonUniformBspline & traj, double & dt, double & duration);
 
   void optimizeTopoBspline(
     double start_t, double duration, vector<Eigen::Vector3d> guide_path, int traj_id);
@@ -90,7 +99,7 @@ private:
   // Peak |yaw|/|pitch| rate of the position spline, divided by the matching
   // manager limit. 1.0 means the heading already stays inside the limits.
   double headingRateRatio(fast_planner::NonUniformBspline & pos) const;
-  Eigen::MatrixXd reparamLocalTraj(double start_t, double & dt, double & duration);
+  Eigen::MatrixXd reparamLocalTraj(double start_t, double radius, double & dt, double & duration);
   Eigen::MatrixXd reparamLocalTraj(double start_t, double duration, int seg_num, double & dt);
 
   // Returns the index of the chosen candidate in plan_data_.topo_traj_pos2_.

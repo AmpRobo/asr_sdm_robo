@@ -79,6 +79,13 @@ With several separate collision stretches, one box covers all of them. The safe
 parts outside the window (`start_pts`, `end_pts`) are not sampled; they are
 spliced back onto every candidate in `selectShortPaths`.
 
+The last few control points of the segment are pinned to the global trajectory
+and get no clearance cost, so a collision that ends there cannot be optimized
+away. Before this walk, `topoReplan` therefore measures the arc length from the
+last unsafe point to the segment end. If it is below `manager.window_end_margin`
+(or the segment ends inside an obstacle), the cut radius grows in 0.5 m steps,
+by at most `manager.max_window_extension`, and never past the goal.
+
 #### Box frame and size
 
 `createGraph` builds an oriented box centred between `start` and `end`:
@@ -109,58 +116,50 @@ If `start -> end` is vertical, `x_hat × (0, 0, -1)` is zero and the box
 collapses onto the x axis. The robot normally moves near the horizontal plane,
 so this is not handled.
 
-#### Quadrant pruning
+#### Sample allocation
 
-With `topo_prm.prune_quadrant: true`, the box is split by its local x-y and
-x-z planes. Both planes contain the start -> end axis, so each quadrant still
-spans the whole blocked window.
+`generateSamples()` runs once per `createGraph`, right after the box is set,
+and generates exactly `max_sample_num` samples (2000). ESDF voxel `i` of the box
+gets the share
 
 ```text
-view from start, looking along +x (towards end)
-
-                 +z (up)
-                   |
-   Q0 left-up      |      Q1 right-up
-   (y >= 0, z >= 0)|      (y < 0, z >= 0)
-  +y --------------x-------------- -y
-   Q2 left-down    |      Q3 right-down
-   (y >= 0, z < 0) |      (y < 0, z < 0)
-                   |
-                 -z
+P_i = (1 - v_i) / sum_j (1 - v_j)
 ```
 
-`lowestEsdfQuadrant()` runs once per `createGraph`:
+where `v_i` is the region value of the voxel, i.e. the score of the
+`region_valuation_buffer_` cell that contains it. Low-value regions (far from
+obstacles, or with one dominant gradient direction) therefore receive more
+samples than high-value ones. Cells never evaluated (`-1`) count as `v = 0`.
 
-1. Lay a grid of cell centres over the box in the local frame, spacing
-   `quadrant_eval_step` (never finer than the map resolution). The y and z
-   cell counts are even, so no centre sits on a splitting plane and every
-   quadrant gets the same number of cells.
-2. For each cell inside the map, read `ESDFMap::getDistance()` (a
-   precomputed voxel value, no interpolation), cap it at `quadrant_dist_cap`,
-   and add it to that quadrant's sum. Cells outside the map add nothing.
-3. The quadrant with the **lowest** sum is the one most filled by obstacles.
-   It is removed, and the log shows
-   `[Topo]: quadrant esdf sum: a b c d, removed N`.
+`v_i` is the same for every voxel of a region cell (0.5 m), so the samples are
+allocated per region cell; a cell holds 125 voxels at the 0.1 m map resolution:
 
-The cap is required. Voxels that no ESDF update has reached hold `10000`, and
-an update whose box contained no obstacle leaves values around `1e153`;
-uncapped, a single such voxel would decide the comparison.
+1. List the region cells that overlap the box and the map. A cell whose eight
+   corners are all inside is fully covered; for the others, count how many of
+   their voxel-sized parts have the centre inside. The cell weight is
+   `(1 - v) * covered fraction`, i.e. the sum of `1 - v_i` over its voxels in
+   the box.
+2. Allocate `max_sample_num` in proportion to the cell weights with the
+   largest remainder method: each cell gets the integer part of its quota, and
+   the remaining samples go to the cells with the largest fractional parts, so
+   the counts add up to exactly `max_sample_num`.
+3. Draw each cell's samples uniform inside the cell. A point outside the box or
+   the map is redrawn, so a partly covered cell spreads its samples over its
+   covered part.
+4. Shuffle the list. The log shows
+   `[Topo]: region sampling cells: N, samples: S, build time: T`.
 
-`getSample()` then samples the remaining three quadrants directly: x is
-uniform in `[-r_x, r_x]`, |y| and |z| are uniform in `[0, r_y]` and
-`[0, r_z]`, one of the three kept quadrants is picked uniformly, and the signs
-of y and z are set from its index. All quadrants have the same volume, so the
-result is uniform over their union and no draw is discarded.
-
-With `prune_quadrant: false`, no ESDF sum is computed and all four quadrants
-are sampled, which is the same distribution as the original whole-box
-sampling.
+If no cell qualifies (the box lies outside the map, or every `v` is 1), the
+list is filled with `max_sample_num` uniform samples of the whole box: each
+local coordinate uniform in `[-r, r]`.
 
 #### What happens to each sample
 
-Sampling stops at `max_sample_time` (accumulated) or `max_sample_num`,
-whichever comes first; with the default 5 ms budget, the time limit is usually
-hit first (see `[Topo]: sample num: N`).
+The main loop takes the samples in list order and stops at `max_sample_time`
+(accumulated) or the end of the list, whichever comes first. With the default
+5 ms budget the time limit is hit long before the 2000th sample (see
+`[Topo]: sample num: N, sample time: T`, T in seconds); the list is shuffled so that the processed part
+follows the same allocation.
 
 1. Reject the sample if its ESDF distance is `<= clearance`.
 2. Find visible guards (line of sight through ESDF voxels, blocked at
@@ -174,14 +173,13 @@ hit first (see `[Topo]: sample num: N`).
 
 #### Caveats
 
-- The ESDF is only valid inside the map's latest update box: the bounding box
-  of obstacle points within `esdf_map.local_update_range` of the sensor, plus
-  the sensor position. Box cells outside it read `10000` or stale values,
-  which the cap turns into "free". Parts of the box within 1 m of that
-  boundary therefore look slightly more open than they are.
-- The removed quadrant is deterministic for a given map. If the only passage
-  lies in it, every retry fails with `No path.`; set `prune_quadrant: false`
-  in that environment.
+- The ESDF and the region values are only refreshed inside the map's latest
+  update box: the bounding box of obstacle points within
+  `esdf_map.local_update_range` of the sensor, plus the sensor position.
+  Outside it they are stale. Region cells never evaluated read `-1`, which
+  gives never-observed parts of the box the largest weight.
+- Sampling outside the map is no longer possible while the distribution is
+  non-empty; the uniform fallback still samples the whole box.
 - Nodes keep `clearance` (0.3 m) from obstacles, but edges are only checked
   against one voxel (0.1 m). The B-spline clearance cost in the manager pushes
   the final trajectory away.
@@ -195,15 +193,13 @@ hit first (see `[Topo]: sample num: N`).
 | `sample_inflate_z` | 3.0 | Half-height along z (up / down) [m] |
 | `clearance` | 0.3 | Min ESDF distance for a node; also the collision-range threshold in the manager [m] |
 | `max_sample_time` | 0.005 | Accumulated sampling budget [s] |
-| `max_sample_num` | 2000 | Sample count cap |
-| `prune_quadrant` | true | Remove the lowest-ESDF quadrant before sampling |
-| `quadrant_dist_cap` | 1.0 | Per-cell ESDF cap before summing [m] |
-| `quadrant_eval_step` | 0.2 | Grid spacing for the quadrant sums [m] |
+| `max_sample_num` | 2000 | Samples generated per graph and allocated to region cells |
 | `max_raw_path` | 300 | DFS raw path cap |
 | `max_raw_path2` | 25 | Raw paths kept, fewest nodes first |
 | `reserve_num` | 6 | Max selected paths |
 | `ratio_to_short` | 5.5 | Max length ratio to the shortest selected path |
-| `parallel_shortcut` | true | One thread per raw path during shortcutting |
+| `parallel_shortcut` | true | One thread per path during shortcutting, both for raw paths and for selected paths |
+| `select_shortcut_iter` | 5 | Max shortcut iterations on each selected path after `start_pts` / `end_pts` are spliced back; stops early once an iteration shortens the path by less than 1 mm |
 | `short_cut_num` | 1 | Read but unused |
 
 Parameters are read once in `TopologyPRM::init()`; restart the manager node
@@ -226,7 +222,7 @@ backward compatibility.
 
 #### Sample region (TopoPathModifier)
 
-This class does not use the oriented box or quadrant pruning above.
+This class does not use the oriented box or the sample allocation above.
 
 - **Box**: world-axis-aligned. It is the bounding box of `start`, `goal`, the
   input waypoints in the window, and every collision hint centre padded by
@@ -407,6 +403,11 @@ TopologyPRM::findTopoPaths(start, end, start_pts, end_pts, ...)
 有好几段互不相连的碰撞区间时，一个采样盒会把它们全部包进去。碰撞窗口外的安全部分
 （`start_pts`、`end_pts`）不参与采样，最后在 `selectShortPaths` 里拼回每条候选路径。
 
+局部段末尾的几个控制点固定在全局轨迹上，也没有间隙代价，碰撞如果结束在那里，优化
+无法把它推开。所以 `topoReplan` 在扫描之前先量出最后一个不安全点到局部段末端的弧长：
+小于 `manager.window_end_margin`（或者局部段终点就在障碍物里）时，按 0.5 m 一步加大
+截取半径，最多加 `manager.max_window_extension`，也不会超过终点。
+
 #### 采样盒的坐标系和尺寸
 
 `createGraph` 以 `start` 和 `end` 的中点为中心，建一个有朝向的长方体：
@@ -434,49 +435,39 @@ p_world   = R · p_local + c,   p_local ∈ [-sample_r, +sample_r]
 如果 `start -> end` 是竖直方向，`x_hat × (0, 0, -1)` 为零，采样盒会塌成 x 轴上的一条线。
 机器人通常在接近水平的面上运动，代码里没有处理这种情况。
 
-#### 象限剔除
+#### 采样点分配
 
-`topo_prm.prune_quadrant: true` 时，用局部坐标系的 x-y 平面和 x-z 平面把采样盒切成四块。
-两个平面都包含 start -> end 轴，所以每个象限都沿 x 方向覆盖整个碰撞窗口。
+每次 `createGraph` 在确定采样盒之后调用一次 `generateSamples()`，正好生成
+`max_sample_num`（2000）个采样点。采样盒里 ESDF 体素 `i` 分到的比例是：
 
 ```text
-站在 start，沿 +x 看向 end
-
-                 +z（上）
-                   |
-   Q0 左上         |      Q1 右上
-   (y >= 0, z >= 0)|      (y < 0, z >= 0)
-  +y --------------x-------------- -y
-   Q2 左下         |      Q3 右下
-   (y >= 0, z < 0) |      (y < 0, z < 0)
-                   |
-                 -z
+P_i = (1 - v_i) / sum_j (1 - v_j)
 ```
 
-每次 `createGraph` 调用一次 `lowestEsdfQuadrant()`：
+其中 `v_i` 是该体素的 region value，也就是包含它的 `region_valuation_buffer_` 格子的
+分数。所以 region value 低的地方（离障碍物远，或梯度方向单一）比 region value 高的地方
+得到更多采样点。从未评估过的格子（`-1`）按 `v = 0` 处理。
 
-1. 在局部坐标系下按 `quadrant_eval_step` 的间距铺格点中心（间距不会小于地图分辨率）。
-   y、z 方向的格点数取偶数，这样没有格点中心落在切割平面上，四个象限分到的格点数相同。
-2. 对地图范围内的每个格点，读 `ESDFMap::getDistance()`（地图预先算好的体素值，不插值），
-   截断到 `quadrant_dist_cap` 后累加到所在象限。地图外的格点不计入。
-3. 总和**最小**的象限就是被障碍物占得最多的象限。把它去掉，并打印日志
-   `[Topo]: quadrant esdf sum: a b c d, removed N`。
+同一个 region 格子（0.5 m）里所有体素的 `v_i` 都相同，所以按 region 格子分配；地图
+分辨率为 0.1 m 时，一个格子包含 125 个体素：
 
-截断是必须的：从未被 ESDF 更新过的体素值是 `10000`，某次更新的盒子里一个障碍物都没有时
-会留下约 `1e153` 的值。不截断的话，只要有一个这样的体素，它就决定了比较结果。
+1. 列出和采样盒、地图相交的 region 格子。8 个角点都在里面的格子算完全覆盖；其余格子
+   统计它的体素大小的小块里有多少个中心落在里面。格子权重是 `(1 - v) × 覆盖比例`，
+   也就是它落在采样盒里的那些体素的 `1 - v_i` 之和。
+2. 按格子权重分配 `max_sample_num`，用最大余数法：每个格子先拿配额的整数部分，剩下的
+   点给小数部分最大的那些格子，所以各格子的点数加起来正好是 `max_sample_num`。
+3. 在每个格子里均匀随机生成它分到的点。点落在采样盒外或地图外就重抽，所以部分覆盖的
+   格子会把点分布在它被覆盖的那部分里。
+4. 打乱整个列表。日志会打印 `[Topo]: region sampling cells: N, samples: S, build time: T`。
 
-随后 `getSample()` 直接在剩下的三个象限里取点：x 在 `[-r_x, r_x]` 上均匀取值，|y| 和 |z|
-分别在 `[0, r_y]`、`[0, r_z]` 上均匀取值；再从三个保留象限里等概率选一个，按它的编号
-设定 y、z 的符号。四个象限体积相同，所以结果在三个象限的并集上是均匀的，而且不会有
-被丢弃的抽样。
-
-`prune_quadrant: false` 时，不计算 ESDF 总和，四个象限都参与采样，分布和原来的整盒
-均匀采样相同。
+如果一个格子都选不出来（采样盒在地图外，或所有 `v` 都是 1），就用 `max_sample_num` 个
+在整个采样盒里均匀采的点填满列表：每个局部坐标都在 `[-r, r]` 上均匀取值。
 
 #### 每个采样点怎么处理
 
-采样在累计时间达到 `max_sample_time` 或采样数达到 `max_sample_num` 时停止，哪个先到
-算哪个。默认的 5 ms 预算下，通常是时间先到（看日志 `[Topo]: sample num: N`）。
+主循环按列表顺序取点，累计时间达到 `max_sample_time` 或列表取完时停止，哪个先到算哪个。
+默认的 5 ms 预算下，远没到第 2000 个点时间就用完了（看日志 `[Topo]: sample num: N, sample time: T`，T 单位为秒）；
+列表打乱过，所以处理到的那部分点也符合同样的分配。
 
 1. ESDF 距离 `<= clearance` 的点直接丢掉。
 2. 找它能看到的 guard（沿 ESDF 体素做视线检查，距离 `<= resolution` 就算被挡）：
@@ -488,12 +479,10 @@ p_world   = R · p_local + c,   p_local ∈ [-sample_r, +sample_r]
 
 #### 注意事项
 
-- ESDF 只在地图最近一次更新的盒子里有效。这个盒子是传感器周围
-  `esdf_map.local_update_range` 内障碍物点的包围盒，再并上传感器位置。采样盒落在它外面
-  的格点读到的是 `10000` 或旧值，截断后按“空闲”计入。所以采样盒里离这个边界 1 m 以内的
-  部分，会显得比实际更空旷一些。
-- 对同一张地图，去掉哪个象限是确定的。如果唯一的通道恰好在被去掉的象限里，每次重试都会
-  失败并打印 `No path.`。遇到这种环境时，把 `prune_quadrant` 设为 `false`。
+- ESDF 和 region value 只在地图最近一次更新的盒子里刷新。这个盒子是传感器周围
+  `esdf_map.local_update_range` 内障碍物点的包围盒，再并上传感器位置。盒子外面是旧值。
+  从未评估过的 region 格子是 `-1`，会让采样盒里从未观测过的部分拿到最大的权重。
+- 只要分布非空，就不会采到地图外的点；退回的均匀采样仍然覆盖整个采样盒。
 - 节点离障碍物至少 `clearance`（0.3 m），但边只按一个体素（0.1 m）检查。最终轨迹靠
   manager 里 B 样条的距离代价推开。
 
@@ -506,15 +495,13 @@ p_world   = R · p_local + c,   p_local ∈ [-sample_r, +sample_r]
 | `sample_inflate_z` | 3.0 | z 方向（上下）半高 [m] |
 | `clearance` | 0.3 | 节点离障碍物的最小 ESDF 距离；也是 manager 判断碰撞区间的阈值 [m] |
 | `max_sample_time` | 0.005 | 累计采样时间预算 [s] |
-| `max_sample_num` | 2000 | 采样数上限 |
-| `prune_quadrant` | true | 采样前是否去掉 ESDF 总和最小的象限 |
-| `quadrant_dist_cap` | 1.0 | 求和前每个格点 ESDF 值的上限 [m] |
-| `quadrant_eval_step` | 0.2 | 计算象限总和的格点间距 [m] |
+| `max_sample_num` | 2000 | 每次建图生成并分配到各 region 格子的采样点总数 |
 | `max_raw_path` | 300 | DFS 枚举的原始路径上限 |
 | `max_raw_path2` | 25 | 保留的原始路径数，节点少的优先 |
 | `reserve_num` | 6 | 最终保留的路径数上限 |
 | `ratio_to_short` | 5.5 | 相对最短路径的最大长度比 |
-| `parallel_shortcut` | true | 捷径时每条原始路径一个线程 |
+| `parallel_shortcut` | true | 捷径时每条路径一个线程，原始路径和选出的路径都适用 |
+| `select_shortcut_iter` | 5 | 选出的路径拼回 `start_pts` / `end_pts` 后做捷径的最大迭代次数；某次迭代缩短不到 1 mm 就提前停止 |
 | `short_cut_num` | 1 | 会读取，但没有被使用 |
 
 参数只在 `TopologyPRM::init()` 里读一次，改完 yaml 要重启 manager 节点。用
@@ -533,7 +520,7 @@ p_world   = R · p_local + c,   p_local ∈ [-sample_r, +sample_r]
 
 #### 采样区域（TopoPathModifier）
 
-这个类不使用上面的有向采样盒，也没有象限剔除。
+这个类不使用上面的有向采样盒，也不使用上面的采样点分配。
 
 - **采样盒**：与世界坐标轴对齐。取 `start`、`goal`、窗口内的输入路点，以及每个碰撞提示点
   中心向外扩 `radius + collision_clearance + local_window_padding` 后的包围盒，再在每个
