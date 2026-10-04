@@ -110,12 +110,8 @@ private:
   Eigen::Vector3d translation_;
   Eigen::Matrix3d rotation_;
 
-  // Centers of the region valuation cells that may overlap the sample box, and
-  // the running sum of their weights 1 - region value, rebuilt once per
-  // createGraph.
-  vector<Eigen::Vector3d> sample_cells_;
-  vector<double> sample_weight_cdf_;
-  double sample_cell_size_;
+  // Samples of the current createGraph, in random order.
+  vector<Eigen::Vector3d> samples_;
 
   // roadmap data structure, 0:start, 1:goal, 2-n: others
   list<GraphNode::Ptr> graph_;
@@ -152,9 +148,8 @@ private:
     vector<vector<Eigen::Vector3d>> & paths, int step);
 
   /* ---------- helper ---------- */
-  inline Eigen::Vector3d getSample();
   Eigen::Vector3d getUniformSample();
-  void buildSampleDistribution();
+  void generateSamples();
   vector<GraphNode::Ptr> findVisibGuard(Eigen::Vector3d pt);  // find pairs of visibile guard
   bool needConnection(
     GraphNode::Ptr g1, GraphNode::Ptr g2,

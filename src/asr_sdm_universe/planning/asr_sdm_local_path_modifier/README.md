@@ -116,9 +116,11 @@ If `start -> end` is vertical, `x_hat × (0, 0, -1)` is zero and the box
 collapses onto the x axis. The robot normally moves near the horizontal plane,
 so this is not handled.
 
-#### Sampling probability
+#### Sample allocation
 
-A sample lands in ESDF voxel `i` of the box with probability
+`generateSamples()` runs once per `createGraph`, right after the box is set,
+and generates exactly `max_sample_num` samples (2000). ESDF voxel `i` of the box
+gets the share
 
 ```text
 P_i = (1 - v_i) / sum_j (1 - v_j)
@@ -127,31 +129,37 @@ P_i = (1 - v_i) / sum_j (1 - v_j)
 where `v_i` is the region value of the voxel, i.e. the score of the
 `region_valuation_buffer_` cell that contains it. Low-value regions (far from
 obstacles, or with one dominant gradient direction) therefore receive more
-samples than high-value ones.
+samples than high-value ones. Cells never evaluated (`-1`) count as `v = 0`.
 
-`v_i` is the same for every voxel of a region cell (0.5 m), so the distribution
-is built over region cells instead of voxels; a cell holds 125 voxels at the
-0.1 m map resolution:
+`v_i` is the same for every voxel of a region cell (0.5 m), so the samples are
+allocated per region cell; a cell holds 125 voxels at the 0.1 m map resolution:
 
-1. `buildSampleDistribution()` runs once per `createGraph`, right after the
-   box is set. It lists the region cells that can overlap the box (tested with
-   the cell's half-diagonal), and stores the running sum of their weights
-   `1 - v`. Cells never evaluated (`-1`) count as `v = 0`. The log shows
-   `[Topo]: region sampling cells: N, weight sum: W, build time: T`.
-2. `getSample()` picks a cell by a binary search over the running sums and
-   draws a point uniform inside it. A point outside the box or outside the map
-   is redrawn from step 2, so cells that only partly overlap the box keep the
-   same density `1 - v` on the overlapping part.
+1. List the region cells that overlap the box and the map. A cell whose eight
+   corners are all inside is fully covered; for the others, count how many of
+   their voxel-sized parts have the centre inside. The cell weight is
+   `(1 - v) * covered fraction`, i.e. the sum of `1 - v_i` over its voxels in
+   the box.
+2. Allocate `max_sample_num` in proportion to the cell weights with the
+   largest remainder method: each cell gets the integer part of its quota, and
+   the remaining samples go to the cells with the largest fractional parts, so
+   the counts add up to exactly `max_sample_num`.
+3. Draw each cell's samples uniform inside the cell. A point outside the box or
+   the map is redrawn, so a partly covered cell spreads its samples over its
+   covered part.
+4. Shuffle the list. The log shows
+   `[Topo]: region sampling cells: N, samples: S, build time: T`.
 
-If no cell qualifies (the box lies outside the map, or every `v` is 1), or 100
-draws in a row are rejected, `getSample()` falls back to uniform sampling of
-the whole box: each local coordinate uniform in `[-r, r]`.
+If no cell qualifies (the box lies outside the map, or every `v` is 1), the
+list is filled with `max_sample_num` uniform samples of the whole box: each
+local coordinate uniform in `[-r, r]`.
 
 #### What happens to each sample
 
-Sampling stops at `max_sample_time` (accumulated) or `max_sample_num`,
-whichever comes first; with the default 5 ms budget, the time limit is usually
-hit first (see `[Topo]: sample num: N`).
+The main loop takes the samples in list order and stops at `max_sample_time`
+(accumulated) or the end of the list, whichever comes first. With the default
+5 ms budget the time limit is hit long before the 2000th sample (see
+`[Topo]: sample num: N, sample time: T`, T in seconds); the list is shuffled so that the processed part
+follows the same allocation.
 
 1. Reject the sample if its ESDF distance is `<= clearance`.
 2. Find visible guards (line of sight through ESDF voxels, blocked at
@@ -185,7 +193,7 @@ hit first (see `[Topo]: sample num: N`).
 | `sample_inflate_z` | 3.0 | Half-height along z (up / down) [m] |
 | `clearance` | 0.3 | Min ESDF distance for a node; also the collision-range threshold in the manager [m] |
 | `max_sample_time` | 0.005 | Accumulated sampling budget [s] |
-| `max_sample_num` | 2000 | Sample count cap |
+| `max_sample_num` | 2000 | Samples generated per graph and allocated to region cells |
 | `max_raw_path` | 300 | DFS raw path cap |
 | `max_raw_path2` | 25 | Raw paths kept, fewest nodes first |
 | `reserve_num` | 6 | Max selected paths |
@@ -214,7 +222,7 @@ backward compatibility.
 
 #### Sample region (TopoPathModifier)
 
-This class does not use the oriented box or the sampling probability above.
+This class does not use the oriented box or the sample allocation above.
 
 - **Box**: world-axis-aligned. It is the bounding box of `start`, `goal`, the
   input waypoints in the window, and every collision hint centre padded by
@@ -427,9 +435,10 @@ p_world   = R · p_local + c,   p_local ∈ [-sample_r, +sample_r]
 如果 `start -> end` 是竖直方向，`x_hat × (0, 0, -1)` 为零，采样盒会塌成 x 轴上的一条线。
 机器人通常在接近水平的面上运动，代码里没有处理这种情况。
 
-#### 采样概率
+#### 采样点分配
 
-采样点落在采样盒里 ESDF 体素 `i` 内的概率是：
+每次 `createGraph` 在确定采样盒之后调用一次 `generateSamples()`，正好生成
+`max_sample_num`（2000）个采样点。采样盒里 ESDF 体素 `i` 分到的比例是：
 
 ```text
 P_i = (1 - v_i) / sum_j (1 - v_j)
@@ -437,26 +446,28 @@ P_i = (1 - v_i) / sum_j (1 - v_j)
 
 其中 `v_i` 是该体素的 region value，也就是包含它的 `region_valuation_buffer_` 格子的
 分数。所以 region value 低的地方（离障碍物远，或梯度方向单一）比 region value 高的地方
-得到更多采样点。
+得到更多采样点。从未评估过的格子（`-1`）按 `v = 0` 处理。
 
-同一个 region 格子（0.5 m）里所有体素的 `v_i` 都相同，所以分布按 region 格子建立，
-而不是按体素；地图分辨率为 0.1 m 时，一个格子包含 125 个体素：
+同一个 region 格子（0.5 m）里所有体素的 `v_i` 都相同，所以按 region 格子分配；地图
+分辨率为 0.1 m 时，一个格子包含 125 个体素：
 
-1. 每次 `createGraph` 在确定采样盒之后调用一次 `buildSampleDistribution()`：列出可能
-   与采样盒相交的 region 格子（用格子的半对角线判断），记录它们权重 `1 - v` 的累加和。
-   从未评估过的格子（`-1`）按 `v = 0` 处理。日志会打印
-   `[Topo]: region sampling cells: N, weight sum: W, build time: T`。
-2. `getSample()` 在累加和上二分查找选出一个格子，再在格子内均匀取一个点。点落在采样盒
-   外或地图外时，回到第 2 步重新抽。这样只和采样盒部分相交的格子，在相交部分上的密度
-   仍然是 `1 - v`。
+1. 列出和采样盒、地图相交的 region 格子。8 个角点都在里面的格子算完全覆盖；其余格子
+   统计它的体素大小的小块里有多少个中心落在里面。格子权重是 `(1 - v) × 覆盖比例`，
+   也就是它落在采样盒里的那些体素的 `1 - v_i` 之和。
+2. 按格子权重分配 `max_sample_num`，用最大余数法：每个格子先拿配额的整数部分，剩下的
+   点给小数部分最大的那些格子，所以各格子的点数加起来正好是 `max_sample_num`。
+3. 在每个格子里均匀随机生成它分到的点。点落在采样盒外或地图外就重抽，所以部分覆盖的
+   格子会把点分布在它被覆盖的那部分里。
+4. 打乱整个列表。日志会打印 `[Topo]: region sampling cells: N, samples: S, build time: T`。
 
-如果一个格子都选不出来（采样盒在地图外，或所有 `v` 都是 1），或者连续 100 次都被拒绝，
-`getSample()` 退回到在整个采样盒里均匀采样：每个局部坐标都在 `[-r, r]` 上均匀取值。
+如果一个格子都选不出来（采样盒在地图外，或所有 `v` 都是 1），就用 `max_sample_num` 个
+在整个采样盒里均匀采的点填满列表：每个局部坐标都在 `[-r, r]` 上均匀取值。
 
 #### 每个采样点怎么处理
 
-采样在累计时间达到 `max_sample_time` 或采样数达到 `max_sample_num` 时停止，哪个先到
-算哪个。默认的 5 ms 预算下，通常是时间先到（看日志 `[Topo]: sample num: N`）。
+主循环按列表顺序取点，累计时间达到 `max_sample_time` 或列表取完时停止，哪个先到算哪个。
+默认的 5 ms 预算下，远没到第 2000 个点时间就用完了（看日志 `[Topo]: sample num: N, sample time: T`，T 单位为秒）；
+列表打乱过，所以处理到的那部分点也符合同样的分配。
 
 1. ESDF 距离 `<= clearance` 的点直接丢掉。
 2. 找它能看到的 guard（沿 ESDF 体素做视线检查，距离 `<= resolution` 就算被挡）：
@@ -484,7 +495,7 @@ P_i = (1 - v_i) / sum_j (1 - v_j)
 | `sample_inflate_z` | 3.0 | z 方向（上下）半高 [m] |
 | `clearance` | 0.3 | 节点离障碍物的最小 ESDF 距离；也是 manager 判断碰撞区间的阈值 [m] |
 | `max_sample_time` | 0.005 | 累计采样时间预算 [s] |
-| `max_sample_num` | 2000 | 采样数上限 |
+| `max_sample_num` | 2000 | 每次建图生成并分配到各 region 格子的采样点总数 |
 | `max_raw_path` | 300 | DFS 枚举的原始路径上限 |
 | `max_raw_path2` | 25 | 保留的原始路径数，节点少的优先 |
 | `reserve_num` | 6 | 最终保留的路径数上限 |
@@ -509,7 +520,7 @@ P_i = (1 - v_i) / sum_j (1 - v_j)
 
 #### 采样区域（TopoPathModifier）
 
-这个类不使用上面的有向采样盒，也不使用上面的采样概率。
+这个类不使用上面的有向采样盒，也不使用上面的采样点分配。
 
 - **采样盒**：与世界坐标轴对齐。取 `start`、`goal`、窗口内的输入路点，以及每个碰撞提示点
   中心向外扩 `radius + collision_clearance + local_window_padding` 后的包围盒，再在每个

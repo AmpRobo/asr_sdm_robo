@@ -51,6 +51,7 @@ private:
   double waypoints_[50][3];
   int waypoint_num_;
   bool act_map_;
+  double region_valuation_vis_min_score_;
 
   /* planning data */
   bool trigger_, have_target_, have_odom_, collide_;

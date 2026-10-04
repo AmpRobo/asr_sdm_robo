@@ -101,7 +101,7 @@ Visualization is published through `asr_sdm_trajectory_visualizer`:
 | `/planning_vis/frontier` | `visualization_msgs/msg/Marker` | Frontier |
 | `/planning_vis/yaw` | `visualization_msgs/msg/Marker` | Body-axis heading along the trajectory (yaw + pitch) |
 
-`planning_manager_node` also publishes `/planning_vis/region_valuation` (`sensor_msgs/msg/PointCloud2`) at 2 Hz while it has subscribers: one point per evaluated cell of the ESDF map's region valuation grid, placed at the cell center, with `intensity` = region score in [0, 1]. Cells never evaluated are not published.
+`planning_manager_node` also publishes `/planning_vis/region_valuation` (`sensor_msgs/msg/PointCloud2`) at 2 Hz while it has subscribers: one point per evaluated cell of the ESDF map's region valuation grid, placed at the cell center, with `intensity` = region score in [0, 1]. Cells never evaluated, and cells scoring below `fsm.region_valuation_vis_min_score` (0.1), are not published; this only affects the display.
 
 #### 2. `traj_server` (`asr_sdm_planning_manager`)
 
@@ -308,7 +308,7 @@ launch 同时 remap 进程内 ESDF 地图输入（`/esdf_map/odom`、`/esdf_map/
 | `/planning_vis/frontier` | `visualization_msgs/msg/Marker` | frontier |
 | `/planning_vis/yaw` | `visualization_msgs/msg/Marker` | 沿轨迹的机体系朝向（yaw + pitch） |
 
-`planning_manager_node` 另外在有订阅者时以 2 Hz 发布 `/planning_vis/region_valuation`（`sensor_msgs/msg/PointCloud2`）：ESDF 地图 region valuation 网格中每个已评估的格子对应一个点，位于格子中心，`intensity` 为 region score（[0, 1]）。从未评估过的格子不发布。
+`planning_manager_node` 另外在有订阅者时以 2 Hz 发布 `/planning_vis/region_valuation`（`sensor_msgs/msg/PointCloud2`）：ESDF 地图 region valuation 网格中每个已评估的格子对应一个点，位于格子中心，`intensity` 为 region score（[0, 1]）。从未评估过的格子，以及分数低于 `fsm.region_valuation_vis_min_score`（0.1）的格子不发布；这只影响显示。
 
 #### 2. `traj_server`（轨迹执行）
 

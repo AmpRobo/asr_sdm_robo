@@ -95,8 +95,8 @@ struct MappingData {
   vector<double> distance_buffer_;
   vector<double> distance_buffer_neg_;
   vector<double> distance_buffer_all_;
-  // Per region score in [0, 1]: mean voxel weight * normalized entropy of the
-  // eigenvalues of the region tensor. Regions never evaluated stay -1.
+  // Per region score in [0, 1]: normalized entropy of the eigenvalues of the
+  // region tensor. Regions never evaluated stay -1.
   vector<double> region_valuation_buffer_;
   // Per region: mean of normalized ESDF gradients, and eigen decomposition of the
   // mean gradient direction tensor (eigenvalues ascending, eigenvectors as columns).

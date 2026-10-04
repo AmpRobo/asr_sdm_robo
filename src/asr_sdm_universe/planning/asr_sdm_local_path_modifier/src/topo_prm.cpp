@@ -7,6 +7,8 @@
 
 #include <algorithm>
 #include <cmath>
+#include <functional>
+#include <limits>
 #include <thread>
 
 namespace amprobo
@@ -151,7 +153,7 @@ list<GraphNode::Ptr> TopologyPRM::createGraph(Eigen::Vector3d start, Eigen::Vect
   rotation_.col(1) = ytf;
   rotation_.col(2) = ztf;
 
-  buildSampleDistribution();
+  generateSamples();
 
   int node_id = 1;
 
@@ -160,10 +162,10 @@ list<GraphNode::Ptr> TopologyPRM::createGraph(Eigen::Vector3d start, Eigen::Vect
   double sample_time = 0.0;
   Eigen::Vector3d pt;
   rclcpp::Time t1, t2;
-  while (sample_time < max_sample_time_ && sample_num < max_sample_num_) {
+  while (sample_time < max_sample_time_ && sample_num < static_cast<int>(samples_.size())) {
     t1 = node_->now();
 
-    pt = getSample();
+    pt = samples_[sample_num];
     ++sample_num;
     double dist;
     Eigen::Vector3d grad;
@@ -204,7 +206,7 @@ list<GraphNode::Ptr> TopologyPRM::createGraph(Eigen::Vector3d start, Eigen::Vect
   }
 
   /* print record */
-  SPDLOG_INFO("[Topo]: sample num: {}", sample_num);
+  SPDLOG_INFO("[Topo]: sample num: {}, sample time: {:.4f}", sample_num, sample_time);
 
   pruneGraph();
   // std::cout << "[Topo]: node num: " << graph_.size() << std::endl;
@@ -265,77 +267,147 @@ bool TopologyPRM::needConnection(GraphNode::Ptr g1, GraphNode::Ptr g2, Eigen::Ve
   return true;
 }
 
-/* An ESDF voxel i lands the sample with probability P_i = (1 - v_i) / sum_j (1 - v_j),
- * v_i being the region value of the voxel. v_i is constant over a region cell, so
- * a cell is picked with weight 1 - v and the point is uniform inside it; points
- * outside the box or the map are redrawn, which keeps the density at 1 - v there
- * for cells that only partly overlap it. */
-Eigen::Vector3d TopologyPRM::getSample()
-{
-  if (sample_weight_cdf_.empty()) return getUniformSample();
-
-  std::uniform_real_distribution<double> rand_weight(0.0, sample_weight_cdf_.back());
-  const ESDFMap::Ptr & map = edt_environment_->esdf_map_;
-  for (int attempt = 0; attempt < 100; ++attempt) {
-    const size_t index = std::min(
-      static_cast<size_t>(
-        std::upper_bound(sample_weight_cdf_.begin(), sample_weight_cdf_.end(), rand_weight(eng_)) -
-        sample_weight_cdf_.begin()),
-      sample_cells_.size() - 1);
-
-    Eigen::Vector3d pt;
-    for (int i = 0; i < 3; ++i) {
-      pt(i) = sample_cells_[index](i) + 0.5 * sample_cell_size_ * rand_pos_(eng_);
-    }
-
-    const Eigen::Vector3d local = rotation_.transpose() * (pt - translation_);
-    if ((local.cwiseAbs() - sample_r_).maxCoeff() > 0.0) continue;
-    if (!map->isInMap(pt)) continue;
-    return pt;
-  }
-  return getUniformSample();
-}
-
-/* Unevaluated cells (-1) weigh like a score of 0. */
-void TopologyPRM::buildSampleDistribution()
+/* Region valuation cell r receives n_r of the max_sample_num samples, n_r in
+ * proportion to (1 - v_r) times the number of its voxels inside the sample box
+ * and the map, i.e. to the sum of 1 - v_i over those voxels. Its samples are
+ * uniform over the part of the cell inside the box. Unevaluated cells (-1) weigh
+ * like a score of 0. */
+void TopologyPRM::generateSamples()
 {
   const rclcpp::Time t1 = node_->now();
   const ESDFMap::Ptr & map = edt_environment_->esdf_map_;
+  samples_.clear();
 
-  sample_cells_.clear();
-  sample_weight_cdf_.clear();
-  sample_cell_size_ = map->getRegionValuationResolution();
-
+  const double cell_size = map->getRegionValuationResolution();
+  const double half = 0.5 * cell_size;
   const Eigen::Vector3d half_extent = rotation_.cwiseAbs() * sample_r_;
   Eigen::Vector3i min_id, max_id;
   map->posToRegionIndex(translation_ - half_extent, min_id);
   map->posToRegionIndex(translation_ + half_extent, max_id);
 
+  // Scalar copies: boundary cells are tested on every voxel, which is slow
+  // through Eigen in an unoptimized build.
+  Eigen::Vector3d map_origin, map_size;
+  map->getRegion(map_origin, map_size);
+  double rot[3][3], box_center[3], box_half[3], map_min[3], map_max[3];
+  for (int i = 0; i < 3; ++i) {
+    for (int j = 0; j < 3; ++j) rot[i][j] = rotation_(i, j);
+    box_center[i] = translation_(i);
+    box_half[i] = sample_r_(i);
+    // Same margins as ESDFMap::isInMap().
+    map_min[i] = map_origin(i) + 1e-4;
+    map_max[i] = map_origin(i) + map_size(i) - 1e-4;
+  }
+  // Largest |local_j| - sample_r_j over the box axes; positive outside the box.
+  auto box_excess = [&](const double p[3]) {
+    double excess = -std::numeric_limits<double>::infinity();
+    for (int j = 0; j < 3; ++j) {
+      const double local = rot[0][j] * (p[0] - box_center[0]) +
+                           rot[1][j] * (p[1] - box_center[1]) +
+                           rot[2][j] * (p[2] - box_center[2]);
+      excess = std::max(excess, std::fabs(local) - box_half[j]);
+    }
+    return excess;
+  };
+  auto in_region = [&](const double p[3]) {
+    for (int k = 0; k < 3; ++k) {
+      if (p[k] < map_min[k] || p[k] > map_max[k]) return false;
+    }
+    return box_excess(p) <= 0.0;
+  };
+
   // Every point of a cell is within half its diagonal of the cell center.
-  const double reach = 0.5 * std::sqrt(3.0) * sample_cell_size_;
-  const Eigen::Vector3d origin = map->getOrigin();
-  const Eigen::Matrix3d world_to_local = rotation_.transpose();
+  const double reach = std::sqrt(3.0) * half;
+  // A partly covered cell is measured on sub^3 voxel sized parts; with the map
+  // aligned to the region grid, these are its voxels.
+  const int sub = std::max(1, static_cast<int>(std::lround(cell_size / resolution_)));
+  const double part_size = cell_size / sub;
+
+  vector<Eigen::Vector3d> cells;
+  vector<double> weights;
   double weight_sum = 0.0;
   Eigen::Vector3i id;
+  double center[3], p[3];
   for (id(0) = min_id(0); id(0) <= max_id(0); ++id(0))
     for (id(1) = min_id(1); id(1) <= max_id(1); ++id(1))
       for (id(2) = min_id(2); id(2) <= max_id(2); ++id(2)) {
-        const Eigen::Vector3d center =
-          origin + (id.cast<double>() + Eigen::Vector3d::Constant(0.5)) * sample_cell_size_;
-        const Eigen::Vector3d local = world_to_local * (center - translation_);
-        if ((local.cwiseAbs() - sample_r_).maxCoeff() > reach) continue;
+        for (int k = 0; k < 3; ++k) center[k] = map_origin(k) + (id(k) + 0.5) * cell_size;
+        if (box_excess(center) > reach) continue;
 
-        const double weight = 1.0 - std::clamp(map->getRegionValue(id), 0.0, 1.0);
-        if (weight <= 0.0) continue;
+        const double value_weight = 1.0 - std::clamp(map->getRegionValue(id), 0.0, 1.0);
+        if (value_weight <= 0.0) continue;
 
-        weight_sum += weight;
-        sample_cells_.push_back(center);
-        sample_weight_cdf_.push_back(weight_sum);
+        // The box and the map are convex, so a cell with all corners inside is inside.
+        bool covered = true;
+        for (int corner = 0; corner < 8 && covered; ++corner) {
+          for (int k = 0; k < 3; ++k) p[k] = center[k] + (((corner >> k) & 1) ? half : -half);
+          covered = in_region(p);
+        }
+
+        double inside_ratio = 1.0;
+        if (!covered) {
+          int inside_num = 0;
+          for (int a = 0; a < sub; ++a) {
+            p[0] = center[0] - half + (a + 0.5) * part_size;
+            for (int b = 0; b < sub; ++b) {
+              p[1] = center[1] - half + (b + 0.5) * part_size;
+              for (int c = 0; c < sub; ++c) {
+                p[2] = center[2] - half + (c + 0.5) * part_size;
+                if (in_region(p)) ++inside_num;
+              }
+            }
+          }
+          if (inside_num == 0) continue;
+          inside_ratio = static_cast<double>(inside_num) / (sub * sub * sub);
+        }
+
+        cells.emplace_back(center[0], center[1], center[2]);
+        weights.push_back(value_weight * inside_ratio);
+        weight_sum += weights.back();
       }
 
+  if (cells.empty()) {
+    for (int i = 0; i < max_sample_num_; ++i) samples_.push_back(getUniformSample());
+    SPDLOG_INFO("[Topo]: no region sampling cell, {} uniform samples", samples_.size());
+    return;
+  }
+
+  // Largest remainder: each cell gets the integer part of its quota, and the
+  // samples left over go to the cells with the largest fractional parts.
+  vector<int> counts(cells.size());
+  vector<pair<double, size_t>> remainders(cells.size());
+  int assigned = 0;
+  for (size_t i = 0; i < cells.size(); ++i) {
+    const double quota = max_sample_num_ * weights[i] / weight_sum;
+    counts[i] = static_cast<int>(quota);
+    assigned += counts[i];
+    remainders[i] = {quota - counts[i], i};
+  }
+  const size_t left =
+    std::min(static_cast<size_t>(std::max(0, max_sample_num_ - assigned)), cells.size());
+  std::partial_sort(
+    remainders.begin(), remainders.begin() + left, remainders.end(), std::greater<>());
+  for (size_t i = 0; i < left; ++i) ++counts[remainders[i].second];
+
+  // Points of a partly covered cell that fall outside the box or the map are redrawn.
+  samples_.reserve(max_sample_num_);
+  for (size_t i = 0; i < cells.size(); ++i)
+    for (int k = 0; k < counts[i]; ++k)
+      for (int attempt = 0; attempt < 1000; ++attempt) {
+        for (int j = 0; j < 3; ++j) p[j] = cells[i](j) + half * rand_pos_(eng_);
+        if (in_region(p)) {
+          samples_.emplace_back(p[0], p[1], p[2]);
+          break;
+        }
+      }
+
+  // The time budget usually ends the main loop before the list does; shuffling
+  // keeps the processed part spread like the whole list.
+  std::shuffle(samples_.begin(), samples_.end(), eng_);
+
   SPDLOG_INFO(
-    "[Topo]: region sampling cells: {}, weight sum: {:.1f}, build time: {:.4f}",
-    sample_cells_.size(), weight_sum, (node_->now() - t1).seconds());
+    "[Topo]: region sampling cells: {}, samples: {}, build time: {:.4f}", cells.size(),
+    samples_.size(), (node_->now() - t1).seconds());
 }
 
 Eigen::Vector3d TopologyPRM::getUniformSample()

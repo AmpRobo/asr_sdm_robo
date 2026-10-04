@@ -33,11 +33,14 @@ void TopoReplanFSM::init(const std::shared_ptr<rclcpp::Node> & nh)
   node_->declare_parameter("fsm.waypoint_num", -1);
   node_->declare_parameter("fsm.act_map", false);
   node_->declare_parameter("fsm.initialpose_topic", std::string("/control/initial_pose"));
+  node_->declare_parameter("fsm.region_valuation_vis_min_score", 0.1);
   flight_type_ = node_->get_parameter("fsm.flight_type").as_string();
   replan_time_threshold_ = node_->get_parameter("fsm.thresh_replan").as_double();
   replan_distance_threshold_ = node_->get_parameter("fsm.thresh_no_replan").as_double();
   waypoint_num_ = node_->get_parameter("fsm.waypoint_num").as_int();
   act_map_ = node_->get_parameter("fsm.act_map").as_bool();
+  region_valuation_vis_min_score_ =
+    node_->get_parameter("fsm.region_valuation_vis_min_score").as_double();
   const std::string initialpose_topic =
     node_->get_parameter("fsm.initialpose_topic").as_string();
 
@@ -572,6 +575,16 @@ void TopoReplanFSM::regionValuationVisCallback()
   vector<Eigen::Vector3d> centers;
   vector<double> scores;
   planning_manager_->edt_environment_->esdf_map_->getRegionValuation(centers, scores);
+
+  size_t kept = 0;
+  for (size_t i = 0; i < centers.size(); ++i) {
+    if (scores[i] < region_valuation_vis_min_score_) continue;
+    centers[kept] = centers[i];
+    scores[kept] = scores[i];
+    ++kept;
+  }
+  centers.resize(kept);
+  scores.resize(kept);
 
   sensor_msgs::msg::PointCloud2 cloud;
   cloud.header.stamp = node_->now();

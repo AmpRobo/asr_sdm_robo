@@ -17,6 +17,9 @@
       waypoint2_y: 19.0
       waypoint2_z: 1.0
       act_map: false
+      # Region valuation cells scoring below this are left out of
+      # /planning_vis/region_valuation (display only).
+      region_valuation_vis_min_score: 0.1
 
     esdf_map:
       resolution: 0.1
@@ -113,7 +116,9 @@
       sample_inflate_z: 3.0
       clearance: 0.3
       max_sample_time: 0.005
-      max_sample_num: 2000
+      # Samples generated per graph, allocated to region valuation cells in
+      # proportion to the sum of (1 - region value) over their voxels in the box.
+      max_sample_num: 50
       max_raw_path: 300
       max_raw_path2: 25
       short_cut_num: 1

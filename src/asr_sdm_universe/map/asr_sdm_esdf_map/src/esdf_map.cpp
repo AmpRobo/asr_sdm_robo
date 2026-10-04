@@ -829,7 +829,6 @@ void ESDFMap::updateRegionValuation()
         Eigen::Vector3d gradient_sum = Eigen::Vector3d::Zero();
         Eigen::Matrix3d tensor_sum = Eigen::Matrix3d::Zero();
         double weight_sum = 0.0;
-        int valid_num = 0;
 
         for (id(0) = begin(0); id(0) < end(0); ++id(0))
           for (id(1) = begin(1); id(1) < end(1); ++id(1))
@@ -849,7 +848,6 @@ void ESDFMap::updateRegionValuation()
               gradient_sum += weight * direction;
               tensor_sum += weight * direction * direction.transpose();
               weight_sum += weight;
-              ++valid_num;
             }
 
         const int address = toRegionAddress(region_id);
@@ -871,7 +869,7 @@ void ESDFMap::updateRegionValuation()
         md_.region_tensor_eigenvalues_[address] = eigenvalues;
         md_.region_tensor_eigenvectors_[address] = solver.eigenvectors();
 
-        /* ========== region score: mean weight * normalized eigenvalue entropy ========== */
+        /* ========== region score: normalized eigenvalue entropy ========== */
         // The eigenvalues of T sum to 1; rounding can leave them slightly negative,
         // and 0 * log(0) is taken as 0.
         double entropy = 0.0;
@@ -881,7 +879,7 @@ void ESDFMap::updateRegionValuation()
         }
         entropy /= std::log(3.0);
 
-        md_.region_valuation_buffer_[address] = weight_sum / valid_num * entropy;
+        md_.region_valuation_buffer_[address] = entropy;
       }
 }
 
