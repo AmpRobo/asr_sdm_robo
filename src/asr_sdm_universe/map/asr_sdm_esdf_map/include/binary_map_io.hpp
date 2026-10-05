@@ -48,6 +48,12 @@ bool readOccupancy(
 bool readEsdf(
   const std::string & path, EsdfData & data, std::string & error);
 
+bool writeOccupancy(
+  const std::string & path, const OccupancyData & data, std::string & error);
+
+bool writeEsdf(
+  const std::string & path, const EsdfData & data, std::string & error);
+
 }  // namespace asr_sdm_esdf_map::binary_map
 
 #endif  // ASR_SDM_ESDF_MAP__BINARY_MAP_IO_HPP_

@@ -16,6 +16,7 @@
 #include <sensor_msgs/msg/point_cloud.hpp>
 #include <sensor_msgs/msg/point_cloud2.hpp>
 
+#include <atomic>
 #include <cmath>
 #include <cstddef>
 #include <iostream>
@@ -55,6 +56,11 @@ struct MappingParameters {
   string preload_occupancy_filename_;
   string preload_esdf_filename_;
   double preload_source_resolution_;
+
+  /* shutdown snapshot, stored next to asr_sdm_log_collector run logs */
+  bool save_on_shutdown_{false};
+  string save_map_directory_;
+  string save_frame_id_;
 
   /* camera parameters */
   double cx_, cy_, fx_, fy_;
@@ -151,7 +157,12 @@ class ESDFMap
 {
 public:
   ESDFMap() = default;
-  ~ESDFMap() = default;
+  ~ESDFMap();
+
+  ESDFMap(const ESDFMap &) = delete;
+  ESDFMap & operator=(const ESDFMap &) = delete;
+  ESDFMap(ESDFMap &&) = delete;
+  ESDFMap & operator=(ESDFMap &&) = delete;
 
   enum { INVALID_IDX = -10000 };
 
@@ -202,6 +213,8 @@ public:
   bool loadPreloadedMaps();
   bool loadOccupancyBinary(const std::string & path, std::string & status);
   bool loadEsdfBinary(const std::string & path, std::string & status);
+  // Writes occupancy.bin and esdf.bin. Empty directory uses save_map_directory.
+  bool saveMaps(const std::string & directory = std::string());
   void getRegion(Eigen::Vector3d & ori, Eigen::Vector3d & size);
   double getResolution();
   Eigen::Vector3d getOrigin();
@@ -250,6 +263,10 @@ private:
   void raycastProcess();
   void clearAndInflateLocalMap();
   void rebuildEsdfFromOccupancy();
+  void saveMapsOnShutdown();
+  std::string expandConfiguredPath(const std::string & path) const;
+  std::string resolveSaveDirectory() const;
+  void reportSaveStatus(bool warning, const std::string & message) const;
   bool setPreloadedOccupiedVoxel(
     const Eigen::Vector3i & target_id, std::size_t & inserted_target_voxels);
   bool insertPreloadedSourceVoxel(
@@ -286,6 +303,7 @@ private:
   default_random_engine eng_;
 
   bool preloaded_occupancy_grid_matches_target_{false};
+  std::atomic<bool> saved_on_shutdown_{false};
 };
 
 /* ============================== definition of inline function

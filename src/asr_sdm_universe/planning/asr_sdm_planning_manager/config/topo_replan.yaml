@@ -64,6 +64,10 @@
       simulation_odom_topic: "/visual_slam/odom"
       # Enable both simulation point-cloud and odometry subscriptions.
       enable_simulation_cloud_odom: true
+      # On Ctrl-C, write occupancy.bin and esdf.bin next to the log collector
+      # run files (~/log/vehicle/latest when the collector is running).
+      save_on_shutdown: true
+      save_map_directory: "~/log/vehicle"
 
     manager:
       max_vel: 0.4

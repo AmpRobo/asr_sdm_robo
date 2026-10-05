@@ -27,12 +27,16 @@
 #include <ament_index_cpp/get_package_share_directory.hpp>
 
 #include <algorithm>
+#include <cctype>
 #include <chrono>
 #include <cmath>
+#include <cstdio>
+#include <cstdlib>
 #include <filesystem>
 #include <functional>
 #include <limits>
 #include <stdexcept>
+#include <system_error>
 #include <rmw/qos_profiles.h>
 
 namespace
@@ -127,6 +131,9 @@ void ESDFMap::initMap(const std::shared_ptr<rclcpp::Node> & nh)
   node_->declare_parameter("esdf_map.preload_occupancy_filename", string("occupancy.bin"));
   node_->declare_parameter("esdf_map.preload_esdf_filename", string("esdf.bin"));
   node_->declare_parameter("esdf_map.preload_source_resolution", -1.0);
+  node_->declare_parameter("esdf_map.save_on_shutdown", true);
+  node_->declare_parameter("esdf_map.save_map_directory", string("~/log/vehicle"));
+  node_->declare_parameter("esdf_map.frame_id", string("world"));
 
   mp_.resolution_ = node_->get_parameter("esdf_map.resolution").as_double();
   mp_.region_valuation_resolution_ =
@@ -183,6 +190,9 @@ void ESDFMap::initMap(const std::shared_ptr<rclcpp::Node> & nh)
     node_->get_parameter("esdf_map.preload_esdf_filename").as_string();
   mp_.preload_source_resolution_ =
     node_->get_parameter("esdf_map.preload_source_resolution").as_double();
+  mp_.save_on_shutdown_ = node_->get_parameter("esdf_map.save_on_shutdown").as_bool();
+  mp_.save_map_directory_ = node_->get_parameter("esdf_map.save_map_directory").as_string();
+  mp_.save_frame_id_ = node_->get_parameter("esdf_map.frame_id").as_string();
 
   if (!std::isfinite(mp_.resolution_) || mp_.resolution_ <= 0.0) {
     throw std::invalid_argument("esdf_map.resolution must be finite and positive.");
@@ -326,10 +336,211 @@ void ESDFMap::initMap(const std::shared_ptr<rclcpp::Node> & nh)
 
   loadPreloadedMaps();
 
+  if (mp_.save_on_shutdown_) {
+    RCLCPP_INFO(
+      node_->get_logger(),
+      "ESDF map will be saved on shutdown to %s (occupancy=%s, esdf=%s).",
+      resolveSaveDirectory().c_str(), mp_.preload_occupancy_filename_.c_str(),
+      mp_.preload_esdf_filename_.c_str());
+  }
+
   rand_noise_ = uniform_real_distribution<double>(-0.2, 0.2);
   rand_noise2_ = normal_distribution<double>(0, 0.2);
   random_device rd;
   eng_ = default_random_engine(rd());
+}
+
+ESDFMap::~ESDFMap()
+{
+  saveMapsOnShutdown();
+}
+
+std::string ESDFMap::expandConfiguredPath(const std::string & path) const
+{
+  std::string result;
+  result.reserve(path.size());
+  std::size_t index = 0;
+
+  const auto environment_value = [](const std::string & name) -> const char * {
+    const char * value = std::getenv(name.c_str());
+    return value != nullptr ? value : "";
+  };
+
+  if (path == "~" || path.rfind("~/", 0) == 0) {
+    result.append(environment_value("HOME"));
+    index = 1;
+  }
+
+  while (index < path.size()) {
+    if (path[index] != '$') {
+      result.push_back(path[index++]);
+      continue;
+    }
+    if (index + 1 >= path.size()) {
+      result.push_back(path[index++]);
+      continue;
+    }
+
+    const bool braced = path[index + 1] == '{';
+    const std::size_t name_start = braced ? index + 2 : index + 1;
+    std::size_t name_end = name_start;
+    if (braced) {
+      name_end = path.find('}', name_start);
+      if (name_end == std::string::npos) {
+        result.append(path, index, std::string::npos);
+        break;
+      }
+    } else {
+      while (name_end < path.size() &&
+        (std::isalnum(static_cast<unsigned char>(path[name_end])) != 0 ||
+         path[name_end] == '_'))
+      {
+        ++name_end;
+      }
+      if (name_end == name_start) {
+        result.push_back(path[index++]);
+        continue;
+      }
+    }
+
+    result.append(environment_value(path.substr(name_start, name_end - name_start)));
+    index = braced ? name_end + 1 : name_end;
+  }
+
+  return result;
+}
+
+std::string ESDFMap::resolveSaveDirectory() const
+{
+  const std::string expanded = expandConfiguredPath(mp_.save_map_directory_);
+  if (expanded.empty()) {
+    return {};
+  }
+
+  const std::filesystem::path base(expanded);
+  const std::filesystem::path latest = base / "latest";
+  std::error_code error;
+  if (std::filesystem::is_directory(latest, error)) {
+    return latest.string();
+  }
+  return base.string();
+}
+
+void ESDFMap::reportSaveStatus(const bool warning, const std::string & message) const
+{
+  if (node_) {
+    if (warning) {
+      RCLCPP_WARN(node_->get_logger(), "%s", message.c_str());
+    } else {
+      RCLCPP_INFO(node_->get_logger(), "%s", message.c_str());
+    }
+    return;
+  }
+
+  std::fprintf(stderr, "%s%s\n", warning ? "esdf_map warning: " : "esdf_map: ", message.c_str());
+}
+
+void ESDFMap::saveMapsOnShutdown()
+{
+  if (!mp_.save_on_shutdown_) {
+    return;
+  }
+  if (saved_on_shutdown_.exchange(true)) {
+    return;
+  }
+  saveMaps();
+}
+
+bool ESDFMap::saveMaps(const std::string & directory)
+{
+  const std::string save_directory =
+    directory.empty() ? resolveSaveDirectory() : expandConfiguredPath(directory);
+  if (save_directory.empty()) {
+    reportSaveStatus(true, "esdf_map: save directory is empty; skipping map snapshot.");
+    return false;
+  }
+  if (mp_.map_voxel_num_(0) <= 0 || mp_.map_voxel_num_(1) <= 0 || mp_.map_voxel_num_(2) <= 0) {
+    reportSaveStatus(true, "esdf_map: map is not initialized; skipping map snapshot.");
+    return false;
+  }
+
+  std::error_code error;
+  std::filesystem::create_directories(save_directory, error);
+  if (error) {
+    reportSaveStatus(
+      true, "esdf_map: failed to create save directory " + save_directory + ": " +
+        error.message());
+    return false;
+  }
+
+  asr_sdm_esdf_map::binary_map::OccupancyData occupancy;
+  asr_sdm_esdf_map::binary_map::EsdfData esdf;
+  occupancy.frame_id = mp_.save_frame_id_.empty() ? "world" : mp_.save_frame_id_;
+  esdf.frame_id = occupancy.frame_id;
+
+  const int voxel_count = getVoxelNum();
+  occupancy.occupied_centers.reserve(static_cast<std::size_t>(voxel_count / 8));
+  esdf.samples.reserve(static_cast<std::size_t>(voxel_count / 4));
+
+  for (int x = 0; x < mp_.map_voxel_num_(0); ++x) {
+    for (int y = 0; y < mp_.map_voxel_num_(1); ++y) {
+      for (int z = 0; z < mp_.map_voxel_num_(2); ++z) {
+        const Eigen::Vector3i id(x, y, z);
+        const int address = toAddress(id);
+        Eigen::Vector3d center;
+        indexToPos(id, center);
+
+        if (md_.occupancy_buffer_inflate_[address] == 1) {
+          occupancy.occupied_centers.push_back(center);
+        }
+
+        const double distance = md_.distance_buffer_all_[address];
+        if (std::isfinite(distance) && distance < 10000.0) {
+          asr_sdm_esdf_map::binary_map::EsdfSample sample;
+          sample.center = center;
+          sample.distance = distance;
+          esdf.samples.push_back(sample);
+        }
+      }
+    }
+  }
+
+  occupancy.record_count = occupancy.occupied_centers.size();
+  esdf.record_count = esdf.samples.size();
+
+  const std::string occupancy_filename = mp_.preload_occupancy_filename_.empty() ?
+    "occupancy.bin" : mp_.preload_occupancy_filename_;
+  const std::string esdf_filename = mp_.preload_esdf_filename_.empty() ?
+    "esdf.bin" : mp_.preload_esdf_filename_;
+  const std::filesystem::path occupancy_path =
+    std::filesystem::path(save_directory) / occupancy_filename;
+  const std::filesystem::path esdf_path =
+    std::filesystem::path(save_directory) / esdf_filename;
+
+  std::string occupancy_error;
+  const bool occupancy_written = asr_sdm_esdf_map::binary_map::writeOccupancy(
+    occupancy_path.string(), occupancy, occupancy_error);
+  if (!occupancy_written) {
+    reportSaveStatus(true, occupancy_error);
+  }
+
+  std::string esdf_error;
+  const bool esdf_written =
+    asr_sdm_esdf_map::binary_map::writeEsdf(esdf_path.string(), esdf, esdf_error);
+  if (!esdf_written) {
+    reportSaveStatus(true, esdf_error);
+  }
+
+  if (!occupancy_written || !esdf_written) {
+    return false;
+  }
+
+  reportSaveStatus(
+    false,
+    "esdf_map: saved occupancy.bin records=" + std::to_string(occupancy.record_count) +
+      " and esdf.bin records=" + std::to_string(esdf.record_count) +
+      " at resolution=" + std::to_string(mp_.resolution_) + " to " + save_directory);
+  return true;
 }
 
 bool ESDFMap::loadPreloadedMaps()

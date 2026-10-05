@@ -1,9 +1,11 @@
 #include "binary_map_io.hpp"
 
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <cstring>
 #include <fstream>
+#include <string>
 
 namespace asr_sdm_esdf_map::binary_map
 {
@@ -104,6 +106,56 @@ bool readHeader(
   return true;
 }
 
+bool writeHeader(
+  std::ofstream & stream, const char * magic, const uint32_t map_type,
+  const uint32_t floats_per_record, const uint64_t record_count,
+  const std::string & frame_id, const std::string & path, const std::string & map_name,
+  std::string & error)
+{
+  if (frame_id.size() > kMaxFrameIdLength) {
+    error = "invalid frame_id length while writing " + map_name + " binary: " + path;
+    return false;
+  }
+
+  BinaryHeader header{};
+  const std::size_t magic_length = std::min(std::strlen(magic), sizeof(header.magic));
+  std::memcpy(header.magic, magic, magic_length);
+  header.version = kBinaryVersion;
+  header.map_type = map_type;
+
+  const auto now = std::chrono::system_clock::now().time_since_epoch();
+  const auto nanoseconds =
+    std::chrono::duration_cast<std::chrono::nanoseconds>(now).count();
+  header.stamp_sec = nanoseconds / 1000000000LL;
+  header.stamp_nanosec = static_cast<uint32_t>(nanoseconds % 1000000000LL);
+  header.floats_per_record = floats_per_record;
+  header.record_count = record_count;
+  header.frame_id_length = static_cast<uint32_t>(frame_id.size());
+
+  stream.write(header.magic, sizeof(header.magic));
+  stream.write(reinterpret_cast<const char *>(&header.version), sizeof(header.version));
+  stream.write(reinterpret_cast<const char *>(&header.map_type), sizeof(header.map_type));
+  stream.write(reinterpret_cast<const char *>(&header.stamp_sec), sizeof(header.stamp_sec));
+  stream.write(
+    reinterpret_cast<const char *>(&header.stamp_nanosec), sizeof(header.stamp_nanosec));
+  stream.write(
+    reinterpret_cast<const char *>(&header.floats_per_record),
+    sizeof(header.floats_per_record));
+  stream.write(
+    reinterpret_cast<const char *>(&header.record_count), sizeof(header.record_count));
+  stream.write(
+    reinterpret_cast<const char *>(&header.frame_id_length), sizeof(header.frame_id_length));
+  if (!frame_id.empty()) {
+    stream.write(frame_id.data(), static_cast<std::streamsize>(frame_id.size()));
+  }
+
+  if (!stream.good()) {
+    error = "failed to write " + map_name + " binary header: " + path;
+    return false;
+  }
+  return true;
+}
+
 }  // namespace
 
 bool readOccupancy(
@@ -190,6 +242,90 @@ bool readEsdf(const std::string & path, EsdfData & data, std::string & error)
     data.samples.push_back(sample);
   }
 
+  return true;
+}
+
+bool writeOccupancy(
+  const std::string & path, const OccupancyData & data, std::string & error)
+{
+  std::ofstream stream(path, std::ios::binary);
+  if (!stream.is_open()) {
+    error = "failed to open occupancy binary file for writing: " + path;
+    return false;
+  }
+
+  const uint64_t record_count = static_cast<uint64_t>(data.occupied_centers.size());
+  if (record_count > kMaxOccupancyRecords) {
+    error = "too many occupancy records to write: " + std::to_string(record_count);
+    return false;
+  }
+
+  if (!writeHeader(
+        stream, kOccupancyMagic, kOccupancyMapType, 3U, record_count, data.frame_id, path,
+        "occupancy", error))
+  {
+    return false;
+  }
+
+  for (const Eigen::Vector3d & center : data.occupied_centers) {
+    const float xyz[3] = {
+      static_cast<float>(center.x()),
+      static_cast<float>(center.y()),
+      static_cast<float>(center.z())};
+    stream.write(reinterpret_cast<const char *>(xyz), sizeof(xyz));
+    if (!stream.good()) {
+      error = "failed while writing occupancy binary: " + path;
+      return false;
+    }
+  }
+
+  stream.flush();
+  if (!stream.good()) {
+    error = "failed to flush occupancy binary: " + path;
+    return false;
+  }
+  return true;
+}
+
+bool writeEsdf(const std::string & path, const EsdfData & data, std::string & error)
+{
+  std::ofstream stream(path, std::ios::binary);
+  if (!stream.is_open()) {
+    error = "failed to open ESDF binary file for writing: " + path;
+    return false;
+  }
+
+  const uint64_t record_count = static_cast<uint64_t>(data.samples.size());
+  if (record_count > kMaxEsdfRecords) {
+    error = "too many ESDF records to write: " + std::to_string(record_count);
+    return false;
+  }
+
+  if (!writeHeader(
+        stream, kEsdfMagic, kEsdfMapType, 4U, record_count, data.frame_id, path, "ESDF",
+        error))
+  {
+    return false;
+  }
+
+  for (const EsdfSample & sample : data.samples) {
+    const float xyzi[4] = {
+      static_cast<float>(sample.center.x()),
+      static_cast<float>(sample.center.y()),
+      static_cast<float>(sample.center.z()),
+      static_cast<float>(sample.distance)};
+    stream.write(reinterpret_cast<const char *>(xyzi), sizeof(xyzi));
+    if (!stream.good()) {
+      error = "failed while writing ESDF binary: " + path;
+      return false;
+    }
+  }
+
+  stream.flush();
+  if (!stream.good()) {
+    error = "failed to flush ESDF binary: " + path;
+    return false;
+  }
   return true;
 }
 

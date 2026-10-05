@@ -85,6 +85,14 @@ esdf_map:
       # world-frame voxel centers but do not store their voxel size.
       preload_source_resolution: 0.15
 
+      # On Ctrl-C / process shutdown, write occupancy.bin and esdf.bin into the
+      # same directory asr_sdm_log_collector uses for this run. If
+      # <save_map_directory>/latest exists (the collector's per-run symlink),
+      # files go there; otherwise they go in save_map_directory itself.
+      save_on_shutdown: true
+      save_map_directory: "~/log/vehicle"
+      frame_id: "world"
+
     # Visualization belongs to the test executable, not the reusable library.
     test:
       frame_id: "world"
