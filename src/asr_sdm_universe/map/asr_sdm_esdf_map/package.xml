@@ -20,6 +20,7 @@
   <depend>cv_bridge</depend>
   <depend>message_filters</depend>
   <depend>pcl_conversions</depend>
+  <depend>asr_sdm_log_collector</depend>
 
   <exec_depend>ament_index_python</exec_depend>
   <exec_depend>launch</exec_depend>

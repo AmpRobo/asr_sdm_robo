@@ -1,4 +1,5 @@
 #include <asr_sdm_esdf_map/esdf_map.hpp>
+#include <asr_sdm_log_collector/log_client.hpp>
 
 #include <cv_bridge/cv_bridge.hpp>
 #include <geometry_msgs/msg/point.hpp>
@@ -33,6 +34,34 @@
 #include <unordered_set>
 #include <utility>
 #include <vector>
+
+namespace
+{
+
+class LogThrottle
+{
+public:
+  explicit LogThrottle(const std::chrono::milliseconds period)
+  : period_(period)
+  {
+  }
+
+  bool due()
+  {
+    const auto now = std::chrono::steady_clock::now();
+    if (last_.time_since_epoch().count() != 0 && now - last_ < period_) {
+      return false;
+    }
+    last_ = now;
+    return true;
+  }
+
+private:
+  std::chrono::milliseconds period_;
+  std::chrono::steady_clock::time_point last_{};
+};
+
+}  // namespace
 
 class ESDFMapTestNode : public rclcpp::Node
 {
@@ -100,7 +129,7 @@ public:
 
     double period = get_parameter("test.publish_period").as_double();
     if (!std::isfinite(period) || period <= 0.0) {
-      RCLCPP_WARN(get_logger(), "test.publish_period must be positive; using 0.5 s.");
+      SPDLOG_WARN( "test.publish_period must be positive; using 0.5 s.");
       period = 0.5;
     }
     vis_timer_ = create_wall_timer(
@@ -282,9 +311,11 @@ private:
       return;
     }
     if (orientation.norm() < 1e-9) {
-      RCLCPP_WARN_THROTTLE(
-        get_logger(), *get_clock(), 3000,
-        "Ignoring odometry visualization with an invalid zero-norm quaternion.");
+      static LogThrottle throttle{std::chrono::milliseconds(3000)};
+      if (throttle.due()) {
+        SPDLOG_WARN( 
+          "Ignoring odometry visualization with an invalid zero-norm quaternion.");
+      }
       return;
     }
     orientation.normalize();
@@ -401,10 +432,12 @@ private:
   void pointCloud2Callback(const sensor_msgs::msg::PointCloud2::ConstSharedPtr msg)
   {
     if (!has_pointcloud_odom_) {
-      RCLCPP_WARN_THROTTLE(
-        get_logger(), *get_clock(), 3000,
-        "Ignoring %s until the first odometry message arrives on %s.",
-        cloud_topic_.c_str(), odom_topic_.c_str());
+      static LogThrottle throttle{std::chrono::milliseconds(3000)};
+      if (throttle.due()) {
+        SPDLOG_WARN( 
+          "Ignoring {} until the first odometry message arrives on {}.",
+          cloud_topic_, odom_topic_);
+      }
       return;
     }
 
@@ -452,9 +485,10 @@ private:
       return;
     }
     if (camera_orientation.norm() < 1e-9) {
-      RCLCPP_WARN_THROTTLE(
-        get_logger(), *get_clock(), 3000,
-        "Ignoring depth frame with an invalid zero-norm odometry quaternion.");
+      static LogThrottle throttle{std::chrono::milliseconds(3000)};
+      if (throttle.due()) {
+        SPDLOG_WARN( "Ignoring depth frame with an invalid zero-norm odometry quaternion.");
+      }
       return;
     }
     camera_orientation.normalize();
@@ -463,17 +497,20 @@ private:
     try {
       cv_image = cv_bridge::toCvShare(image);
     } catch (const cv_bridge::Exception & error) {
-      RCLCPP_ERROR_THROTTLE(
-        get_logger(), *get_clock(), 3000,
-        "Failed to decode depth image: %s", error.what());
+      static LogThrottle throttle{std::chrono::milliseconds(3000)};
+      if (throttle.due()) {
+        SPDLOG_ERROR( "Failed to decode depth image: {}", error.what());
+      }
       return;
     }
 
     const cv::Mat & depth = cv_image->image;
     if (depth.type() != CV_16UC1 && depth.type() != CV_32FC1) {
-      RCLCPP_ERROR_THROTTLE(
-        get_logger(), *get_clock(), 3000,
-        "Unsupported depth image type %d; expected 16UC1 or 32FC1.", depth.type());
+      static LogThrottle throttle{std::chrono::milliseconds(3000)};
+      if (throttle.due()) {
+        SPDLOG_ERROR( 
+          "Unsupported depth image type {}; expected 16UC1 or 32FC1.", depth.type());
+      }
       return;
     }
 
@@ -488,9 +525,10 @@ private:
     const int margin = use_depth_filter_ ? depth_filter_margin_ : 0;
     const int step = use_depth_filter_ ? skip_pixel_ : 1;
     if (depth.rows <= 2 * margin || depth.cols <= 2 * margin) {
-      RCLCPP_WARN_THROTTLE(
-        get_logger(), *get_clock(), 3000,
-        "Depth image is smaller than the configured filter margins.");
+      static LogThrottle throttle{std::chrono::milliseconds(3000)};
+      if (throttle.due()) {
+        SPDLOG_WARN( "Depth image is smaller than the configured filter margins.");
+      }
       return;
     }
 
@@ -661,41 +699,36 @@ private:
 
     if (!reported_initial_map_) {
       reported_initial_map_ = true;
-      RCLCPP_INFO(
-        get_logger(),
-        "Test outputs: raw_live_voxels=%zu (source=%s; preload excluded), "
-        "inflated_voxels=%zu, occupied_map_voxels=%zu, esdf_voxels=%zu, "
-        "raw_esdf_range=[%.3f, %.3f] m, "
+      SPDLOG_INFO( 
+        "Test outputs: raw_live_voxels={} (source={}; preload excluded), "
+        "inflated_voxels={}, occupied_map_voxels={}, esdf_voxels={}, "
+        "raw_esdf_range=[{:.3f}, {:.3f}] m, "
         "esdf_distance_intensity=metres, esdf_visualization_intensity=[0, 1], "
-        "marker_voxel_resolution=%.3f m (from ESDFMap), "
-        "region_origin=(%.3f, %.3f, %.3f), region_size=(%.3f, %.3f, %.3f)",
+        "marker_voxel_resolution={:.3f} m (from ESDFMap), "
+        "region_origin=({:.3f}, {:.3f}, {:.3f}), region_size=({:.3f}, {:.3f}, {:.3f})",
         raw_occupancy_.size(),
-        raw_occupancy_source_.empty() ? "no live input" : raw_occupancy_source_.c_str(),
+        raw_occupancy_source_.empty() ? "no live input" : raw_occupancy_source_,
         inflated_occupancy.size(), occupied_map.points.size(), esdf_3d.size(),
         esdf_3d.empty() ? 0.0 : min_esdf_distance,
         esdf_3d.empty() ? 0.0 : max_esdf_distance,
         resolution, origin.x(), origin.y(), origin.z(), size.x(), size.y(), size.z());
 
       if (inflated_occupancy.empty()) {
-        RCLCPP_ERROR(
-          get_logger(),
+        SPDLOG_ERROR( 
           "No inflated occupied voxels are available. Check live inputs or the "
           "occupancy.bin path/header/map bounds diagnostics.");
       }
       if (occupied_map.points.empty()) {
-        RCLCPP_ERROR(
-          get_logger(),
+        SPDLOG_ERROR( 
           "The occupied_map CUBE_LIST is empty although the publisher is active.");
       }
       if (esdf_3d.empty()) {
-        RCLCPP_ERROR(
-          get_logger(),
+        SPDLOG_ERROR( 
           "No valid ESDF voxels are available. Check live inputs or the "
           "esdf.bin path/header/map bounds diagnostics.");
       }
       if (!enable_depth_odom_ && !enable_pointcloud_odom_) {
-        RCLCPP_INFO(
-          get_logger(),
+        SPDLOG_INFO( 
           "/map/esdf_map/cloud is intentionally empty in preload-only mode; binary occupancy "
           "is published only on /map/esdf_map/occupancy_inflate and /map/esdf_map/occupied_map.");
       }
@@ -753,9 +786,13 @@ private:
 int main(int argc, char ** argv)
 {
   rclcpp::init(argc, argv);
-  auto node = std::make_shared<ESDFMapTestNode>();
-  node->initialize();
-  rclcpp::spin(node);
+  asr_sdm::log::initialize("esdf_map");
+  {
+    auto node = std::make_shared<ESDFMapTestNode>();
+    node->initialize();
+    rclcpp::spin(node);
+  }
+  asr_sdm::log::shutdown();
   rclcpp::shutdown();
   return 0;
 }

@@ -25,12 +25,12 @@
 #include "binary_map_io.hpp"
 
 #include <ament_index_cpp/get_package_share_directory.hpp>
+#include <asr_sdm_log_collector/log_client.hpp>
 
 #include <algorithm>
 #include <cctype>
 #include <chrono>
 #include <cmath>
-#include <cstdio>
 #include <cstdlib>
 #include <filesystem>
 #include <functional>
@@ -218,11 +218,11 @@ void ESDFMap::initMap(const std::shared_ptr<rclcpp::Node> & nh)
   mp_.min_occupancy_log_ = logit(mp_.p_occ_);
   mp_.unknown_flag_ = 0.01;
 
-  RCLCPP_INFO(node_->get_logger(), "hit: %f", mp_.prob_hit_log_);
-  RCLCPP_INFO(node_->get_logger(), "miss: %f", mp_.prob_miss_log_);
-  RCLCPP_INFO(node_->get_logger(), "min log: %f", mp_.clamp_min_log_);
-  RCLCPP_INFO(node_->get_logger(), "max: %f", mp_.clamp_max_log_);
-  RCLCPP_INFO(node_->get_logger(), "thresh log: %f", mp_.min_occupancy_log_);
+  SPDLOG_INFO( "hit: {}", mp_.prob_hit_log_);
+  SPDLOG_INFO( "miss: {}", mp_.prob_miss_log_);
+  SPDLOG_INFO( "min log: {}", mp_.clamp_min_log_);
+  SPDLOG_INFO( "max: {}", mp_.clamp_max_log_);
+  SPDLOG_INFO( "thresh log: {}", mp_.min_occupancy_log_);
 
   for (int i = 0; i < 3; ++i) {
     mp_.map_voxel_num_(i) = ceil(mp_.map_size_(i) / mp_.resolution_);
@@ -317,9 +317,7 @@ void ESDFMap::initMap(const std::shared_ptr<rclcpp::Node> & nh)
     esdf_timer_ = node_->create_wall_timer(
       update_period, std::bind(&ESDFMap::updateESDFCallback, this));
   } else {
-    RCLCPP_INFO(
-      node_->get_logger(),
-      "Live map inputs are disabled; running in preload-only mode.");
+    SPDLOG_INFO( "Live map inputs are disabled; running in preload-only mode.");
   }
 
   md_.occ_need_update_ = false;
@@ -337,11 +335,9 @@ void ESDFMap::initMap(const std::shared_ptr<rclcpp::Node> & nh)
   loadPreloadedMaps();
 
   if (mp_.save_on_shutdown_) {
-    RCLCPP_INFO(
-      node_->get_logger(),
-      "ESDF map will be saved on shutdown to %s (occupancy=%s, esdf=%s).",
-      resolveSaveDirectory().c_str(), mp_.preload_occupancy_filename_.c_str(),
-      mp_.preload_esdf_filename_.c_str());
+    SPDLOG_INFO( 
+      "ESDF map will be saved on shutdown to {} (occupancy={}, esdf={}).",
+      resolveSaveDirectory(), mp_.preload_occupancy_filename_, mp_.preload_esdf_filename_);
   }
 
   rand_noise_ = uniform_real_distribution<double>(-0.2, 0.2);
@@ -428,16 +424,16 @@ std::string ESDFMap::resolveSaveDirectory() const
 
 void ESDFMap::reportSaveStatus(const bool warning, const std::string & message) const
 {
-  if (node_) {
-    if (warning) {
-      RCLCPP_WARN(node_->get_logger(), "%s", message.c_str());
-    } else {
-      RCLCPP_INFO(node_->get_logger(), "%s", message.c_str());
-    }
-    return;
+  if (warning) {
+    SPDLOG_WARN( "{}", message);
+  } else {
+    SPDLOG_INFO( "{}", message);
   }
+}
 
-  std::fprintf(stderr, "%s%s\n", warning ? "esdf_map warning: " : "esdf_map: ", message.c_str());
+void ESDFMap::logInvalidOccupancyValue() const
+{
+  SPDLOG_ERROR( "occ value error!");
 }
 
 void ESDFMap::saveMapsOnShutdown()
@@ -546,7 +542,7 @@ bool ESDFMap::saveMaps(const std::string & directory)
 bool ESDFMap::loadPreloadedMaps()
 {
   if (mp_.preload_map_directory_.empty()) {
-    RCLCPP_INFO(node_->get_logger(), "esdf_map preload disabled (empty preload_map_directory).");
+    SPDLOG_INFO( "esdf_map preload disabled (empty preload_map_directory).");
     return false;
   }
 
@@ -560,18 +556,16 @@ bool ESDFMap::loadPreloadedMaps()
               ament_index_cpp::get_package_share_directory("asr_sdm_esdf_map")) /
             dir;
     } catch (const std::exception & e) {
-      RCLCPP_WARN(
-        node_->get_logger(), "Failed to resolve package share directory for preload maps: %s",
-        e.what());
+      SPDLOG_WARN( 
+        "Failed to resolve package share directory for preload maps: {}", e.what());
     }
   }
 
   const std::string occupancy_path = (dir / mp_.preload_occupancy_filename_).string();
   const std::string esdf_path = (dir / mp_.preload_esdf_filename_).string();
 
-  RCLCPP_INFO(
-    node_->get_logger(), "Preloading map files: occupancy=%s, esdf=%s",
-    occupancy_path.c_str(), esdf_path.c_str());
+  SPDLOG_INFO( 
+    "Preloading map files: occupancy={}, esdf={}", occupancy_path, esdf_path);
 
   // Start from an empty local update region and grow it to cover the voxels that
   // are actually populated by the preloaded map.
@@ -582,17 +576,16 @@ bool ESDFMap::loadPreloadedMaps()
   std::string occupancy_status;
   const bool occupancy_loaded = loadOccupancyBinary(occupancy_path, occupancy_status);
   if (occupancy_loaded) {
-    RCLCPP_INFO(node_->get_logger(), "%s", occupancy_status.c_str());
+    SPDLOG_INFO( "{}", occupancy_status);
   } else {
-    RCLCPP_WARN(node_->get_logger(), "%s", occupancy_status.c_str());
+    SPDLOG_WARN( "{}", occupancy_status);
   }
 
   bool esdf_available = false;
   if (occupancy_loaded && !preloaded_occupancy_grid_matches_target_) {
-    RCLCPP_INFO(
-      node_->get_logger(),
+    SPDLOG_INFO( 
       "Source occupancy grid differs from the target grid. The preloaded ESDF file is ignored "
-      "and the ESDF is rebuilt at target resolution %.6f m.",
+      "and the ESDF is rebuilt at target resolution {:.6f} m.",
       mp_.resolution_);
     rebuildEsdfFromOccupancy();
     esdf_available = true;
@@ -600,13 +593,12 @@ bool ESDFMap::loadPreloadedMaps()
     std::string esdf_status;
     esdf_available = loadEsdfBinary(esdf_path, esdf_status);
     if (esdf_available) {
-      RCLCPP_INFO(node_->get_logger(), "%s", esdf_status.c_str());
+      SPDLOG_INFO( "{}", esdf_status);
     } else {
-      RCLCPP_WARN(node_->get_logger(), "%s", esdf_status.c_str());
+      SPDLOG_WARN( "{}", esdf_status);
       if (occupancy_loaded) {
-        RCLCPP_INFO(
-          node_->get_logger(),
-          "Rebuilding ESDF from the loaded occupancy map at target resolution %.6f m.",
+        SPDLOG_INFO( 
+          "Rebuilding ESDF from the loaded occupancy map at target resolution {:.6f} m.",
           mp_.resolution_);
         rebuildEsdfFromOccupancy();
         esdf_available = true;
@@ -947,7 +939,7 @@ void ESDFMap::updateESDF3d()
         } else if (md_.occupancy_buffer_inflate_[idx] == 1) {
           md_.occupancy_buffer_neg[idx] = 0;
         } else {
-          RCLCPP_ERROR(node_->get_logger(), "what?");
+          SPDLOG_ERROR( "unexpected occupancy_buffer_inflate_ value");
         }
       }
 
@@ -1490,8 +1482,8 @@ void ESDFMap::updateOccupancyCallback()
   md_.max_fuse_time_ = max(md_.max_fuse_time_, (t2 - t1).seconds());
 
   if (mp_.show_occ_time_)
-    RCLCPP_WARN(
-      node_->get_logger(), "Fusion: cur t = %lf, avg t = %lf, max t = %lf", (t2 - t1).seconds(),
+    SPDLOG_WARN( 
+      "Fusion: cur t = {}, avg t = {}, max t = {}", (t2 - t1).seconds(),
       md_.fuse_time_ / md_.update_num_, md_.max_fuse_time_);
 
   md_.occ_need_update_ = false;
@@ -1514,8 +1506,8 @@ void ESDFMap::updateESDFCallback()
   md_.max_esdf_time_ = max(md_.max_esdf_time_, (t2 - t1).seconds());
 
   if (mp_.show_esdf_time_)
-    RCLCPP_WARN(
-      node_->get_logger(), "ESDF: cur t = %lf, avg t = %lf, max t = %lf", (t2 - t1).seconds(),
+    SPDLOG_WARN( 
+      "ESDF: cur t = {}, avg t = {}, max t = {}", (t2 - t1).seconds(),
       md_.esdf_time_ / md_.update_num_, md_.max_esdf_time_);
 
   md_.esdf_need_update_ = false;

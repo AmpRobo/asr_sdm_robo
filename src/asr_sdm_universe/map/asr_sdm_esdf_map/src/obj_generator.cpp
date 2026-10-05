@@ -31,6 +31,7 @@
 #include <rclcpp/rclcpp.hpp>
 
 #include <asr_sdm_esdf_map/linear_obj_model.hpp>
+#include <asr_sdm_log_collector/log_client.hpp>
 #include <visualization_msgs/msg/marker.hpp>
 
 using namespace std;
@@ -65,6 +66,7 @@ void visualizeObj(int id);
 
 int main(int argc, char **argv) {
   rclcpp::init(argc, argv);
+  asr_sdm::log::initialize("obj_generator");
   auto node = std::make_shared<rclcpp::Node>("dynamic_obj");
   g_node = node;
 
@@ -107,7 +109,7 @@ int main(int argc, char **argv) {
       updateCallback);
   (void)update_timer;
 
-  cout << "[dynamic]: initialize with " + to_string(obj_num) << " moving obj." << endl;
+  SPDLOG_INFO("[dynamic]: initialize with {} moving obj.", obj_num);
   std::this_thread::sleep_for(std::chrono::seconds(1));
 
   rand_color = uniform_real_distribution<double>(0.0, 1.0);
@@ -146,6 +148,7 @@ int main(int argc, char **argv) {
   time_change = node->now();
 
   rclcpp::spin(node);
+  asr_sdm::log::shutdown();
   rclcpp::shutdown();
 
   return 0;

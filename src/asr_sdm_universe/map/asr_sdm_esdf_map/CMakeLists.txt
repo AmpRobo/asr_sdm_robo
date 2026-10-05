@@ -31,6 +31,7 @@ find_package(pcl_conversions REQUIRED)
 find_package(PCL REQUIRED)
 find_package(OpenCV REQUIRED)
 find_package(Eigen3 REQUIRED)
+find_package(asr_sdm_log_collector REQUIRED)
 
 add_library(${PROJECT_NAME} SHARED
   src/binary_map_io.cpp
@@ -63,6 +64,7 @@ target_link_libraries(${PROJECT_NAME}
   Eigen3::Eigen
   ${PCL_LIBRARIES}
   ${OpenCV_LIBS}
+  asr_sdm_log_collector::asr_sdm_log_client
 )
 
 add_executable(obj_generator
@@ -82,6 +84,7 @@ ament_target_dependencies(obj_generator
 
 target_link_libraries(obj_generator
   Eigen3::Eigen
+  asr_sdm_log_collector::asr_sdm_log_client
 )
 
 add_executable(esdf_map_test
@@ -108,6 +111,7 @@ ament_target_dependencies(esdf_map_test
 target_link_libraries(esdf_map_test
   ${PROJECT_NAME}
   ${PCL_LIBRARIES}
+  asr_sdm_log_collector::asr_sdm_log_client
 )
 
 # Export only the reusable library. Executables must not be part of the
@@ -151,6 +155,7 @@ ament_export_dependencies(
   Eigen3
   PCL
   OpenCV
+  asr_sdm_log_collector
 )
 
 ament_package()

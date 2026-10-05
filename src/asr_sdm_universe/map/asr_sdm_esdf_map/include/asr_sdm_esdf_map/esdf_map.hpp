@@ -19,7 +19,6 @@
 #include <atomic>
 #include <cmath>
 #include <cstddef>
-#include <iostream>
 #include <memory>
 #include <queue>
 #include <random>
@@ -267,6 +266,7 @@ private:
   std::string expandConfiguredPath(const std::string & path) const;
   std::string resolveSaveDirectory() const;
   void reportSaveStatus(bool warning, const std::string & message) const;
+  void logInvalidOccupancyValue() const;
   bool setPreloadedOccupiedVoxel(
     const Eigen::Vector3i & target_id, std::size_t & inserted_target_voxels);
   bool insertPreloadedSourceVoxel(
@@ -445,7 +445,7 @@ inline void ESDFMap::setOccupied(Eigen::Vector3d pos) {
 
 inline void ESDFMap::setOccupancy(Eigen::Vector3d pos, double occ) {
   if (occ != 1 && occ != 0) {
-    cout << "occ value error!" << endl;
+    logInvalidOccupancyValue();
     return;
   }
 

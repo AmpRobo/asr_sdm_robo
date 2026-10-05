@@ -24,8 +24,9 @@
 
 
 #include <Eigen/Eigen>
+#include <asr_sdm_log_collector/log_client.hpp>
 #include <cmath>
-#include <iostream>
+#include <stdexcept>
 #include <asr_sdm_esdf_map/raycast.hpp>
 
 int signum(int x) {
@@ -217,7 +218,7 @@ void Raycast(const Eigen::Vector3d& start, const Eigen::Vector3d& end, const Eig
       if (dist > maxDist) return;
 
       if (output->size() > 1500) {
-        std::cerr << "Error, too many racyast voxels." << std::endl;
+        SPDLOG_ERROR("Error, too many raycast voxels.");
         throw std::out_of_range("Too many raycast voxels");
       }
     }
