@@ -1148,3 +1148,110 @@ Live 与录制行为：
 9. 从已打开 bag 的字段中选择曲线，设置 **Start Time**、**End Time**、**Current Time** 和 **Speed**，然后点击 **Play**。
 
    ![Plot Recorded 回放](docs/images/plot_recorded_playback.png)
+
+## 版本记录
+
+以下内容合并自 `asr_sdm_monitor.v2.md` 至 `asr_sdm_monitor.v6.md`。上文描述的是当前行为；本节保留各版本的增量说明。
+
+### v2
+
+#### 增加
+
+- `video_monitor.py` 最多可以同时监测 2 个节点，根据 UI 动态调整监测 0–2 个 `/perception*` topic。
+- UI 两个窗口默认是 None，通过下拉菜单选择需要的 `/perception*`。
+
+#### 修改
+
+- 修改了 UI 的 Warning。
+- 运行过程中 `/diagnostics` 话题大约 5 分钟后会丢失：`topic list` 没有输出，`node list` 也没有。在 `.bashrc` 中加入下面两行后，连续监测 2 小时正常。是否适合长期写进 `.bashrc` 仍未确认。
+
+```bash
+export RMW_IMPLEMENTATION=rmw_cyclonedds_cpp
+export ROS_AUTOMATIC_DISCOVERY_RANGE=LOCALHOST
+```
+
+- 标题栏 ASR SDM Monitor 随主题颜色改变。
+- CPU / Memory / HDD / Net / NTP 随页面宽度自动伸缩。
+
+### v3
+
+#### 增加
+
+- 标题栏右上角 Minimize / Restore Down / Close 三个按钮。
+
+#### 修改
+
+- Video Window 灰色框宽度缩放问题。
+
+### v4
+
+#### 增加
+
+- Video 可选窗口数量，1 / 2 / 3 / 4 任选，默认为 2 个窗口。
+- 已测试稳定渲染图像 0.5 小时。
+
+#### 修改
+
+- 删除 `ros2-system-monitor` 的视频监视功能，在 `asr_sdm_monitor` package 中实现。
+
+### v5
+
+#### 增加
+
+- Plot 页面（以 IMU 的速度和加速度数据为例）：
+  - 用户在 Topics 里查看当前所有发布的 topic，并可以选择 Plot 的候选集合。候选集合可以在 Live 和 Recorded 里可视化。
+  - Live 可视化当前的 topic。
+    - Start Recording 可以记录当前的 topic。
+  - Recorded 播放 rosbag：
+    - Open 打开文件目录。
+    - Play 播放 / Pause 停止。
+    - Start / End / Current time 可以在允许范围内自定义，Current time 可以在进度条手动调整。
+    - Speed 播放速度。
+  - X 轴：
+    - Label type 决定 X 轴数据类型，可选 Time 或 Topic message。当 X 轴 Label type 选 Topic message（例如 IMU 测量的 x 轴速度），若 Y 轴选择 IMU 测量的 y 轴速度，则绘制 xy 平面上的速度。
+    - Timestamp format 可选相对时间和绝对时间。
+    - Time window 表示窗口展示的 topic 时长，默认 4 s，即默认展示 Current time 前后 2 s 的数据。
+    - Label 下拉菜单选择 topic。
+    - Show tick labels 是否展示刻度标签。
+  - Y 轴：
+    - Series number 默认 1 个，最多 16 个 Series。
+    - Show tick labels 是否展示刻度标签。
+    - Label 下拉菜单选择 topic，相同的 topic 不可以重复选择。
+    - 每个 Series 独立选择 Label (topic) / Color / Line width。
+- Hardware / Video / Plot 收起选项。
+
+### v6
+
+- Plot 页面：
+  - Topics 根据 publisher GID 区分正常 ROS 2 话题和 `ros2 bag play` 的话题。
+  - Topics 增加了话题排序：按名称 A–Z、按名称 Z–A、按话题来源（ROS 2 Live / ROS 2 Bag Play）、按是否可绘制。
+  - Live 页面记录 Topics 勾选的所有话题，允许绘制 “Topics 勾选且可绘制类型” 的话题。
+  - Recorded 点击 Open 后打开数据包，可以直接播放数据。之前需要在 Topics 勾选话题才能播放；现在与 Topics 页面解耦，打开数据包即可播放。
+- 多线程：
+
+```text
+线程 1：Qt GUI 主线程
+├── 所有 QML 页面
+├── Plot 曲线最终绘制
+├── Plot 数据批量刷新
+├── 视频最终显示
+├── diagnostics
+└── ROS Graph 话题发现
+
+线程 2：Plot / Record ROS Executor
+├── Plot 类型化话题订阅
+├── publisher GID 来源过滤
+├── 消息字段提取
+├── GenericSubscription 录制
+└── rosbag2 Writer 写入
+
+线程 3：视频 ROS Executor
+├── Image / CompressedImage 订阅
+└── 图像解码
+
+线程 4：硬件监控 ROS Executor
+├── CPU
+├── Memory
+├── Disk
+└── Network
+```
