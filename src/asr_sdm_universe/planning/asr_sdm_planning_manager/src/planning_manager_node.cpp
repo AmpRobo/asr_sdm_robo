@@ -11,12 +11,15 @@
 #include <asr_sdm_planning_manager/planner_manager.h>
 #include <asr_sdm_planning_manager/topo_replan_fsm.h>
 
+#include <asr_sdm_esdf_map/raycast.hpp>
+
 #include <algorithm>
 #include <chrono>
 #include <cmath>
 #include <limits>
 #include <memory>
 #include <thread>
+#include <vector>
 namespace backward
 {
 backward::SignalHandling sh;
@@ -105,6 +108,146 @@ void retimeBoundaryCtrlPts(Eigen::MatrixXd & ctrl_pts, double dt, double new_dt)
     ctrl_pts.row(first + 1) = p - (dt2 / 6.0) * a;
     ctrl_pts.row(first + 2) = p + new_dt * v + (dt2 / 3.0) * a;
   }
+}
+
+double voxelResolution(const ESDFMap::Ptr & map)
+{
+  const double resolution = map->getResolution();
+  if (!std::isfinite(resolution) || resolution <= 0.0) return 0.1;
+  return resolution;
+}
+
+Eigen::Vector3d positionAt(fast_planner::NonUniformBspline & traj, double t)
+{
+  const Eigen::VectorXd point = traj.evaluateDeBoor(t);
+  return Eigen::Vector3d(point(0), point(1), point(2));
+}
+
+double travelAlong(
+  const Eigen::Vector3d & from, const Eigen::Vector3d & to, const Eigen::Vector3d & hit)
+{
+  const Eigen::Vector3d segment = to - from;
+  const double length2 = segment.squaredNorm();
+  if (length2 < 1.0e-12) return 0.0;
+  const double ratio = std::clamp((hit - from).dot(segment) / length2, 0.0, 1.0);
+  return ratio * std::sqrt(length2);
+}
+
+// True when some voxel on the straight segment is closer than clearance.
+// Point samples miss that voxel whenever the step is longer than the chord
+// cut through it, which for a corner graze is shorter than the map resolution.
+bool segmentFirstViolation(
+  const ESDFMap::Ptr & map, const Eigen::Vector3d & from, const Eigen::Vector3d & to,
+  double clearance, double & travel, Eigen::Vector3d & hit)
+{
+  travel = 0.0;
+  hit = from;
+  if (map->getDistance(from) < clearance) return true;
+
+  const double segment_length = (to - from).norm();
+  if (segment_length < 1.0e-9) return false;
+
+  const double resolution = voxelResolution(map);
+  const Eigen::Vector3d origin = map->getOrigin();
+  ::RayCaster caster;
+  if (caster.setInput((from - origin) / resolution, (to - origin) / resolution)) {
+    Eigen::Vector3d ray_pt;
+    while (caster.step(ray_pt)) {
+      const Eigen::Vector3i index(
+        static_cast<int>(ray_pt(0)), static_cast<int>(ray_pt(1)), static_cast<int>(ray_pt(2)));
+      if (map->getDistance(index) < clearance) {
+        map->indexToPos(index, hit);
+        travel = travelAlong(from, to, hit);
+        if (travel < 1.0e-4 && (hit - from).norm() > 1.0e-3) {
+          travel = std::min((hit - from).norm(), segment_length);
+        }
+        return true;
+      }
+    }
+  }
+
+  if (map->getDistance(to) < clearance) {
+    hit = to;
+    travel = segment_length;
+    return true;
+  }
+  return false;
+}
+
+enum class SampleStatus { Finished, Stopped, Capped };
+
+// Samples in time order. Consecutive points stay within one voxel of each
+// other, and the curve stays within a quarter voxel of the chord, so a later
+// voxel walk cannot step over an obstacle the trajectory enters.
+template <typename Callback>
+SampleStatus sampleTrajectoryForCollision(
+  fast_planner::NonUniformBspline & traj, double t0, double t1, double resolution, int max_samples,
+  Callback && callback)
+{
+  double t_min = 0.0;
+  double t_max = 0.0;
+  traj.getTimeSpan(t_min, t_max);
+  t0 = std::clamp(t0, t_min, t_max);
+  t1 = std::clamp(t1, t_min, t_max);
+
+  const double max_step = std::max(resolution, 1.0e-3);
+  const double max_chord_error = 0.25 * max_step;
+  constexpr int kMaxDepth = 24;
+
+  const Eigen::Vector3d start = positionAt(traj, t0);
+  int samples = 1;
+  SampleStatus status = SampleStatus::Finished;
+  Eigen::Vector3d last = start;
+
+  const auto emit = [&](double t, const Eigen::Vector3d & point) {
+    if ((point - last).squaredNorm() <= 1.0e-16) return true;
+    if (samples >= max_samples) {
+      status = SampleStatus::Capped;
+      return false;
+    }
+    ++samples;
+    last = point;
+    if (!callback(t, point)) {
+      status = SampleStatus::Stopped;
+      return false;
+    }
+    return true;
+  };
+
+  if (!callback(t0, start)) return SampleStatus::Stopped;
+  if (!(t1 > t0 + 1.0e-9)) return SampleStatus::Finished;
+
+  struct Piece
+  {
+    double t_begin;
+    double t_end;
+    Eigen::Vector3d p_begin;
+    Eigen::Vector3d p_end;
+    int depth;
+  };
+
+  std::vector<Piece> pending;
+  pending.push_back(Piece{t0, t1, start, positionAt(traj, t1), 0});
+
+  while (!pending.empty()) {
+    const Piece piece = pending.back();
+    pending.pop_back();
+
+    const double t_mid = 0.5 * (piece.t_begin + piece.t_end);
+    const Eigen::Vector3d mid = positionAt(traj, t_mid);
+    const double step = (piece.p_end - piece.p_begin).norm();
+    const double chord_error = (mid - 0.5 * (piece.p_begin + piece.p_end)).norm();
+    if (
+      (step > max_step || chord_error > max_chord_error) && piece.depth < kMaxDepth &&
+      piece.t_end - piece.t_begin > 1.0e-7) {
+      pending.push_back(Piece{t_mid, piece.t_end, mid, piece.p_end, piece.depth + 1});
+      pending.push_back(Piece{piece.t_begin, t_mid, piece.p_begin, mid, piece.depth + 1});
+      continue;
+    }
+
+    if (!emit(t_mid, mid) || !emit(piece.t_end, piece.p_end)) return status;
+  }
+  return status;
 }
 
 }  // namespace
@@ -246,30 +389,56 @@ void PlanningManager::setStartMotion(
 
 bool PlanningManager::checkTrajCollision(double & distance)
 {
+  // 0.02 s sampling skips any obstacle the trajectory crosses between samples.
+  // At the speeds a folded spline actually reaches, that gap is many voxels.
+  constexpr int kMaxSamples = 4096;
+
   double t_now = (node_->now() - local_data_.start_time_).seconds();
+  if (t_now < 0.0) t_now = 0.0;
+  if (t_now >= local_data_.duration_) return true;
 
-  double tm, tmp;
+  double tm = 0.0;
+  double tmp = 0.0;
   local_data_.position_traj_.getTimeSpan(tm, tmp);
-  Eigen::Vector3d cur_pt = local_data_.position_traj_.evaluateDeBoor(tm + t_now);
+  const double t0 = tm + t_now;
+  const double t1 = tm + local_data_.duration_;
+  const Eigen::Vector3d cur_pt = positionAt(local_data_.position_traj_, t0);
 
-  double radius = 0.0;
-  Eigen::Vector3d fut_pt;
-  double fut_t = 0.02;
+  double arc = 0.0;
+  Eigen::Vector3d prev = cur_pt;
+  bool have_prev = false;
+  bool collision = false;
 
-  while (radius < 6.0 && t_now + fut_t < local_data_.duration_) {
-    fut_pt = local_data_.position_traj_.evaluateDeBoor(tm + t_now + fut_t);
+  const SampleStatus status = sampleTrajectoryForCollision(
+    local_data_.position_traj_, t0, t1, voxelResolution(esdf_map_), kMaxSamples,
+    [&](double /*t*/, const Eigen::Vector3d & pt) {
+      if (have_prev) {
+        double travel = 0.0;
+        Eigen::Vector3d hit;
+        if (segmentFirstViolation(esdf_map_, prev, pt, pp_.clearance_, travel, hit)) {
+          distance = arc + travel;
+          collision = true;
+          return false;
+        }
+        arc += (pt - prev).norm();
+      } else if (esdf_map_->getDistance(pt) < pp_.clearance_) {
+        distance = 0.0;
+        collision = true;
+        return false;
+      }
 
-    double dist = edt_environment_->evaluateCoarseEDT(fut_pt, -1.0);
-    if (dist < 0.1) {
-      distance = radius;
-      return false;
-    }
+      have_prev = true;
+      const bool inside_horizon = (pt - cur_pt).norm() < pp_.local_traj_len_;
+      prev = pt;
+      return inside_horizon;
+    });
 
-    radius = (fut_pt - cur_pt).norm();
-    fut_t += 0.02;
+  if (status == SampleStatus::Capped) {
+    SPDLOG_WARN("trajectory collision check capped at {} samples", kMaxSamples);
+    distance = arc;
+    return false;
   }
-
-  return true;
+  return !collision;
 }
 
 // !SECTION
@@ -870,72 +1039,111 @@ void PlanningManager::findCollisionRange(
   vector<Eigen::Vector3d> & colli_start, vector<Eigen::Vector3d> & colli_end,
   vector<Eigen::Vector3d> & start_pts, vector<Eigen::Vector3d> & end_pts)
 {
-  bool last_safe = true, safe;
-  double t_m, t_mp;
+  double t_m = 0.0;
+  double t_mp = 0.0;
   fast_planner::NonUniformBspline * initial_traj = &plan_data_.initial_local_segment_;
   initial_traj->getTimeSpan(t_m, t_mp);
 
   /* find range of collision */
-  double t_s = -1.0, t_e = t_mp;
-  for (double tc = t_m; tc <= t_mp + 1e-4; tc += 0.05) {
-    Eigen::Vector3d ptc = initial_traj->evaluateDeBoor(tc);
-    safe = edt_environment_->evaluateCoarseEDT(ptc, -1.0) < topo_prm_->clearance_ ? false : true;
+  constexpr int kMaxSamples = 20000;
+  double t_s = -1.0;
+  double t_e = t_mp;
+  bool last_safe = true;
+  bool have_prev = false;
+  Eigen::Vector3d prev_pt = Eigen::Vector3d::Zero();
+  double prev_t = t_m;
 
-    if (last_safe && !safe) {
-      colli_start.push_back(initial_traj->evaluateDeBoor(tc - 0.05));
-      if (t_s < 0.0) t_s = tc - 0.05;
-    } else if (!last_safe && safe) {
-      colli_end.push_back(ptc);
-      t_e = tc;
-    }
+  const SampleStatus status = sampleTrajectoryForCollision(
+    *initial_traj, t_m, t_mp, voxelResolution(esdf_map_), kMaxSamples,
+    [&](double tc, const Eigen::Vector3d & ptc) {
+      const bool safe = esdf_map_->getDistance(ptc) >= topo_prm_->clearance_;
+      if (have_prev && last_safe && safe) {
+        double travel = 0.0;
+        Eigen::Vector3d hit;
+        if (segmentFirstViolation(esdf_map_, prev_pt, ptc, topo_prm_->clearance_, travel, hit)) {
+          colli_start.push_back(prev_pt);
+          colli_end.push_back(ptc);
+          if (t_s < 0.0) t_s = prev_t;
+          t_e = tc;
+        }
+      } else if (last_safe && !safe) {
+        colli_start.push_back(have_prev ? prev_pt : ptc);
+        if (t_s < 0.0) t_s = have_prev ? prev_t : tc;
+      } else if (!last_safe && safe) {
+        colli_end.push_back(ptc);
+        t_e = tc;
+      }
 
-    last_safe = safe;
+      last_safe = safe;
+      prev_pt = ptc;
+      prev_t = tc;
+      have_prev = true;
+      return true;
+    });
+  if (status == SampleStatus::Capped) {
+    SPDLOG_WARN("collision range sampling capped at {} points", kMaxSamples);
   }
 
   if (colli_start.size() == 0) return;
 
   if (colli_start.size() == 1 && colli_end.size() == 0) return;
 
+  if (t_s < t_m) t_s = t_m;
+  if (t_e > t_mp) t_e = t_mp;
+
   /* find start and end safe segment */
-  double dt = initial_traj->getInterval();
-  int sn = ceil((t_s - t_m) / dt);
-  dt = (t_s - t_m) / sn;
-
-  for (double tc = t_m; tc <= t_s + 1e-4; tc += dt) {
-    start_pts.push_back(initial_traj->evaluateDeBoor(tc));
-  }
-
-  dt = initial_traj->getInterval();
-  sn = ceil((t_mp - t_e) / dt);
-  dt = (t_mp - t_e) / sn;
-  // std::cout << "dt: " << dt << std::endl;
-  // std::cout << "sn: " << sn << std::endl;
-  // std::cout << "t_m: " << t_m << std::endl;
-  // std::cout << "t_mp: " << t_mp << std::endl;
-  // std::cout << "t_s: " << t_s << std::endl;
-  // std::cout << "t_e: " << t_e << std::endl;
-
-  if (dt > 1e-4) {
-    for (double tc = t_e; tc <= t_mp + 1e-4; tc += dt) {
-      end_pts.push_back(initial_traj->evaluateDeBoor(tc));
+  const auto appendSpan = [&](double t_from, double t_to, vector<Eigen::Vector3d> & pts) {
+    if (t_to - t_from < 1.0e-4) {
+      pts.push_back(initial_traj->evaluateDeBoor(t_to));
+      return;
     }
-  } else {
-    end_pts.push_back(initial_traj->evaluateDeBoor(t_mp));
-  }
+    const double interval = std::max(initial_traj->getInterval(), 1.0e-6);
+    const int seg_num = std::max(1, static_cast<int>(std::ceil((t_to - t_from) / interval)));
+    const double dt = (t_to - t_from) / static_cast<double>(seg_num);
+    for (double tc = t_from; tc <= t_to + 1.0e-4; tc += dt) {
+      pts.push_back(initial_traj->evaluateDeBoor(tc));
+    }
+  };
+
+  appendSpan(t_m, t_s, start_pts);
+  appendSpan(t_e, t_mp, end_pts);
 }
 
 double PlanningManager::safeTailLength(fast_planner::NonUniformBspline & traj)
 {
-  double t_m, t_mp;
+  double t_m = 0.0;
+  double t_mp = 0.0;
   traj.getTimeSpan(t_m, t_mp);
 
+  constexpr int kMaxSamples = 20000;
+  std::vector<Eigen::Vector3d> samples;
+  const SampleStatus status = sampleTrajectoryForCollision(
+    traj, t_m, t_mp, voxelResolution(esdf_map_), kMaxSamples,
+    [&](double /*t*/, const Eigen::Vector3d & point) {
+      samples.push_back(point);
+      return true;
+    });
+  if (status == SampleStatus::Capped || samples.empty()) {
+    SPDLOG_WARN("safe-tail collision check was capped; treating the window end as blocked");
+    return 0.0;
+  }
+  if (samples.size() == 1) {
+    return esdf_map_->getDistance(samples.front()) < topo_prm_->clearance_
+             ? 0.0
+             : std::numeric_limits<double>::infinity();
+  }
+
+  // Walk from the end so the first hit is the obstacle closest to the tail.
   double length = 0.0;
-  Eigen::Vector3d next = traj.evaluateDeBoor(t_mp);
-  for (double tc = t_mp; tc >= t_m - 1e-4; tc -= 0.05) {
-    Eigen::Vector3d ptc = traj.evaluateDeBoor(tc);
-    if (edt_environment_->evaluateCoarseEDT(ptc, -1.0) < topo_prm_->clearance_) return length;
-    length += (next - ptc).norm();
-    next = ptc;
+  for (int i = static_cast<int>(samples.size()) - 2; i >= 0; --i) {
+    double travel = 0.0;
+    Eigen::Vector3d hit;
+    if (segmentFirstViolation(
+          esdf_map_, samples[static_cast<size_t>(i + 1)], samples[static_cast<size_t>(i)],
+          topo_prm_->clearance_, travel, hit)) {
+      return length + travel;
+    }
+    length += (samples[static_cast<size_t>(i)] - samples[static_cast<size_t>(i + 1)]).norm();
   }
   return std::numeric_limits<double>::infinity();
 }
