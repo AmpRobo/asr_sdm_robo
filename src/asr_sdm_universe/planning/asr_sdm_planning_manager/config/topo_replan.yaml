@@ -122,7 +122,7 @@
       max_sample_time: 0.005
       # Samples generated per graph, allocated to region valuation cells in
       # proportion to the sum of (1 - region value) over their voxels in the box.
-      max_sample_num: 50
+      max_sample_num: 2000
       max_raw_path: 300
       max_raw_path2: 25
       short_cut_num: 1
