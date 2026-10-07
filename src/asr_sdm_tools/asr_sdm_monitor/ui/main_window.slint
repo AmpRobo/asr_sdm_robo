@@ -1,0 +1,1272 @@
+import { Button, CheckBox, ComboBox, LineEdit, Palette, ScrollView, Slider, SpinBox } from "std-widgets.slint";
+import { AppText, AppTheme } from "theme.slint";
+import { TextRow, UiActions, UiState } from "state.slint";
+
+export { AppText, AppTheme } from "theme.slint";
+export { UiActions, UiState } from "state.slint";
+
+component TitleButton inherits Rectangle {
+    in property <string> label;
+    in property <bool> danger: false;
+    callback clicked;
+
+    width: 48px;
+    height: 36px;
+
+    touch := TouchArea {
+        width: 100%;
+        height: 100%;
+        clicked => { root.clicked(); }
+    }
+
+    background: root.danger && touch.has-hover ? AppTheme.danger : (touch.has-hover ? AppTheme.input-background : transparent);
+
+    Text {
+        text: root.label;
+        color: root.danger && touch.has-hover ? AppTheme.accent-text : AppTheme.text-secondary;
+        font-size: 16px;
+        font-weight: 700;
+    }
+}
+
+component NavButton inherits Rectangle {
+    in property <string> label;
+    in property <bool> selected;
+    callback clicked;
+
+    height: 42px;
+    horizontal-stretch: 1;
+    border-radius: 8px;
+    background: root.selected ? AppTheme.selected-nav : (touch.has-hover ? AppTheme.input-background : transparent);
+
+    touch := TouchArea {
+        clicked => { root.clicked(); }
+    }
+
+    Text {
+        text: root.label;
+        x: 12px;
+        y: (parent.height - self.height) / 2;
+        width: parent.width - 16px;
+        overflow: elide;
+        color: root.selected ? AppTheme.accent : AppTheme.text-primary;
+        font-size: 15px;
+        font-weight: 600;
+    }
+}
+
+component SectionTitle inherits Text {
+    font-size: 18px;
+    font-weight: 700;
+    color: AppTheme.text-primary;
+}
+
+component ValueCard inherits Rectangle {
+    in property <string> title;
+    in property <string> value;
+
+    horizontal-stretch: 1;
+    min-width: 120px;
+    min-height: 78px;
+    border-radius: 10px;
+    background: AppTheme.surface-background;
+    border-width: 1px;
+    border-color: AppTheme.border;
+
+    VerticalLayout {
+        padding: 10px;
+        spacing: 6px;
+        Text {
+            text: root.title;
+            color: AppTheme.text-secondary;
+            font-size: 13px;
+            overflow: elide;
+        }
+        Text {
+            text: root.value == "" ? "--" : root.value;
+            color: AppTheme.card-value;
+            font-size: 16px;
+            font-weight: 600;
+            wrap: word-wrap;
+        }
+    }
+}
+
+component Cell inherits Text {
+    horizontal-stretch: 1;
+    font-size: 14px;
+    color: AppTheme.text-primary;
+    overflow: elide;
+    vertical-alignment: center;
+}
+
+component DataTable inherits VerticalLayout {
+    in property <[string]> headers;
+    in property <[TextRow]> rows;
+    spacing: 0;
+    min-height: 80px;
+
+    Rectangle {
+        background: AppTheme.header-background;
+        height: 34px;
+        HorizontalLayout {
+            padding-left: 8px;
+            padding-right: 8px;
+            spacing: 8px;
+            for header in root.headers: Text {
+                text: header;
+                horizontal-stretch: 1;
+                font-size: 13px;
+                font-weight: 700;
+                color: AppTheme.text-secondary;
+                overflow: elide;
+                vertical-alignment: center;
+            }
+        }
+    }
+
+    VerticalLayout {
+        spacing: 0;
+        for row[index] in root.rows: Rectangle {
+            height: 32px;
+            background: mod(index, 2) == 1 ? AppTheme.row-alt : transparent;
+            HorizontalLayout {
+                padding-left: 8px;
+                padding-right: 8px;
+                spacing: 8px;
+                if root.headers.length > 0: Cell { text: row.c0; }
+                if root.headers.length > 1: Cell { text: row.c1; }
+                if root.headers.length > 2: Cell { text: row.c2; }
+                if root.headers.length > 3: Cell { text: row.c3; }
+                if root.headers.length > 4: Cell { text: row.c4; }
+                if root.headers.length > 5: Cell { text: row.c5; }
+                if root.headers.length > 6: Cell { text: row.c6; }
+                if root.headers.length > 7: Cell { text: row.c7; }
+                if root.headers.length > 8: Cell { text: row.c8; }
+            }
+        }
+    }
+}
+
+component ChartFrame inherits VerticalLayout {
+    in property <string> caption;
+    in property <string> scale;
+    in property <image> source;
+    spacing: 8px;
+
+    HorizontalLayout {
+        Text {
+            text: root.caption;
+            color: AppTheme.accent;
+            font-size: 15px;
+            horizontal-stretch: 1;
+        }
+        Text {
+            text: root.scale;
+            color: AppTheme.text-secondary;
+            font-size: 13px;
+        }
+    }
+
+    Rectangle {
+        height: 220px;
+        border-radius: 12px;
+        background: AppTheme.surface-background;
+        border-width: 1px;
+        border-color: AppTheme.border;
+        clip: true;
+        Image {
+            width: 100%;
+            height: 100%;
+            source: root.source;
+            image-fit: fill;
+        }
+    }
+}
+
+component CardGrid inherits GridLayout {
+    in property <[string]> titles;
+    in property <[string]> values;
+    spacing: 12px;
+    min-height: 78px;
+
+    for title[index] in root.titles: ValueCard {
+        title: title;
+        value: index < root.values.length ? root.values[index] : "--";
+        col: mod(index, 4);
+        row: index / 4;
+    }
+}
+
+component HardwarePage inherits Flickable {
+    property <int> tab: 0;
+    content-width: root.width;
+    content-height: content.preferred-height;
+
+    content := VerticalLayout {
+        width: parent.width;
+        spacing: 16px;
+        padding: 4px;
+
+        HorizontalLayout {
+            spacing: 8px;
+            for label[index] in [
+                AppText.t("cpu"),
+                AppText.t("memory"),
+                AppText.t("hdd"),
+                AppText.t("net"),
+                AppText.t("ntp"),
+            ]: Rectangle {
+                horizontal-stretch: 1;
+                height: 36px;
+                border-radius: 8px;
+                background: root.tab == index ? AppTheme.accent : AppTheme.input-background;
+                border-width: 1px;
+                border-color: AppTheme.border;
+                touch := TouchArea {
+                    clicked => { root.tab = index; }
+                }
+                Text {
+                    text: label;
+                    color: root.tab == index ? AppTheme.accent-text : AppTheme.text-primary;
+                    font-weight: 600;
+                }
+            }
+        }
+
+        if root.tab == 0: VerticalLayout {
+            spacing: 12px;
+            SectionTitle { text: AppText.t("cpu"); }
+            CardGrid {
+                titles: [
+                    AppText.t("avgUsage"), AppText.t("maxCoreUsage"), AppText.t("avgClock"), AppText.t("load1"),
+                    AppText.t("load5"), AppText.t("load15"), AppText.t("coreCount"), AppText.t("state"),
+                ];
+                values: UiState.cpu-values;
+            }
+            ChartFrame { caption: AppText.t("cpuHistory"); scale: AppText.t("percentScale"); source: UiState.cpu-chart; }
+            SectionTitle { text: AppText.t("coreDetails"); }
+            DataTable {
+                headers: [AppText.t("core"), AppText.t("usage"), AppText.t("clock"), AppText.t("user"), AppText.t("system"), AppText.t("idle"), AppText.t("status")];
+                rows: UiState.cpu-rows;
+            }
+        }
+        if root.tab == 1: VerticalLayout {
+            spacing: 12px;
+            SectionTitle { text: AppText.t("memory"); }
+            CardGrid {
+                titles: [
+                    AppText.t("usedPhysical"), AppText.t("totalPhysical"), AppText.t("freePhysical"), AppText.t("usagePercent"),
+                    AppText.t("usedSwap"), AppText.t("totalSwap"), AppText.t("updateStatus"), AppText.t("state"),
+                ];
+                values: UiState.memory-values;
+            }
+            ChartFrame { caption: AppText.t("memoryHistory"); scale: AppText.t("percentScale"); source: UiState.memory-chart; }
+            SectionTitle { text: AppText.t("memoryDetails"); }
+            DataTable {
+                headers: [AppText.t("type"), AppText.t("total"), AppText.t("used"), AppText.t("free")];
+                rows: UiState.memory-rows;
+            }
+        }
+        if root.tab == 2: VerticalLayout {
+            spacing: 12px;
+            SectionTitle { text: AppText.t("hdd"); }
+            CardGrid {
+                titles: [AppText.t("diskCount"), AppText.t("worstUse"), AppText.t("stateLevel"), AppText.t("stateDescription")];
+                values: UiState.hdd-values;
+            }
+            SectionTitle { text: AppText.t("diskDetails"); }
+            DataTable {
+                headers: [AppText.t("disk"), AppText.t("mount"), AppText.t("size"), AppText.t("available"), AppText.t("use"), AppText.t("status")];
+                rows: UiState.hdd-rows;
+            }
+        }
+        if root.tab == 3: VerticalLayout {
+            spacing: 12px;
+            SectionTitle { text: AppText.t("net"); }
+            CardGrid {
+                titles: [
+                    AppText.t("totalInput"), AppText.t("totalOutput"), AppText.t("interfaceCount"), AppText.t("errorCount"),
+                    AppText.t("interfaceList"), AppText.t("ipAddressList"), AppText.t("stateLevel"), AppText.t("stateDescription"),
+                ];
+                values: UiState.net-values;
+            }
+            ChartFrame { caption: AppText.t("inputHistory") + " / " + AppText.t("outputHistory"); scale: UiState.net-scale; source: UiState.net-chart; }
+            SectionTitle { text: AppText.t("interfaceDetails"); }
+            DataTable {
+                headers: [AppText.t("interface"), AppText.t("ipAddress"), AppText.t("state"), AppText.t("input"), AppText.t("output"), AppText.t("rxErr"), AppText.t("txErr"), AppText.t("totalRx"), AppText.t("totalTx")];
+                rows: UiState.net-rows;
+            }
+        }
+        if root.tab == 4: VerticalLayout {
+            spacing: 12px;
+            SectionTitle { text: AppText.t("ntp"); }
+            CardGrid {
+                titles: [AppText.t("offset"), AppText.t("tolerance"), AppText.t("errorTolerance"), AppText.t("state")];
+                values: UiState.ntp-values;
+            }
+            SectionTitle { text: AppText.t("ntpDetails"); }
+            DataTable {
+                headers: [AppText.t("name"), AppText.t("value")];
+                rows: UiState.ntp-rows;
+            }
+        }
+    }
+}
+
+component VideoSlot inherits Rectangle {
+    in property <string> title;
+    in property <[string]> topics;
+    in-out property <int> topic-index: 0;
+    in property <string> current-topic;
+    in property <string> status;
+    in property <image> frame;
+    in property <bool> has-frame;
+    callback topic-picked(int);
+
+    horizontal-stretch: 1;
+    vertical-stretch: 1;
+    min-width: 240px;
+    min-height: 180px;
+    border-radius: 12px;
+    background: AppTheme.surface-background;
+    border-width: 1px;
+    border-color: AppTheme.border;
+    clip: true;
+
+    VerticalLayout {
+        padding: 10px;
+        spacing: 8px;
+        Text {
+            text: root.title;
+            color: AppTheme.text-primary;
+            font-weight: 700;
+        }
+        HorizontalLayout {
+            spacing: 8px;
+            Text {
+                text: AppText.t("videoTopic");
+                color: AppTheme.text-secondary;
+                vertical-alignment: center;
+            }
+            ComboBox {
+                horizontal-stretch: 1;
+                model: root.topics;
+                current-index <=> root.topic-index;
+                selected => { root.topic-picked(self.current-index); }
+            }
+        }
+        Text {
+            text: AppText.t("currentVideoTopic") + " " + root.current-topic;
+            color: AppTheme.text-secondary;
+            font-size: 13px;
+            overflow: elide;
+        }
+        Text {
+            text: AppText.t("videoStatus") + " " + root.status;
+            color: AppTheme.text-secondary;
+            font-size: 13px;
+            overflow: elide;
+        }
+        Rectangle {
+            vertical-stretch: 1;
+            background: AppTheme.input-background;
+            border-radius: 8px;
+            clip: true;
+            if root.has-frame: Image {
+                width: 100%;
+                height: 100%;
+                source: root.frame;
+                image-fit: contain;
+            }
+            if !root.has-frame: Text {
+                text: root.status;
+                wrap: word-wrap;
+                width: parent.width - 24px;
+                x: 12px;
+                y: (parent.height - self.height) / 2;
+                color: AppTheme.text-secondary;
+                horizontal-alignment: center;
+            }
+        }
+    }
+}
+
+component VideoPage inherits VerticalLayout {
+    in-out property <int> window-count: 2;
+    spacing: 12px;
+
+    HorizontalLayout {
+        spacing: 12px;
+        Text {
+            text: AppText.t("videoWindowCount");
+            color: AppTheme.text-primary;
+            vertical-alignment: center;
+        }
+        ComboBox {
+            model: ["1", "2", "3", "4"];
+            current-index: root.window-count - 1;
+            selected => {
+                root.window-count = self.current-index + 1;
+                UiActions.video-count-changed(root.window-count);
+            }
+        }
+    }
+
+    if root.window-count <= 1: VideoSlot {
+        title: AppText.t("videoWindow") + " 1";
+        topics: UiState.video-topics;
+        topic-index <=> UiState.video-index-0;
+        current-topic: UiState.video-topic-0;
+        status: UiState.video-status-0;
+        frame: UiState.video-frame-0;
+        has-frame: UiState.video-has-frame-0;
+        topic-picked(index) => { UiActions.video-topic-picked(0, index); }
+    }
+    if root.window-count == 2: HorizontalLayout {
+        spacing: 12px;
+        VideoSlot {
+            title: AppText.t("videoWindow") + " 1";
+            topics: UiState.video-topics;
+            topic-index <=> UiState.video-index-0;
+            current-topic: UiState.video-topic-0;
+            status: UiState.video-status-0;
+            frame: UiState.video-frame-0;
+            has-frame: UiState.video-has-frame-0;
+            topic-picked(index) => { UiActions.video-topic-picked(0, index); }
+        }
+        VideoSlot {
+            title: AppText.t("videoWindow") + " 2";
+            topics: UiState.video-topics;
+            topic-index <=> UiState.video-index-1;
+            current-topic: UiState.video-topic-1;
+            status: UiState.video-status-1;
+            frame: UiState.video-frame-1;
+            has-frame: UiState.video-has-frame-1;
+            topic-picked(index) => { UiActions.video-topic-picked(1, index); }
+        }
+    }
+    if root.window-count >= 3: VerticalLayout {
+        spacing: 12px;
+        HorizontalLayout {
+            spacing: 12px;
+            VideoSlot {
+                title: AppText.t("videoWindow") + " 1";
+                topics: UiState.video-topics;
+                topic-index <=> UiState.video-index-0;
+                current-topic: UiState.video-topic-0;
+                status: UiState.video-status-0;
+                frame: UiState.video-frame-0;
+                has-frame: UiState.video-has-frame-0;
+                topic-picked(index) => { UiActions.video-topic-picked(0, index); }
+            }
+            VideoSlot {
+                title: AppText.t("videoWindow") + " 2";
+                topics: UiState.video-topics;
+                topic-index <=> UiState.video-index-1;
+                current-topic: UiState.video-topic-1;
+                status: UiState.video-status-1;
+                frame: UiState.video-frame-1;
+                has-frame: UiState.video-has-frame-1;
+                topic-picked(index) => { UiActions.video-topic-picked(1, index); }
+            }
+        }
+        HorizontalLayout {
+            spacing: 12px;
+            VideoSlot {
+                title: AppText.t("videoWindow") + " 3";
+                topics: UiState.video-topics;
+                topic-index <=> UiState.video-index-2;
+                current-topic: UiState.video-topic-2;
+                status: UiState.video-status-2;
+                frame: UiState.video-frame-2;
+                has-frame: UiState.video-has-frame-2;
+                topic-picked(index) => { UiActions.video-topic-picked(2, index); }
+            }
+            if root.window-count == 4: VideoSlot {
+                title: AppText.t("videoWindow") + " 4";
+                topics: UiState.video-topics;
+                topic-index <=> UiState.video-index-3;
+                current-topic: UiState.video-topic-3;
+                status: UiState.video-status-3;
+                frame: UiState.video-frame-3;
+                has-frame: UiState.video-has-frame-3;
+                topic-picked(index) => { UiActions.video-topic-picked(3, index); }
+            }
+        }
+    }
+}
+
+component PlotSettings inherits VerticalLayout {
+    spacing: 8px;
+    Text { text: AppText.t("xAxis"); color: AppTheme.text-primary; font-weight: 700; }
+    HorizontalLayout {
+        spacing: 8px;
+        Text { text: AppText.t("labelType"); color: AppTheme.text-secondary; vertical-alignment: center; horizontal-stretch: 1; }
+        ComboBox {
+            horizontal-stretch: 1;
+            model: [AppText.t("time"), AppText.t("topicMessage")];
+            current-index <=> UiState.x-mode-index;
+            selected => { UiActions.plot-settings-changed(); }
+        }
+    }
+    if UiState.x-mode-index == 1: HorizontalLayout {
+        spacing: 8px;
+        Text { text: AppText.t("label"); color: AppTheme.text-secondary; vertical-alignment: center; horizontal-stretch: 1; }
+        ComboBox {
+            horizontal-stretch: 1;
+            model: UiState.x-field-labels;
+            current-index <=> UiState.x-field-index;
+            selected => { UiActions.plot-settings-changed(); }
+        }
+    }
+    if UiState.x-mode-index == 0: HorizontalLayout {
+        spacing: 8px;
+        Text { text: AppText.t("timestampFormat"); color: AppTheme.text-secondary; vertical-alignment: center; horizontal-stretch: 1; }
+        ComboBox {
+            horizontal-stretch: 1;
+            model: [AppText.t("relativeTime"), AppText.t("absoluteTime")];
+            current-index <=> UiState.timestamp-index;
+            selected => { UiActions.plot-settings-changed(); }
+        }
+    }
+    HorizontalLayout {
+        spacing: 8px;
+        visible: UiState.x-mode-index == 0;
+        Text { text: AppText.t("timeWindow"); color: AppTheme.text-secondary; vertical-alignment: center; }
+        time-edit := LineEdit {
+            horizontal-stretch: 1;
+            text: "4.00";
+            input-type: InputType.decimal;
+            accepted(text) => { UiActions.time-window-accepted(text); }
+        }
+    }
+    CheckBox {
+        text: AppText.t("showTickLabels");
+        checked <=> UiState.show-x-ticks;
+        toggled => { UiActions.plot-settings-changed(); }
+    }
+    if UiState.x-mode-index == 1: HorizontalLayout {
+        spacing: 8px;
+        Text { text: AppText.t("axisScale"); color: AppTheme.text-secondary; vertical-alignment: center; horizontal-stretch: 1; }
+        ComboBox {
+            horizontal-stretch: 1;
+            model: [AppText.t("independent"), AppText.t("square")];
+            current-index <=> UiState.axis-scale-index;
+            selected => { UiActions.plot-settings-changed(); }
+        }
+    }
+
+    Text { text: AppText.t("yAxis"); color: AppTheme.text-primary; font-weight: 700; }
+    HorizontalLayout {
+        spacing: 8px;
+        Text { text: AppText.t("seriesNumber"); color: AppTheme.text-secondary; vertical-alignment: center; horizontal-stretch: 1; }
+        SpinBox {
+            minimum: 1;
+            maximum: 16;
+            value <=> UiState.series-count;
+            edited(value) => { UiActions.series-count-changed(value); }
+        }
+    }
+    CheckBox {
+        text: AppText.t("showTickLabels");
+        checked <=> UiState.show-y-ticks;
+        toggled => { UiActions.plot-settings-changed(); }
+    }
+
+    VerticalLayout {
+        spacing: 0;
+        for series[index] in UiState.series-rows: VerticalLayout {
+            height: 72px;
+            spacing: 4px;
+            padding-top: 4px;
+            HorizontalLayout {
+                spacing: 8px;
+                Text {
+                    text: AppText.t("series") + " " + (index + 1);
+                    color: AppTheme.text-secondary;
+                    vertical-alignment: center;
+                    width: 72px;
+                }
+                ComboBox {
+                    horizontal-stretch: 1;
+                    model: UiState.y-field-labels;
+                    current-index: series.field-index;
+                    selected => { UiActions.series-field-changed(index, self.current-index); }
+                }
+            }
+            HorizontalLayout {
+                spacing: 8px;
+                Rectangle {
+                    width: 28px;
+                    height: 18px;
+                    border-radius: 4px;
+                    background: series.swatch;
+                    border-width: 1px;
+                    border-color: AppTheme.border;
+                    TouchArea {
+                        clicked => { UiActions.series-color-requested(index); }
+                    }
+                }
+                Slider {
+                    horizontal-stretch: 1;
+                    minimum: 0.5;
+                    maximum: 6;
+                    step: 0.5;
+                    init => { self.value = series.line-width; }
+                    released(value) => { UiActions.series-width-changed(index, value); }
+                }
+            }
+        }
+    }
+
+    Button {
+        text: AppText.t("resetView");
+        clicked => { UiActions.reset-plot-view(); }
+    }
+
+    property <int> editor-generation: UiState.editor-generation;
+    changed editor-generation => {
+        if (!time-edit.has-focus) {
+            time-edit.text = UiState.time-window-text;
+        }
+    }
+}
+
+component PlotChart inherits Rectangle {
+    horizontal-stretch: 1;
+    vertical-stretch: 1;
+    min-height: 320px;
+    border-radius: 12px;
+    background: AppTheme.surface-background;
+    border-width: 1px;
+    border-color: AppTheme.border;
+    clip: true;
+
+    property <float> host-w: self.width / 1px;
+    property <float> host-h: self.height / 1px;
+    changed host-w => { UiActions.plot-resized(root.host-w, root.host-h); }
+    changed host-h => { UiActions.plot-resized(root.host-w, root.host-h); }
+
+    Image {
+        width: 100%;
+        height: 100%;
+        source: UiState.plot-chart;
+        image-fit: fill;
+    }
+
+    if !UiState.plot-has-data: Text {
+        text: AppText.t("waitingPlotData");
+        color: AppTheme.text-secondary;
+        wrap: word-wrap;
+        width: parent.width - 32px;
+        x: 16px;
+        y: (parent.height - self.height) / 2;
+        horizontal-alignment: center;
+    }
+
+    touch := TouchArea {
+        width: 100%;
+        height: 100%;
+        pointer-event(event) => {
+            if (event.button == PointerEventButton.left) {
+                if (event.kind == PointerEventKind.down) {
+                    UiActions.plot-pointer(self.mouse-x / 1px, self.mouse-y / 1px, 0);
+                }
+                if (event.kind == PointerEventKind.up || event.kind == PointerEventKind.cancel) {
+                    UiActions.plot-pointer(self.mouse-x / 1px, self.mouse-y / 1px, 2);
+                }
+            }
+        }
+        moved => {
+            if (self.pressed) {
+                UiActions.plot-pointer(self.mouse-x / 1px, self.mouse-y / 1px, 1);
+            }
+        }
+        scroll-event(event) => {
+            UiActions.plot-scroll(self.mouse-x / 1px, self.mouse-y / 1px, event.delta-y / 1px);
+            accept
+        }
+    }
+}
+
+component PlotPage inherits VerticalLayout {
+    property <int> section: 1;
+    spacing: 12px;
+
+    HorizontalLayout {
+        spacing: 8px;
+        for label[index] in [AppText.t("topics"), AppText.t("live"), AppText.t("recorded")]: Rectangle {
+            horizontal-stretch: 1;
+            height: 36px;
+            border-radius: 8px;
+            background: root.section == index ? AppTheme.accent : AppTheme.input-background;
+            border-width: 1px;
+            border-color: AppTheme.border;
+            TouchArea {
+                clicked => {
+                    root.section = index;
+                    UiActions.plot-section-changed(index);
+                }
+            }
+            Text {
+                text: label;
+                color: root.section == index ? AppTheme.accent-text : AppTheme.text-primary;
+                font-weight: 600;
+            }
+        }
+    }
+
+    if root.section == 0: VerticalLayout {
+        spacing: 10px;
+        vertical-stretch: 1;
+        Text {
+            text: AppText.t("unifiedTopicCandidateHint");
+            wrap: word-wrap;
+            color: AppTheme.text-secondary;
+            font-size: 14px;
+        }
+        HorizontalLayout {
+            spacing: 8px;
+            Text { text: AppText.t("topicSort"); color: AppTheme.text-primary; vertical-alignment: center; }
+            ComboBox {
+                horizontal-stretch: 1;
+                model: [
+                    AppText.t("topicSortNameAscending"),
+                    AppText.t("topicSortNameDescending"),
+                    AppText.t("topicSortSource"),
+                    AppText.t("topicSortPlottableFirst"),
+                ];
+                selected => { UiActions.topic-sort-changed(self.current-index); }
+            }
+            Button {
+                text: AppText.t("refresh");
+                clicked => { UiActions.refresh-plot-topics(); }
+            }
+        }
+        Text { text: UiState.topic-summary; color: AppTheme.text-secondary; font-size: 13px; }
+        Rectangle {
+            height: 34px;
+            background: AppTheme.header-background;
+            HorizontalLayout {
+                padding-left: 8px;
+                spacing: 8px;
+                Text { text: ""; width: 28px; }
+                Text { text: AppText.t("topicName"); horizontal-stretch: 2; font-weight: 700; color: AppTheme.text-secondary; font-size: 13px; vertical-alignment: center; }
+                Text { text: AppText.t("topicType"); horizontal-stretch: 2; font-weight: 700; color: AppTheme.text-secondary; font-size: 13px; vertical-alignment: center; }
+                Text { text: AppText.t("topicSource"); horizontal-stretch: 1; font-weight: 700; color: AppTheme.text-secondary; font-size: 13px; vertical-alignment: center; }
+                Text { text: AppText.t("topicCapability"); horizontal-stretch: 1; font-weight: 700; color: AppTheme.text-secondary; font-size: 13px; vertical-alignment: center; }
+            }
+        }
+        Flickable {
+            vertical-stretch: 1;
+            content-width: self.width;
+            content-height: topic-rows.preferred-height;
+            topic-rows := VerticalLayout {
+            for topic[index] in UiState.plot-topics: Rectangle {
+                height: 34px;
+                background: mod(index, 2) == 1 ? AppTheme.row-alt : transparent;
+                HorizontalLayout {
+                    padding-left: 8px;
+                    spacing: 8px;
+                    CheckBox {
+                        checked: topic.selected;
+                        toggled => { UiActions.plot-topic-toggled(index, !topic.selected); }
+                    }
+                    Text { text: topic.name; horizontal-stretch: 2; overflow: elide; vertical-alignment: center; color: AppTheme.text-primary; font-size: 13px; }
+                    Text { text: topic.type; horizontal-stretch: 2; overflow: elide; vertical-alignment: center; color: AppTheme.text-primary; font-size: 13px; }
+                    Text { text: topic.source; horizontal-stretch: 1; overflow: elide; vertical-alignment: center; color: AppTheme.text-primary; font-size: 13px; }
+                    Text { text: topic.capability; horizontal-stretch: 1; overflow: elide; vertical-alignment: center; color: AppTheme.text-primary; font-size: 13px; }
+                }
+            }
+            }
+        }
+    }
+
+    if root.section == 1: HorizontalLayout {
+        spacing: 16px;
+        vertical-stretch: 1;
+        VerticalLayout {
+            width: 420px;
+            spacing: 8px;
+            Text { text: AppText.t("plotHint"); wrap: word-wrap; color: AppTheme.text-secondary; font-size: 13px; }
+            Text { text: AppText.t("recordingFile"); color: AppTheme.text-primary; font-weight: 600; }
+            record-edit := LineEdit {
+                accepted(text) => { UiActions.recording-path-accepted(text); }
+            }
+            property <int> live-editor-generation: UiState.editor-generation;
+            changed live-editor-generation => {
+                if (!record-edit.has-focus) {
+                    record-edit.text = UiState.recording-path;
+                }
+            }
+            HorizontalLayout {
+                spacing: 8px;
+                Button { text: AppText.t("browse"); clicked => { UiActions.browse-recording(); } }
+                Button {
+                    text: UiState.recording ? AppText.t("stopRecording") : AppText.t("startRecording");
+                    clicked => {
+                        if (UiState.recording) { UiActions.stop-recording(); }
+                        else { UiActions.start-recording(); }
+                    }
+                }
+            }
+            Text { text: UiState.recording-status; wrap: word-wrap; color: AppTheme.text-secondary; font-size: 13px; }
+            Text { text: UiState.plot-status; wrap: word-wrap; color: AppTheme.text-secondary; font-size: 13px; }
+            Flickable {
+                vertical-stretch: 1;
+                content-height: settings.preferred-height;
+                content-width: 420px;
+                settings := PlotSettings { width: 420px; }
+            }
+        }
+        PlotChart { }
+    }
+
+    if root.section == 2: HorizontalLayout {
+        spacing: 16px;
+        vertical-stretch: 1;
+        VerticalLayout {
+            width: 420px;
+            spacing: 8px;
+            Text { text: AppText.t("recordedFile"); color: AppTheme.text-primary; font-weight: 600; }
+            bag-edit := LineEdit {
+                accepted(text) => { UiActions.recorded-path-accepted(text); }
+            }
+            HorizontalLayout {
+                spacing: 8px;
+                Button { text: AppText.t("browse"); clicked => { UiActions.browse-recorded(); } }
+                Button { text: AppText.t("open"); clicked => { UiActions.open-recorded(); } }
+            }
+            Text { text: UiState.recorded-status; wrap: word-wrap; color: AppTheme.text-secondary; font-size: 13px; }
+            Text { text: AppText.t("playbackManager"); color: AppTheme.text-primary; font-weight: 700; }
+            Text { text: AppText.t("startTime"); color: AppTheme.text-secondary; font-size: 13px; }
+            start-edit := LineEdit { accepted(text) => { UiActions.playback-bound-accepted("start", text); } }
+            Text { text: AppText.t("endTime"); color: AppTheme.text-secondary; font-size: 13px; }
+            end-edit := LineEdit { accepted(text) => { UiActions.playback-bound-accepted("end", text); } }
+            Text { text: AppText.t("currentTime"); color: AppTheme.text-secondary; font-size: 13px; }
+            current-edit := LineEdit { accepted(text) => { UiActions.playback-bound-accepted("current", text); } }
+            play-slider := Slider {
+                maximum: 1;
+                changed(value) => {
+                    UiState.playback-slider-hold = true;
+                    UiActions.playback-seek(value);
+                }
+                released => { UiState.playback-slider-hold = false; }
+            }
+            HorizontalLayout {
+                spacing: 8px;
+                Text { text: AppText.t("speed"); color: AppTheme.text-secondary; vertical-alignment: center; }
+                ComboBox {
+                    horizontal-stretch: 1;
+                    model: ["0.25x", "0.5x", "1.0x", "2.0x", "4.0x"];
+                    current-index <=> UiState.playback-speed-index;
+                    selected => { UiActions.playback-speed-changed(self.current-index); }
+                }
+                Button {
+                    text: UiState.playback-playing ? AppText.t("pause") : AppText.t("play");
+                    clicked => { UiActions.toggle-playback(); }
+                }
+            }
+            Flickable {
+                vertical-stretch: 1;
+                content-height: recorded-settings.preferred-height;
+                content-width: 420px;
+                recorded-settings := PlotSettings { width: 420px; }
+            }
+
+            property <string> current-seed: UiState.playback-current-text;
+            changed current-seed => {
+                if (!current-edit.has-focus) {
+                    current-edit.text = self.current-seed;
+                }
+            }
+            property <float> playhead: UiState.playback-position;
+            changed playhead => {
+                if (!UiState.playback-slider-hold) {
+                    play-slider.value = self.playhead;
+                }
+            }
+            property <int> editor-generation: UiState.editor-generation;
+            changed editor-generation => {
+                if (!bag-edit.has-focus) { bag-edit.text = UiState.recorded-path; }
+                if (!start-edit.has-focus) { start-edit.text = UiState.playback-start-text; }
+                if (!end-edit.has-focus) { end-edit.text = UiState.playback-end-text; }
+                if (!current-edit.has-focus) { current-edit.text = UiState.playback-current-text; }
+            }
+        }
+        PlotChart { }
+    }
+}
+
+component SimulatorPage inherits VerticalLayout {
+    // 0 launches planning_simulator, 1 launches logging_simulator.
+    property <int> kind: 0;
+    property <int> control: 0;
+    property <int> teleop: 1;
+    property <int> planning: 1;
+    property <bool> follow-log: true;
+    property <int> log-font-px: 12;
+    property <string> log-seed: UiState.simulator-log;
+    spacing: 8px;
+
+    function pin-log-view() {
+        log-view.content-x = 0px;
+        if (root.follow-log) {
+            log-view.content-y = min(0px, log-view.height - log-body.preferred-height - log-body.y);
+        }
+    }
+
+    changed log-seed => { root.pin-log-view(); }
+    changed log-font-px => { root.pin-log-view(); }
+    // Match the selected launch file: planning enables control, logging leaves it off.
+    changed kind => {
+        root.control = root.kind == 0 ? 0 : 1;
+        root.teleop = 1;
+        root.planning = 1;
+    }
+
+    function launch-package() -> string {
+        if (root.kind == 1) { return "logging_simulator"; }
+        return "planning_simulator";
+    }
+
+    SectionTitle { text: AppText.t("simulator"); }
+    Rectangle {
+        vertical-stretch: 0;
+        border-radius: 12px;
+        background: AppTheme.surface-background;
+        border-width: 1px;
+        border-color: AppTheme.border;
+        VerticalLayout {
+            padding-left: 12px;
+            padding-right: 12px;
+            padding-top: 12px;
+            padding-bottom: 4px;
+            spacing: 6px;
+            alignment: start;
+            Text {
+                text: AppText.t("simulatorHint");
+                wrap: word-wrap;
+                color: AppTheme.text-secondary;
+                font-size: 13px;
+            }
+            HorizontalLayout {
+                spacing: 12px;
+                Text { text: AppText.t("simulatorKind"); min-width: 88px; vertical-alignment: center; color: AppTheme.text-primary; }
+                ComboBox {
+                    horizontal-stretch: 1;
+                    model: ["planning_simulator", "logging_simulator"];
+                    enabled: !UiState.simulator-busy;
+                    current-index <=> root.kind;
+                }
+            }
+            HorizontalLayout {
+                spacing: 12px;
+                Text { text: "control"; min-width: 88px; vertical-alignment: center; color: AppTheme.text-primary; }
+                ComboBox {
+                    horizontal-stretch: 1;
+                    model: [AppText.t("simulatorEnable"), AppText.t("simulatorDisable")];
+                    enabled: !UiState.simulator-busy;
+                    current-index <=> root.control;
+                }
+            }
+            HorizontalLayout {
+                spacing: 12px;
+                Text { text: "teleop"; min-width: 88px; vertical-alignment: center; color: AppTheme.text-primary; }
+                ComboBox {
+                    horizontal-stretch: 1;
+                    model: [AppText.t("simulatorEnable"), AppText.t("simulatorDisable")];
+                    enabled: !UiState.simulator-busy;
+                    current-index <=> root.teleop;
+                }
+            }
+            HorizontalLayout {
+                spacing: 12px;
+                Text { text: "planning"; min-width: 88px; vertical-alignment: center; color: AppTheme.text-primary; }
+                ComboBox {
+                    horizontal-stretch: 1;
+                    model: [AppText.t("simulatorEnable"), AppText.t("simulatorDisable")];
+                    enabled: !UiState.simulator-busy;
+                    current-index <=> root.planning;
+                }
+            }
+            Text { text: AppText.t("simulatorLaunchCommand"); color: AppTheme.text-secondary; font-size: 13px; }
+            Text {
+                text: "ros2 launch " + root.launch-package() + " " + root.launch-package() + ".launch.py control:="
+                    + (root.control == 0 ? "enable" : "disable")
+                    + " teleop:=" + (root.teleop == 0 ? "enable" : "disable")
+                    + " planning:=" + (root.planning == 0 ? "enable" : "disable");
+                wrap: word-wrap;
+                color: AppTheme.text-primary;
+                font-size: 14px;
+            }
+            HorizontalLayout {
+                spacing: 8px;
+                Button {
+                    text: AppText.t("simulatorStart");
+                    enabled: !UiState.simulator-busy;
+                    clicked => { UiActions.simulator-start(root.kind, root.control, root.teleop, root.planning); }
+                }
+                Button {
+                    text: AppText.t("simulatorStop");
+                    enabled: UiState.simulator-busy;
+                    clicked => { UiActions.simulator-stop(); }
+                }
+            }
+            Text { text: UiState.simulator-state; color: AppTheme.text-primary; font-weight: 600; }
+            if UiState.simulator-detail != "": Text {
+                text: UiState.simulator-detail;
+                wrap: word-wrap;
+                color: AppTheme.text-secondary;
+            }
+        }
+    }
+
+    Rectangle {
+        vertical-stretch: 1;
+        min-height: 180px;
+        border-radius: 12px;
+        background: AppTheme.input-background;
+        border-width: 1px;
+        border-color: AppTheme.border;
+        VerticalLayout {
+            padding: 12px;
+            spacing: 8px;
+            HorizontalLayout {
+                spacing: 8px;
+                Text {
+                    text: AppText.t("simulatorLog");
+                    color: AppTheme.text-primary;
+                    font-weight: 700;
+                    vertical-alignment: center;
+                }
+                Rectangle { horizontal-stretch: 1; }
+                Text {
+                    text: AppText.t("simulatorFontSize");
+                    color: AppTheme.text-secondary;
+                    font-size: 13px;
+                    vertical-alignment: center;
+                }
+                Button {
+                    text: "−";
+                    enabled: root.log-font-px > 8;
+                    clicked => { root.log-font-px = max(8, root.log-font-px - 1); }
+                }
+                Text {
+                    text: "" + root.log-font-px;
+                    min-width: 24px;
+                    horizontal-alignment: center;
+                    vertical-alignment: center;
+                    color: AppTheme.text-primary;
+                }
+                Button {
+                    text: "+";
+                    enabled: root.log-font-px < 28;
+                    clicked => { root.log-font-px = min(28, root.log-font-px + 1); }
+                }
+            }
+            // ScrollView's preferred size is 100% of its parent. Placed directly in
+            // this padded layout, that size ignores the padding and the viewport
+            // clips the left of the log. The host is sized by the layout instead.
+            log-host := Rectangle {
+                vertical-stretch: 1;
+                horizontal-stretch: 1;
+                clip: true;
+                log-view := ScrollView {
+                    width: parent.width;
+                    height: parent.height;
+                    horizontal-scrollbar-policy: ScrollBarPolicy.always-off;
+                    content-width: self.width;
+                    content-height: max(self.height, log-body.y + log-body.preferred-height + 4px);
+                    scrolled => {
+                        root.follow-log = self.content-y <= self.height - log-body.preferred-height - log-body.y + 32px;
+                    }
+
+                    log-body := Text {
+                        x: 8px;
+                        y: 4px;
+                        width: max(0px, log-view.visible-width - 24px);
+                        text: UiState.simulator-log == "" ? AppText.t("simulatorLogEmpty") : UiState.simulator-log;
+                        wrap: word-wrap;
+                        font-size: root.log-font-px * 1px;
+                        font-family: "DejaVu Sans Mono";
+                        color: UiState.simulator-log == "" ? AppTheme.text-secondary : AppTheme.text-primary;
+                    }
+                }
+            }
+        }
+    }
+}
+
+component EdgeGrip inherits TouchArea {
+    in property <int> edges;
+
+    function report(kind: int) {
+        UiActions.window-edge-drag(root.edges, kind, (self.x + self.mouse-x) / 1px, (self.y + self.mouse-y) / 1px);
+    }
+
+    pointer-event(event) => {
+        if (event.button == PointerEventButton.left && event.kind == PointerEventKind.down) {
+            root.report(0);
+        }
+        if (event.button == PointerEventButton.left && (event.kind == PointerEventKind.up || event.kind == PointerEventKind.cancel)) {
+            root.report(2);
+        }
+    }
+    moved => {
+        if (self.pressed) {
+            root.report(1);
+        }
+    }
+}
+
+export component MainWindow inherits Window {
+    title: AppText.t("appTitle");
+    preferred-width: 1440px;
+    preferred-height: 900px;
+    min-width: 960px;
+    min-height: 640px;
+    background: AppTheme.window-background;
+    no-frame: true;
+    // The winit X11 backend takes edge presses for a native resize that this
+    // window manager ignores, and it also drops the first maximize request.
+    // Edge grips and toggle-window-maximized handle both in the application.
+    resize-border-width: 0px;
+
+    property <int> section: 0;
+    property <bool> sidebar-collapsed: false;
+
+    init => {
+        Palette.color-scheme = ColorScheme.dark;
+    }
+
+    VerticalLayout {
+        Rectangle {
+            height: 36px;
+            background: AppTheme.header-background;
+            border-width: 1px;
+            border-color: AppTheme.border;
+
+            WindowMoveArea {
+                TouchArea {
+                    double-clicked => { UiActions.toggle-window-maximized(); }
+                }
+                HorizontalLayout {
+                    padding-left: 12px;
+                    Text {
+                        text: AppText.t("appTitle");
+                        color: AppTheme.text-secondary;
+                        font-size: 14px;
+                        font-weight: 700;
+                        vertical-alignment: center;
+                    }
+                    Rectangle { horizontal-stretch: 1; }
+                    TitleButton { label: "–"; clicked => { root.minimized = true; } }
+                    TitleButton {
+                        label: UiState.window-maximized ? "❐" : "□";
+                        clicked => { UiActions.toggle-window-maximized(); }
+                    }
+                    TitleButton {
+                        label: "×";
+                        danger: true;
+                        clicked => { root.hide(); }
+                    }
+                }
+            }
+        }
+
+        Rectangle {
+            background: AppTheme.header-background;
+        HorizontalLayout {
+            padding: 10px;
+            spacing: 16px;
+            Text { text: AppText.t("theme"); color: AppTheme.text-secondary; vertical-alignment: center; }
+            ComboBox {
+                model: [AppText.t("darkTheme"), AppText.t("lightTheme")];
+                selected => {
+                    AppTheme.dark = self.current-index == 0;
+                    Palette.color-scheme = AppTheme.dark ? ColorScheme.dark : ColorScheme.light;
+                    UiActions.appearance-changed();
+                }
+            }
+            Text { text: AppText.t("language"); color: AppTheme.text-secondary; vertical-alignment: center; }
+            ComboBox {
+                model: [AppText.t("english"), AppText.t("chinese")];
+                selected => {
+                    AppText.zh = self.current-index == 1;
+                    UiActions.appearance-changed();
+                }
+            }
+            Rectangle { horizontal-stretch: 1; }
+        }
+        }
+
+        HorizontalLayout {
+            vertical-stretch: 1;
+            spacing: 0;
+            Rectangle {
+                width: root.sidebar-collapsed ? 72px : 168px;
+                background: AppTheme.sidebar-background;
+                border-width: 1px;
+                border-color: AppTheme.border;
+                VerticalLayout {
+                    padding: 8px;
+                    spacing: 6px;
+                    NavButton {
+                        label: root.sidebar-collapsed ? "H" : AppText.t("hardware");
+                        selected: root.section == 0;
+                        clicked => { root.section = 0; }
+                    }
+                    NavButton {
+                        label: root.sidebar-collapsed ? "V" : AppText.t("video");
+                        selected: root.section == 1;
+                        clicked => { root.section = 1; }
+                    }
+                    NavButton {
+                        label: root.sidebar-collapsed ? "P" : AppText.t("plot");
+                        selected: root.section == 2;
+                        clicked => { root.section = 2; }
+                    }
+                    NavButton {
+                        label: root.sidebar-collapsed ? "S" : AppText.t("simulator");
+                        selected: root.section == 3;
+                        clicked => { root.section = 3; }
+                    }
+                    Rectangle { vertical-stretch: 1; }
+                    Text {
+                        text: UiState.ros-status;
+                        wrap: word-wrap;
+                        font-size: 12px;
+                        color: AppTheme.text-secondary;
+                    }
+                    Button {
+                        text: root.sidebar-collapsed ? ">" : "<";
+                        clicked => { root.sidebar-collapsed = !root.sidebar-collapsed; }
+                    }
+                }
+            }
+
+            Rectangle {
+                horizontal-stretch: 1;
+                background: AppTheme.content-background;
+                VerticalLayout {
+                    padding: 16px;
+                    if root.section == 0: HardwarePage { vertical-stretch: 1; }
+                    if root.section == 1: VideoPage { vertical-stretch: 1; }
+                    if root.section == 2: PlotPage { vertical-stretch: 1; }
+                    if root.section == 3: SimulatorPage { vertical-stretch: 1; }
+                }
+            }
+        }
+    }
+
+    if !UiState.window-maximized: EdgeGrip { x: 0px; y: 0px; width: root.width; height: 8px; edges: 1; mouse-cursor: ns-resize; }
+    if !UiState.window-maximized: EdgeGrip { x: 0px; y: root.height - 8px; width: root.width; height: 8px; edges: 2; mouse-cursor: ns-resize; }
+    if !UiState.window-maximized: EdgeGrip { x: 0px; y: 0px; width: 8px; height: root.height; edges: 4; mouse-cursor: ew-resize; }
+    if !UiState.window-maximized: EdgeGrip { x: root.width - 8px; y: 0px; width: 8px; height: root.height; edges: 8; mouse-cursor: ew-resize; }
+    if !UiState.window-maximized: EdgeGrip { x: 0px; y: 0px; width: 14px; height: 14px; edges: 5; mouse-cursor: nw-resize; }
+    if !UiState.window-maximized: EdgeGrip { x: root.width - 14px; y: 0px; width: 14px; height: 14px; edges: 9; mouse-cursor: ne-resize; }
+    if !UiState.window-maximized: EdgeGrip { x: 0px; y: root.height - 14px; width: 14px; height: 14px; edges: 6; mouse-cursor: sw-resize; }
+    if !UiState.window-maximized: EdgeGrip { x: root.width - 14px; y: root.height - 14px; width: 14px; height: 14px; edges: 10; mouse-cursor: se-resize; }
+}

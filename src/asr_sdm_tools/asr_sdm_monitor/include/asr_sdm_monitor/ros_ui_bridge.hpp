@@ -34,6 +34,8 @@ namespace asr_sdm_monitor
 class RosExecutorManager;
 }
 
+class QProcess;
+
 class RosUiBridge : public QObject
 {
     Q_OBJECT
@@ -178,6 +180,15 @@ public:
     Q_INVOKABLE QString pickExistingDirectory(const QString &title, const QString &startDir = QString());
     Q_INVOKABLE QString pickColor(const QString &title, const QString &initialColor = QString());
 
+    Q_PROPERTY(QString planningSimulatorState READ planningSimulatorState NOTIFY planningSimulatorChanged)
+    Q_PROPERTY(QString planningSimulatorDetail READ planningSimulatorDetail NOTIFY planningSimulatorChanged)
+    QString planningSimulatorState() const;
+    QString planningSimulatorDetail() const;
+    QString planningSimulatorLog() const;
+    Q_INVOKABLE bool startPlanningSimulator(
+        const QString &kind, const QString &control, const QString &teleop, const QString &planning);
+    Q_INVOKABLE void stopPlanningSimulator();
+
 signals:
     void rosStatusChanged();
 
@@ -220,6 +231,7 @@ signals:
     void playbackCurrentTimeMsChanged();
     void playbackSpeedChanged();
     void playbackPlayingChanged();
+    void planningSimulatorChanged();
 
 private:
     void diagnosticsCallback(const diagnostic_msgs::msg::DiagnosticArray::SharedPtr msg);
@@ -396,15 +408,15 @@ private:
     QTimer *gui_ros_spin_timer_ = nullptr;
     std::chrono::steady_clock::time_point playback_last_tick_;
 
-    // The lightweight ROS-to-GUI node remains serviced from the Qt GUI thread.
-    // It owns diagnostics and ROS graph discovery only; QML and plot rendering
-    // also remain in the Qt GUI thread.
+    // The lightweight ROS-to-GUI node remains serviced from the UI thread.
+    // It owns diagnostics and ROS graph discovery only; the Slint window and
+    // plot rendering also remain on that thread.
     rclcpp::Node::SharedPtr node_;
     std::unique_ptr<rclcpp::executors::SingleThreadedExecutor> gui_executor_;
 
     // Plot/Record data callbacks are isolated from the GUI in their own ROS
-    // executor thread.  They only prepare/buffer data; QML rendering remains in
-    // the Qt GUI thread via plot_update_timer_.
+    // executor thread.  They only prepare/buffer data; chart rendering remains in
+    // the UI thread via plot_update_timer_.
     rclcpp::Node::SharedPtr plot_node_;
 
     // The video node is serviced only by the video worker thread.
@@ -419,4 +431,19 @@ private:
     // thread 4 handles the potentially blocking hardware monitors.
     std::unique_ptr<asr_sdm_monitor::RosExecutorManager> executor_manager_;
     std::atomic_bool shutting_down_{false};
+
+    QProcess *planning_simulator_process_ = nullptr;
+    QString planning_simulator_state_ = QStringLiteral("idle");
+    QString planning_simulator_detail_;
+    QString planning_simulator_output_;
+    bool planning_simulator_stop_requested_ = false;
+    int planning_simulator_stop_generation_ = 0;
+
+    void ensurePlanningSimulatorProcess();
+    void appendPlanningSimulatorOutput();
+    void setPlanningSimulatorState(const QString &state, const QString &detail);
+    void requestPlanningSimulatorStop(bool wait);
+    void signalPlanningSimulator(int signalNumber) const;
+    void onPlanningSimulatorFinished(int exitCode, int exitStatus);
+    static bool isEnableDisableFlag(const QString &value);
 };

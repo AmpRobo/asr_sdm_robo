@@ -3,7 +3,7 @@
 <package format="3">
   <name>asr_sdm_monitor</name>
   <version>0.0.0</version>
-  <description>ROS2 /diagnostics topic visualizer built with Qt QML.</description>
+  <description>ROS 2 diagnostics, video, and plot monitor. The interface is Slint; Qt remains for timers, dialogs, and chart painting.</description>
   <maintainer email="15386742407@163.com">Yunxiu586</maintainer>
   <license>Apache-2.0</license>
 

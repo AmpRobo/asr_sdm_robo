@@ -24,13 +24,13 @@ RosUiBridge::RosUiBridge(QObject *parent)
     connect(plot_update_timer_, &QTimer::timeout, this, &RosUiBridge::flushLivePlotSamples);
     plot_update_timer_->start();
 
-    node_ = std::make_shared<rclcpp::Node>("diagnostics_qml_ui_node");
+    node_ = std::make_shared<rclcpp::Node>("diagnostics_ui_node");
     gui_executor_ = std::make_unique<rclcpp::executors::SingleThreadedExecutor>();
     gui_executor_->add_node(node_);
 
     // Thread 1 services only lightweight diagnostics and ROS graph discovery
-    // in short bounded slices. QML, plot rendering and final video display stay
-    // owned by the Qt GUI thread.
+    // in short bounded slices. The Slint UI, plot rendering and final video
+    // display stay on this thread.
     gui_ros_spin_timer_ = new QTimer(this);
     gui_ros_spin_timer_->setInterval(10);
     connect(gui_ros_spin_timer_, &QTimer::timeout, this, [this]()
@@ -41,8 +41,8 @@ RosUiBridge::RosUiBridge(QObject *parent)
     });
     gui_ros_spin_timer_->start();
 
-    plot_node_ = std::make_shared<rclcpp::Node>("plot_record_qml_ui_node");
-    video_node_ = std::make_shared<rclcpp::Node>("video_qml_ui_node");
+    plot_node_ = std::make_shared<rclcpp::Node>("plot_record_ui_node");
+    video_node_ = std::make_shared<rclcpp::Node>("video_ui_node");
 
     diagnostics_sub_ = node_->create_subscription<diagnostic_msgs::msg::DiagnosticArray>(
         "/diagnostics", 20,
@@ -110,6 +110,7 @@ void RosUiBridge::shutdown()
     }
 
     setPlaybackPlaying(false);
+    requestPlanningSimulatorStop(true);
 
     if (plot_update_timer_) {
         plot_update_timer_->stop();

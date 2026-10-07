@@ -1,0 +1,148 @@
+// Data the C++ bridge pushes into the UI, and the callbacks the UI sends back.
+// Chart bitmaps are rendered in C++ because Slint has no Canvas element.
+
+export struct TextRow {
+    c0: string,
+    c1: string,
+    c2: string,
+    c3: string,
+    c4: string,
+    c5: string,
+    c6: string,
+    c7: string,
+    c8: string,
+}
+
+export struct TopicRow {
+    key: string,
+    name: string,
+    type: string,
+    source: string,
+    capability: string,
+    selected: bool,
+}
+
+export struct SeriesRow {
+    field-index: int,
+    swatch: color,
+    line-width: float,
+}
+
+export global UiState {
+    in property <string> ros-status: "";
+
+    in property <[string]> cpu-values;
+    in property <[TextRow]> cpu-rows;
+    in property <image> cpu-chart;
+
+    in property <[string]> memory-values;
+    in property <[TextRow]> memory-rows;
+    in property <image> memory-chart;
+
+    in property <[string]> hdd-values;
+    in property <[TextRow]> hdd-rows;
+
+    in property <[string]> net-values;
+    in property <[TextRow]> net-rows;
+    in property <image> net-chart;
+    in property <string> net-scale: "";
+
+    in property <[string]> ntp-values;
+    in property <[TextRow]> ntp-rows;
+
+    in property <[string]> video-topics;
+    in-out property <int> video-index-0: 0;
+    in-out property <int> video-index-1: 0;
+    in-out property <int> video-index-2: 0;
+    in-out property <int> video-index-3: 0;
+    in property <string> video-status-0: "";
+    in property <string> video-status-1: "";
+    in property <string> video-status-2: "";
+    in property <string> video-status-3: "";
+    in property <string> video-topic-0: "";
+    in property <string> video-topic-1: "";
+    in property <string> video-topic-2: "";
+    in property <string> video-topic-3: "";
+    in property <image> video-frame-0;
+    in property <image> video-frame-1;
+    in property <image> video-frame-2;
+    in property <image> video-frame-3;
+    in property <bool> video-has-frame-0: false;
+    in property <bool> video-has-frame-1: false;
+    in property <bool> video-has-frame-2: false;
+    in property <bool> video-has-frame-3: false;
+
+    in property <string> topic-summary: "";
+    in property <[TopicRow]> plot-topics;
+    in property <[string]> y-field-labels;
+    in property <[string]> x-field-labels;
+    in property <[SeriesRow]> series-rows;
+    in property <image> plot-chart;
+    in property <bool> plot-has-data: false;
+    in property <string> plot-status: "";
+    in property <bool> recording: false;
+    in property <string> recording-status: "";
+    in property <string> recorded-status: "";
+    in property <bool> playback-playing: false;
+
+    in-out property <int> x-mode-index: 0;
+    in-out property <int> timestamp-index: 0;
+    in-out property <int> axis-scale-index: 0;
+    in-out property <int> x-field-index: 0;
+    in-out property <int> series-count: 1;
+    in-out property <bool> show-x-ticks: true;
+    in-out property <bool> show-y-ticks: true;
+    in property <string> time-window-text: "4.00";
+    in property <string> recording-path: "";
+    in property <string> recorded-path: "";
+    in property <string> playback-start-text: "";
+    in property <string> playback-end-text: "";
+    in property <string> playback-current-text: "";
+    in property <float> playback-position: 0;
+    in-out property <bool> playback-slider-hold: false;
+    in-out property <int> playback-speed-index: 2;
+    in property <int> editor-generation: 0;
+
+    in property <string> simulator-state: "";
+    in property <string> simulator-detail: "";
+    in property <bool> simulator-busy: false;
+    in property <string> simulator-log: "";
+    in property <bool> window-maximized: false;
+}
+
+export global UiActions {
+    callback appearance-changed();
+    callback video-count-changed(int);
+    callback video-topic-picked(int, int);
+    callback refresh-plot-topics();
+    callback topic-sort-changed(int);
+    callback plot-topic-toggled(int, bool);
+    callback plot-section-changed(int);
+    callback plot-settings-changed();
+    callback series-count-changed(int);
+    callback series-field-changed(int, int);
+    callback series-color-requested(int);
+    callback series-width-changed(int, float);
+    callback time-window-accepted(string);
+    callback browse-recording();
+    callback recording-path-accepted(string);
+    callback start-recording();
+    callback stop-recording();
+    callback browse-recorded();
+    callback recorded-path-accepted(string);
+    callback open-recorded();
+    callback toggle-playback();
+    callback playback-bound-accepted(string, string);
+    callback playback-seek(float);
+    callback playback-speed-changed(int);
+    callback reset-plot-view();
+    callback plot-resized(float, float);
+    callback plot-pointer(float, float, int);
+    callback plot-scroll(float, float, float);
+    callback simulator-start(int, int, int, int);
+    callback simulator-stop();
+    callback toggle-window-maximized();
+    // edges: north=1, south=2, west=4, east=8. kind: 0 press, 1 move, 2 release.
+    // x and y are the pointer position in window coordinates.
+    callback window-edge-drag(int, int, float, float);
+}

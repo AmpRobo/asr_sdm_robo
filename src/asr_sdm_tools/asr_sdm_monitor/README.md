@@ -2,13 +2,14 @@
 
 [toc]
 
-The interface is organized into 3 main modules:
+The interface is Slint and is organized into 4 main modules:
 
 - **Hardware**: run the integrated CPU, memory, disk, and network monitors and visualize `/diagnostics`; compatible external NTP diagnostics can also be displayed
 - **Video**: display `/perception*` and `/sensing*` image streams in selectable video windows
 - **Plot**: distinguish normal ROS 2 publishers from active `ros2 bag play` sources, visualize selected live data, record selected topics, and open rosbag / MCAP data independently for playback
+- **Simulator**: start `planning_simulator` or `logging_simulator`, choose whether control, teleop, and planning run, and show the launch output below the controls
 
-The top bar provides **Theme** and **Language** selectors. 
+The window draws its own title bar. Drag the title bar to move the window, double-click it or use the maximize button to fill the available screen, and drag an edge or corner to resize. The minimum size is 960×640. The top bar provides **Theme** and **Language** selectors. The dark theme is a deep navy palette; the light theme stays the pale blue-gray palette. 
 
 ### Quick start
 
@@ -20,12 +21,20 @@ rosdep install --from-paths src --ignore-src -r -y
 sudo apt-get install ros-jazzy-diagnostic-updater
 ```
 
-If the Qt 6 development and QML runtime modules are not installed, install them explicitly:
+If the Qt 6 base development package is not installed, install it explicitly. Qt remains for timers, file and color dialogs, and chart painting. The QML modules are not required:
 
 ```bash
 sudo apt update
-sudo apt install qt6-base-dev qt6-declarative-dev qml6-module-qtquick qml6-module-qtquick-controls qml6-module-qtquick-layouts qml6-module-qtquick-window qml6-module-qtquick-templates qml6-module-qtqml-workerscript
+sudo apt install qt6-base-dev
 ```
+
+The interface links a prebuilt Slint C++ library. By default the build looks in `/home/michael/Documents/code/dependency/slint/cppbuild/api/cpp` for `libslint_cpp.so` and `slint-compiler`. Set `ASR_SDM_SLINT_ROOT` when that checkout lives somewhere else:
+
+```bash
+colcon build --packages-select asr_sdm_monitor --cmake-args -DASR_SDM_SLINT_ROOT=/path/to/slint
+```
+
+The package installs a copy of `libslint_cpp.so` next to its library directory so the installed executable can load it.
 
 Build and run:
 
@@ -55,7 +64,7 @@ ros2 run asr_sdm_monitor asr_sdm_monitor
 
 | Execution domain | Main responsibilities |
 |---|---|
-| **Qt GUI thread** | QML pages, chart rendering, batched plot refresh, final video display, lightweight diagnostics handling, and ROS graph discovery |
+| **UI thread** | Slint window, chart rendering, batched plot refresh, final video display, lightweight diagnostics handling, ROS graph discovery, and the simulator launch process |
 | **Plot / Record executor** | Typed plot subscriptions, publisher-GID source filtering, numeric field extraction, generic recording subscriptions, and rosbag2 writing |
 | **Video executor** | `Image` / `CompressedImage` subscriptions and image decoding |
 | **Hardware executor** | Integrated CPU, memory, disk, and network monitor nodes |
@@ -103,7 +112,7 @@ If `lm-sensors` is not installed, temperature checks may fail while usage, memor
 
 #### Function
 
-The CPU, memory, disk, and network monitor nodes are built into `asr_sdm_monitor`. Starting the application with the following single command starts both the Qt/QML interface and all integrated hardware monitors:
+The CPU, memory, disk, and network monitor nodes are built into `asr_sdm_monitor`. Starting the application with the following single command starts both the Slint interface and all integrated hardware monitors:
 
 ```bash
 ros2 run asr_sdm_monitor asr_sdm_monitor
@@ -525,7 +534,7 @@ Playback behavior:
 | **Show tick labels** | `On`, `Off` | `On` | Show or hide Y-axis tick labels |
 | **Series Label** | `None` or an available plottable field | `None` | Field used by this curve |
 | **Series Color** | Color dialog or text value | Automatic palette color | Color of the curve |
-| **Line width** | Positive number, minimum 0.1 | 1.0 | Width of the curve line |
+| **Line width** | 0.5 to 6, step 0.5 | 1.0 | Width of the curve line |
 
 Series behavior:
 
@@ -577,9 +586,72 @@ Series behavior:
 
    ![Plot Recorded playback](docs/images/plot_recorded_playback.png)
 
+### Simulator
+
+#### Function
+
+The **Simulator** page launches one simulator stack and prints its output in the pane below the controls. RViz opens in its own window. Launch arguments that are not listed here, including the robot model, keep the defaults of the selected launch file.
+
+| Choice | Launch file |
+|---|---|
+| **planning_simulator** | `ros2 launch planning_simulator planning_simulator.launch.py` |
+| **logging_simulator** | `ros2 launch logging_simulator logging_simulator.launch.py` |
+
+Both launch files accept the same three switches. Each switch is `enable` or `disable`:
+
+| Switch | Starts |
+|---|---|
+| **control** | `asr_sdm_control_manager` |
+| **teleop** | `asr_sdm_teleop` |
+| **planning** | `asr_sdm_planning_manager` |
+
+Opening the page selects **planning_simulator**, with control enabled and teleop and planning disabled. Switching to **logging_simulator** sets all three switches to disable, matching that launch file. The switches can be changed again before **Start**.
+
+#### Buttons and controls
+
+| Control | Function |
+|---|---|
+| **Simulator** | Choose `planning_simulator` or `logging_simulator` |
+| **control / teleop / planning** | Enable or disable that part of the stack |
+| **Launch command** | Show the `ros2 launch` line that **Start** will run |
+| **Start** | Launch the selected simulator. Disabled while a launch is running or stopping |
+| **Stop** | Stop the running launch. Disabled while nothing is running |
+| **Log** | Show the merged standard output and standard error of the launch |
+| **Font** | Change the log text size from 8 to 28. The default is 12 |
+
+#### Launch and log behavior
+
+- **Start** runs the displayed command in its own process group.
+- A new start clears the log. New lines are appended, and the pane follows the latest line.
+- Scrolling upward pauses that following. Returning to the bottom resumes it.
+- Color control codes are removed before the text is shown.
+- **Stop** signals the whole process group, first with SIGINT and then with SIGTERM and SIGKILL if the launch does not exit.
+- Only one simulator launch runs at a time.
+
+#### Typical workflow
+
+1. Open **Simulator** from the sidebar.
+
+2. Choose **planning_simulator** or **logging_simulator**.
+
+3. Set **control**, **teleop**, and **planning**.
+
+4. Click **Start**. Read the launch output in the log pane.
+
+5. Click **Stop** when the simulator should exit.
+
 ---
 
 ### 快速开始
+
+界面使用 Slint，包含四个模块：
+
+- **Hardware**：运行内置的 CPU、内存、磁盘和网络监测，并显示 `/diagnostics`；外部节点发布的兼容 NTP 诊断也可以显示
+- **Video**：在可选的视频窗口中显示 `/perception*` 和 `/sensing*` 图像流
+- **Plot**：区分普通 ROS 2 publisher 和正在运行的 `ros2 bag play`，可视化所选实时数据，录制所选话题，并独立打开 rosbag / MCAP 进行回放
+- **Simulator**：启动 `planning_simulator` 或 `logging_simulator`，选择是否运行 control、teleop 和 planning，并在控件下方显示 launch 输出
+
+窗口使用自绘标题栏。拖动标题栏移动窗口，双击标题栏或点击最大化按钮铺满可用屏幕，拖拽边或角改变大小。最小尺寸是 960×640。顶部可以选择 **Theme** 和 **Language**。深色主题是深蓝配色，浅色主题保持原来的浅灰蓝配色。
 
 目标环境为 Ubuntu 24.04、ROS 2 Jazzy 和 Qt 6。请在 ROS 2 workspace 根目录执行：
 
@@ -588,15 +660,20 @@ source /opt/ros/jazzy/setup.bash
 rosdep install --from-paths src --ignore-src -r -y
 ```
 
-如果尚未安装 Qt 6 开发包和 QML 运行模块，可显式安装：
+如果尚未安装 Qt 6 基础开发包，可显式安装。Qt 仍用于定时器、文件和颜色对话框，以及图表绘制。不再需要 QML 模块：
 
 ```bash
 sudo apt update
-sudo apt install qt6-base-dev qt6-declarative-dev \
-  qml6-module-qtquick qml6-module-qtquick-controls \
-  qml6-module-qtquick-layouts qml6-module-qtquick-window \
-  qml6-module-qtqml-workerscript
+sudo apt install qt6-base-dev
 ```
+
+界面链接预先编译好的 Slint C++ 库。默认在 `/home/michael/Documents/code/dependency/slint/cppbuild/api/cpp` 查找 `libslint_cpp.so` 和 `slint-compiler`。库放在其他目录时，用 `ASR_SDM_SLINT_ROOT` 指向那个 Slint 源码树：
+
+```bash
+colcon build --packages-select asr_sdm_monitor --cmake-args -DASR_SDM_SLINT_ROOT=/path/to/slint
+```
+
+安装时会把 `libslint_cpp.so` 复制到本包库目录的上一级，供安装后的可执行文件加载。
 
 编译并启动：
 
@@ -627,7 +704,7 @@ ros2 run asr_sdm_monitor asr_sdm_monitor --ros-args \
 
 | 执行域 | 主要职责 |
 |---|---|
-| **Qt GUI 主线程** | QML 页面、曲线最终绘制、Plot 数据批量刷新、视频最终显示、轻量 diagnostics 处理和 ROS graph 话题发现 |
+| **UI 主线程** | Slint 窗口、曲线最终绘制、Plot 数据批量刷新、视频最终显示、轻量 diagnostics 处理、ROS graph 话题发现，以及仿真 launch 进程 |
 | **Plot / Record executor** | 类型化绘图订阅、publisher GID 来源过滤、数值字段提取、通用录制订阅和 rosbag2 写入 |
 | **Video executor** | `Image` / `CompressedImage` 订阅和图像解码 |
 | **Hardware executor** | 内置 CPU、内存、磁盘和网络监测节点 |
@@ -675,7 +752,7 @@ sensors
 
 #### 功能
 
-CPU、内存、磁盘和网络监测节点已经内置在 `asr_sdm_monitor` 中。执行下面一个命令即可同时启动 Qt/QML 界面和全部内置硬件监测：
+CPU、内存、磁盘和网络监测节点已经内置在 `asr_sdm_monitor` 中。执行下面一个命令即可同时启动 Slint 界面和全部内置硬件监测：
 
 ```bash
 ros2 run asr_sdm_monitor asr_sdm_monitor
@@ -1097,7 +1174,7 @@ Live 与录制行为：
 | **Show tick labels** | `On`, `Off` | `On` | 是否显示 Y 轴刻度标签 |
 | **Series Label** | `None` 或当前数据源中的可用绘图字段 | `None` | 该曲线使用的字段 |
 | **Series Color** | 颜色对话框或文本颜色值 | 自动颜色 | 曲线颜色 |
-| **Line width** | 正数，最小 0.1 | 1.0 | 曲线线宽 |
+| **Line width** | 0.5 到 6，步进 0.5 | 1.0 | 曲线线宽 |
 
 曲线行为：
 
@@ -1148,6 +1225,60 @@ Live 与录制行为：
 9. 从已打开 bag 的字段中选择曲线，设置 **Start Time**、**End Time**、**Current Time** 和 **Speed**，然后点击 **Play**。
 
    ![Plot Recorded 回放](docs/images/plot_recorded_playback.png)
+
+### Simulator
+
+#### 功能
+
+**Simulator** 页面启动一套仿真，并在控件下方的窗口打印输出。RViz 在单独窗口打开。这里没有列出的 launch 参数，包括机器人模型，沿用所选 launch 文件的默认值。
+
+| 选项 | Launch 文件 |
+|---|---|
+| **planning_simulator** | `ros2 launch planning_simulator planning_simulator.launch.py` |
+| **logging_simulator** | `ros2 launch logging_simulator logging_simulator.launch.py` |
+
+两个 launch 文件使用同一组开关，取值都是 `enable` 或 `disable`：
+
+| 开关 | 启动内容 |
+|---|---|
+| **control** | `asr_sdm_control_manager` |
+| **teleop** | `asr_sdm_teleop` |
+| **planning** | `asr_sdm_planning_manager` |
+
+打开页面时默认选择 **planning_simulator**，control 为 enable，teleop 和 planning 为 disable。改成 **logging_simulator** 后，三个开关都会设为 disable，与该 launch 文件的默认值一致。启动前仍可以再改这三个开关。
+
+#### 按钮和控件
+
+| 控件 | 作用 |
+|---|---|
+| **Simulator** | 选择 `planning_simulator` 或 `logging_simulator` |
+| **control / teleop / planning** | 启用或关闭对应部分 |
+| **Launch command** | 显示 **Start** 将要执行的 `ros2 launch` 命令 |
+| **Start** | 启动所选仿真。正在运行或正在停止时不可用 |
+| **Stop** | 停止当前 launch。没有运行中的仿真时不可用 |
+| **Log** | 显示 launch 合并后的标准输出和标准错误 |
+| **Font** | 调整日志字号，范围 8 到 28，默认 12 |
+
+#### 启动和日志行为
+
+- **Start** 会在独立进程组中运行界面上显示的命令。
+- 每次新的启动都会清空日志。新输出追加在末尾，窗口跟随最新一行。
+- 向上滚动时停止跟随，滚回底部后继续跟随。
+- 显示前会去掉颜色控制码。
+- **Stop** 向整个进程组发信号：先 SIGINT，若仍未退出再 SIGTERM，最后 SIGKILL。
+- 同一时间只运行一个仿真 launch。
+
+#### 典型使用流程
+
+1. 在侧边栏打开 **Simulator**。
+
+2. 选择 **planning_simulator** 或 **logging_simulator**。
+
+3. 设置 **control**、**teleop** 和 **planning**。
+
+4. 点击 **Start**，在下方日志窗口查看 launch 输出。
+
+5. 需要退出仿真时点击 **Stop**。
 
 ## 版本记录
 
@@ -1230,8 +1361,8 @@ export ROS_AUTOMATIC_DISCOVERY_RANGE=LOCALHOST
 - 多线程：
 
 ```text
-线程 1：Qt GUI 主线程
-├── 所有 QML 页面
+线程 1：UI 主线程
+├── Slint 界面
 ├── Plot 曲线最终绘制
 ├── Plot 数据批量刷新
 ├── 视频最终显示
@@ -1255,3 +1386,10 @@ export ROS_AUTOMATIC_DISCOVERY_RANGE=LOCALHOST
 ├── Disk
 └── Network
 ```
+
+### 当前界面
+
+- 界面改为 Slint，不再使用 QML。Qt 仍负责定时器、文件和颜色对话框，以及硬件图和 Plot 曲线的绘制。
+- 深色主题改为深蓝配色。
+- 窗口无系统边框：拖动标题栏移动，双击标题栏或最大化按钮铺满可用屏幕，拖拽边框缩放。
+- 增加 Simulator 页面，可选择 `planning_simulator` 或 `logging_simulator`，设置 control、teleop、planning，并在下方显示 launch 输出。日志字号可在 8 到 28 之间调整。

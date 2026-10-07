@@ -1,0 +1,180 @@
+// Visual tokens and UI copy for the monitor. `zh` switches every `t()` lookup.
+
+export global AppTheme {
+    in-out property <bool> dark: true;
+
+    // Dark colors are a deep navy. Chart painting uses the same surface, grid, and text values.
+    out property <color> window-background: dark ? #0b1220 : #ffffff;
+    out property <color> sidebar-background: dark ? #0e182b : #f8fbff;
+    out property <color> content-background: dark ? #0b1220 : #ffffff;
+    out property <color> surface-background: dark ? #16263d : #ffffff;
+    out property <color> header-background: dark ? #101a2e : #f5f8fc;
+    out property <color> input-background: dark ? #091018 : #ffffff;
+    out property <color> row-alt: dark ? #122033 : #fbfdff;
+    out property <color> border: dark ? #2c4060 : #dbe4ef;
+    out property <color> text-primary: dark ? #e7eef8 : #1e2b3a;
+    out property <color> text-secondary: dark ? #8fa3bf : #607285;
+    out property <color> accent: dark ? #5b9dff : #2a6df4;
+    out property <color> accent-text: #ffffff;
+    out property <color> danger: #c42b1c;
+    out property <color> card-value: dark ? #d7e6f8 : #32465a;
+    out property <color> selected-nav: dark ? #1a3a66 : #edf4ff;
+}
+
+export global AppText {
+    in-out property <bool> zh: false;
+
+    public pure function t(key: string) -> string {
+        if (key == "appTitle") { return zh ? "ASR SDM 监控界面" : "ASR SDM Monitor"; }
+        if (key == "theme") { return zh ? "主题" : "Theme"; }
+        if (key == "language") { return zh ? "语言" : "Language"; }
+        if (key == "darkTheme") { return zh ? "深色主题" : "dark theme"; }
+        if (key == "lightTheme") { return zh ? "浅色主题" : "light theme"; }
+        if (key == "english") { return "English"; }
+        if (key == "chinese") { return "中文"; }
+        if (key == "hardware") { return zh ? "硬件" : "Hardware"; }
+        if (key == "video") { return zh ? "视频" : "Video"; }
+        if (key == "plot") { return zh ? "绘图" : "Plot"; }
+        if (key == "simulator") { return zh ? "仿真" : "Simulator"; }
+        if (key == "collapseSidebar") { return zh ? "收起侧边栏" : "Collapse sidebar"; }
+        if (key == "expandSidebar") { return zh ? "展开侧边栏" : "Expand sidebar"; }
+        if (key == "minimize") { return zh ? "最小化" : "Minimize"; }
+        if (key == "maximize") { return zh ? "最大化" : "Maximize"; }
+        if (key == "restoreDown") { return zh ? "向下还原" : "Restore Down"; }
+        if (key == "close") { return zh ? "关闭" : "Close"; }
+        if (key == "cpu") { return "CPU"; }
+        if (key == "memory") { return zh ? "内存" : "Memory"; }
+        if (key == "hdd") { return "HDD"; }
+        if (key == "net") { return zh ? "网络" : "Net"; }
+        if (key == "ntp") { return "NTP"; }
+        if (key == "avgUsage") { return zh ? "平均占用" : "Average Usage"; }
+        if (key == "maxCoreUsage") { return zh ? "最高核心占用" : "Max Core Usage"; }
+        if (key == "avgClock") { return zh ? "平均主频" : "Average Clock"; }
+        if (key == "load1") { return zh ? "1分钟负载" : "1min Load"; }
+        if (key == "load5") { return zh ? "5分钟负载" : "5min Load"; }
+        if (key == "load15") { return zh ? "15分钟负载" : "15min Load"; }
+        if (key == "coreCount") { return zh ? "核心数" : "Core Count"; }
+        if (key == "state") { return zh ? "状态" : "State"; }
+        if (key == "cpuHistory") { return zh ? "CPU 使用率历史" : "CPU Usage History"; }
+        if (key == "percentScale") { return zh ? "百分比图量程: 0 - 1" : "Percent Scale: 0 - 1"; }
+        if (key == "coreDetails") { return zh ? "核心详情" : "Core Details"; }
+        if (key == "core") { return zh ? "核心" : "Core"; }
+        if (key == "usage") { return zh ? "占用" : "Usage"; }
+        if (key == "clock") { return zh ? "频率" : "Clock"; }
+        if (key == "user") { return zh ? "用户态" : "User"; }
+        if (key == "system") { return zh ? "系统态" : "System"; }
+        if (key == "idle") { return zh ? "空闲" : "Idle"; }
+        if (key == "status") { return zh ? "状态" : "Status"; }
+        if (key == "usedPhysical") { return zh ? "物理已用" : "Physical Used"; }
+        if (key == "totalPhysical") { return zh ? "物理总量" : "Physical Total"; }
+        if (key == "freePhysical") { return zh ? "物理空闲" : "Physical Free"; }
+        if (key == "usagePercent") { return zh ? "使用率" : "Usage"; }
+        if (key == "usedSwap") { return zh ? "交换分区已用" : "Swap Used"; }
+        if (key == "totalSwap") { return zh ? "交换分区总量" : "Swap Total"; }
+        if (key == "updateStatus") { return zh ? "更新状态" : "Update Status"; }
+        if (key == "memoryHistory") { return zh ? "内存使用率历史" : "Memory Usage History"; }
+        if (key == "memoryDetails") { return zh ? "内存详情" : "Memory Details"; }
+        if (key == "type") { return zh ? "类型" : "Type"; }
+        if (key == "total") { return zh ? "总量" : "Total"; }
+        if (key == "used") { return zh ? "已用" : "Used"; }
+        if (key == "free") { return zh ? "空闲" : "Free"; }
+        if (key == "diskCount") { return zh ? "磁盘数量" : "Disk Count"; }
+        if (key == "worstUse") { return zh ? "最高占用" : "Max Usage"; }
+        if (key == "stateLevel") { return zh ? "状态等级" : "Status Level"; }
+        if (key == "stateDescription") { return zh ? "状态说明" : "Status Description"; }
+        if (key == "diskDetails") { return zh ? "磁盘详情" : "Disk Details"; }
+        if (key == "disk") { return zh ? "磁盘" : "Disk"; }
+        if (key == "mount") { return zh ? "挂载点" : "Mount"; }
+        if (key == "size") { return zh ? "容量" : "Size"; }
+        if (key == "available") { return zh ? "可用" : "Available"; }
+        if (key == "use") { return zh ? "占用" : "Use"; }
+        if (key == "totalInput") { return zh ? "总输入流量" : "Total Input"; }
+        if (key == "totalOutput") { return zh ? "总输出流量" : "Total Output"; }
+        if (key == "interfaceCount") { return zh ? "接口数量" : "Interface Count"; }
+        if (key == "errorCount") { return zh ? "错误计数" : "Error Count"; }
+        if (key == "interfaceList") { return zh ? "接口列表" : "Interface List"; }
+        if (key == "ipAddressList") { return zh ? "IP 地址" : "IP Addresses"; }
+        if (key == "ipAddress") { return zh ? "IP 地址" : "IP Address"; }
+        if (key == "inputHistory") { return zh ? "输入历史" : "Input History"; }
+        if (key == "outputHistory") { return zh ? "输出历史" : "Output History"; }
+        if (key == "interfaceDetails") { return zh ? "接口详情" : "Interface Details"; }
+        if (key == "interface") { return zh ? "接口" : "Interface"; }
+        if (key == "input") { return zh ? "输入" : "Input"; }
+        if (key == "output") { return zh ? "输出" : "Output"; }
+        if (key == "rxErr") { return zh ? "接收错误" : "RxErr"; }
+        if (key == "txErr") { return zh ? "发送错误" : "TxErr"; }
+        if (key == "totalRx") { return zh ? "总接收" : "TotalRx"; }
+        if (key == "totalTx") { return zh ? "总发送" : "TotalTx"; }
+        if (key == "offset") { return zh ? "偏移" : "Offset"; }
+        if (key == "tolerance") { return zh ? "容差" : "Tolerance"; }
+        if (key == "errorTolerance") { return zh ? "误差容差" : "Error Tolerance"; }
+        if (key == "ntpDetails") { return zh ? "NTP 详情" : "NTP Details"; }
+        if (key == "name") { return zh ? "名称" : "Name"; }
+        if (key == "value") { return zh ? "值" : "Value"; }
+        if (key == "videoWindowCount") { return zh ? "视频窗口" : "Video Windows"; }
+        if (key == "videoWindow") { return zh ? "视频窗口" : "Video Window"; }
+        if (key == "videoTopic") { return zh ? "话题" : "Topic"; }
+        if (key == "none") { return zh ? "无" : "None"; }
+        if (key == "currentVideoTopic") { return zh ? "当前话题:" : "Current Topic:"; }
+        if (key == "videoStatus") { return zh ? "状态:" : "Status:"; }
+        if (key == "topics") { return zh ? "话题" : "Topics"; }
+        if (key == "live") { return zh ? "实时" : "Live"; }
+        if (key == "recorded") { return zh ? "回放" : "Recorded"; }
+        if (key == "refresh") { return zh ? "刷新" : "Refresh"; }
+        if (key == "topicSort") { return zh ? "排序" : "Sort"; }
+        if (key == "topicSortNameAscending") { return zh ? "名称正序 A–Z" : "Name A–Z"; }
+        if (key == "topicSortNameDescending") { return zh ? "名称倒序 Z–A" : "Name Z–A"; }
+        if (key == "topicSortSource") { return zh ? "话题来源" : "Source"; }
+        if (key == "topicSortPlottableFirst") { return zh ? "可绘图优先" : "Plottable first"; }
+        if (key == "unifiedTopicCandidateHint") { return zh ? "这里同时展示 ROS 2 实时话题和正在播放的数据包话题。同一话题名称只能选择一个来源；Recorded 打开数据包后会直接读取其中全部可绘图话题。" : "ROS 2 Live and active ros2 bag play topics are shown here. Only one source can be selected for the same topic name. Recorded reads all plottable topics directly when a bag is opened."; }
+        if (key == "topicName") { return zh ? "话题" : "Topic"; }
+        if (key == "topicType") { return zh ? "类型" : "Type"; }
+        if (key == "topicSource") { return zh ? "来源" : "Source"; }
+        if (key == "topicCapability") { return zh ? "能力" : "Capability"; }
+        if (key == "plotHint") { return zh ? "时间序列图使用时间作为 X 轴，话题消息字段作为 Y 轴。XY 图使用话题消息字段分别作为 X 轴和 Y 轴。" : "Time series uses time as X and a topic message field as Y. XY plot uses topic message fields for both X and Y."; }
+        if (key == "recordingFile") { return zh ? "录制文件" : "Recording Bag"; }
+        if (key == "startRecording") { return zh ? "开始录制" : "Start Recording"; }
+        if (key == "stopRecording") { return zh ? "停止录制" : "Stop Recording"; }
+        if (key == "resetView") { return zh ? "重置视野" : "Reset"; }
+        if (key == "xAxis") { return zh ? "X 轴" : "X Axis"; }
+        if (key == "yAxis") { return zh ? "Y 轴" : "Y Axis"; }
+        if (key == "labelType") { return zh ? "标签类型" : "Label type"; }
+        if (key == "time") { return zh ? "时间" : "Time"; }
+        if (key == "topicMessage") { return zh ? "话题消息" : "Topic Message"; }
+        if (key == "timestampFormat") { return zh ? "时间戳格式" : "Timestamp format"; }
+        if (key == "relativeTime") { return zh ? "相对时间" : "Relative Time"; }
+        if (key == "absoluteTime") { return zh ? "绝对时间" : "Absolute Time"; }
+        if (key == "showTickLabels") { return zh ? "显示刻度标签" : "Show tick labels"; }
+        if (key == "timeWindow") { return zh ? "时间窗口" : "Time window"; }
+        if (key == "seriesNumber") { return zh ? "曲线数量" : "Series number"; }
+        if (key == "series") { return zh ? "曲线" : "Series"; }
+        if (key == "label") { return zh ? "标签" : "Label"; }
+        if (key == "color") { return zh ? "颜色" : "Color"; }
+        if (key == "lineWidth") { return zh ? "线宽" : "Line width"; }
+        if (key == "axisScale") { return zh ? "坐标轴比例" : "Axis Scale"; }
+        if (key == "independent") { return zh ? "独立" : "Independent"; }
+        if (key == "square") { return zh ? "等比例" : "Square"; }
+        if (key == "waitingPlotData") { return zh ? "等待选中的绘图话题数据 ..." : "Waiting for selected plot topic data ..."; }
+        if (key == "recordedFile") { return zh ? "回放文件" : "Recorded Bag"; }
+        if (key == "open") { return zh ? "打开" : "Open"; }
+        if (key == "playbackManager") { return zh ? "回放管理" : "Playback Manager"; }
+        if (key == "startTime") { return zh ? "开始时间" : "Start Time"; }
+        if (key == "endTime") { return zh ? "结束时间" : "End Time"; }
+        if (key == "currentTime") { return zh ? "当前时间" : "Current Time"; }
+        if (key == "speed") { return zh ? "速度" : "Speed"; }
+        if (key == "play") { return zh ? "播放" : "Play"; }
+        if (key == "pause") { return zh ? "暂停" : "Pause"; }
+        if (key == "browse") { return zh ? "浏览" : "Browse"; }
+        if (key == "simulatorHint") { return zh ? "选择 planning_simulator 或 logging_simulator。RViz 在单独窗口打开。未在这里列出的 launch 参数沿用各自的默认值。" : "Choose planning_simulator or logging_simulator. RViz opens in its own window. Launch arguments not listed here keep that launch file's defaults."; }
+        if (key == "simulatorKind") { return zh ? "仿真" : "Simulator"; }
+        if (key == "simulatorLaunchCommand") { return zh ? "启动命令" : "Launch command"; }
+        if (key == "simulatorStart") { return zh ? "启动" : "Start"; }
+        if (key == "simulatorStop") { return zh ? "停止" : "Stop"; }
+        if (key == "simulatorEnable") { return "enable"; }
+        if (key == "simulatorDisable") { return "disable"; }
+        if (key == "simulatorLog") { return zh ? "日志" : "Log"; }
+        if (key == "simulatorLogEmpty") { return zh ? "启动后在这里显示仿真输出。" : "Simulator output appears here after start."; }
+        if (key == "simulatorFontSize") { return zh ? "字号" : "Font"; }
+        return key;
+    }
+}
