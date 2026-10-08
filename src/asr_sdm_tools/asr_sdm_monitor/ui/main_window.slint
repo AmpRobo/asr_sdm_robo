@@ -1153,7 +1153,19 @@ export component MainWindow inherits Window {
                     double-clicked => { UiActions.toggle-window-maximized(); }
                 }
                 HorizontalLayout {
-                    padding-left: 12px;
+                    padding-left: 8px;
+                    spacing: 8px;
+                    Rectangle {
+                        width: 33px;
+                        vertical-stretch: 1;
+                        Image {
+                            y: (parent.height - self.height) / 2;
+                            width: 33px;
+                            height: 24px;
+                            source: @image-url("../pic/logo_title.png");
+                            image-fit: contain;
+                        }
+                    }
                     Text {
                         text: AppText.t("appTitle");
                         color: AppTheme.text-secondary;
