@@ -28,13 +28,11 @@ sudo apt update
 sudo apt install qt6-base-dev
 ```
 
-The interface links a prebuilt Slint C++ library. By default the build looks in `/home/michael/Documents/code/dependency/slint/cppbuild/api/cpp` for `libslint_cpp.so` and `slint-compiler`. Set `ASR_SDM_SLINT_ROOT` when that checkout lives somewhere else:
+The interface links the system-installed Slint C++ library through `find_package(Slint)`. Install Slint into `/usr/local` first; see `docs/slint_setup.md` at the repository root. The build then picks up `/usr/local/lib/libslint_cpp.so`, `/usr/local/bin/slint-compiler`, and `/usr/local/lib/cmake/Slint/` without extra arguments. When Slint is installed under another prefix, such as `~/.local`, pass that prefix to CMake:
 
 ```bash
-colcon build --packages-select asr_sdm_monitor --cmake-args -DASR_SDM_SLINT_ROOT=/path/to/slint
+colcon build --packages-select asr_sdm_monitor --cmake-args -DCMAKE_PREFIX_PATH=$HOME/.local
 ```
-
-The package installs a copy of `libslint_cpp.so` next to its library directory so the installed executable can load it.
 
 Build and run:
 
@@ -667,13 +665,11 @@ sudo apt update
 sudo apt install qt6-base-dev
 ```
 
-界面链接预先编译好的 Slint C++ 库。默认在 `/home/michael/Documents/code/dependency/slint/cppbuild/api/cpp` 查找 `libslint_cpp.so` 和 `slint-compiler`。库放在其他目录时，用 `ASR_SDM_SLINT_ROOT` 指向那个 Slint 源码树：
+界面通过 `find_package(Slint)` 链接系统安装的 Slint C++ 库。先把 Slint 安装到 `/usr/local`，步骤见仓库根目录的 `docs/slint_setup.md`。之后编译会直接使用 `/usr/local/lib/libslint_cpp.so`、`/usr/local/bin/slint-compiler` 和 `/usr/local/lib/cmake/Slint/`，不需要额外参数。Slint 装在其他前缀（例如 `~/.local`）时，把该前缀传给 CMake：
 
 ```bash
-colcon build --packages-select asr_sdm_monitor --cmake-args -DASR_SDM_SLINT_ROOT=/path/to/slint
+colcon build --packages-select asr_sdm_monitor --cmake-args -DCMAKE_PREFIX_PATH=$HOME/.local
 ```
-
-安装时会把 `libslint_cpp.so` 复制到本包库目录的上一级，供安装后的可执行文件加载。
 
 编译并启动：
 

@@ -16,41 +16,7 @@ find_package(geometry_msgs REQUIRED)
 find_package(std_msgs REQUIRED)
 find_package(rosbag2_cpp REQUIRED)
 find_package(Qt6 REQUIRED COMPONENTS Core Gui Widgets)
-
-set(ASR_SDM_SLINT_ROOT "/home/michael/Documents/code/dependency/slint" CACHE PATH
-    "Slint checkout that has already been configured under cppbuild/api/cpp")
-set(ASR_SDM_SLINT_BUILD "${ASR_SDM_SLINT_ROOT}/cppbuild/api/cpp")
-set(ASR_SDM_SLINT_LIBRARY "${ASR_SDM_SLINT_BUILD}/libslint_cpp.so")
-set(ASR_SDM_SLINT_COMPILER "${ASR_SDM_SLINT_BUILD}/slint-compiler")
-
-if(NOT EXISTS "${ASR_SDM_SLINT_LIBRARY}" OR NOT EXISTS "${ASR_SDM_SLINT_COMPILER}")
-    message(FATAL_ERROR
-        "Slint C++ build not found at ${ASR_SDM_SLINT_BUILD}. "
-        "Build api/cpp in the Slint checkout or set ASR_SDM_SLINT_ROOT.")
-endif()
-
-add_library(slint_cpp-shared SHARED IMPORTED)
-set_target_properties(slint_cpp-shared PROPERTIES
-    IMPORTED_LOCATION "${ASR_SDM_SLINT_LIBRARY}"
-    IMPORTED_NO_SONAME TRUE)
-
-add_library(Slint::slint_cpp INTERFACE IMPORTED)
-set_target_properties(Slint::slint_cpp PROPERTIES
-    INTERFACE_LINK_LIBRARIES slint_cpp-shared)
-
-add_library(Slint::Slint INTERFACE IMPORTED)
-set_target_properties(Slint::Slint PROPERTIES
-    INTERFACE_COMPILE_FEATURES cxx_std_20
-    INTERFACE_INCLUDE_DIRECTORIES "${ASR_SDM_SLINT_BUILD}/generated_include;${ASR_SDM_SLINT_ROOT}/api/cpp/include"
-    INTERFACE_LINK_LIBRARIES "Slint::slint_cpp"
-    SLINT_ENABLED_FEATURES "INTERPRETER")
-
-add_executable(Slint::slint-compiler IMPORTED)
-set_target_properties(Slint::slint-compiler PROPERTIES IMPORTED_LOCATION "${ASR_SDM_SLINT_COMPILER}")
-
-set(SLINT_STYLE "fluent" CACHE STRING "Slint widget style")
-set_property(GLOBAL PROPERTY SLINT_STYLE "${SLINT_STYLE}")
-include("${ASR_SDM_SLINT_ROOT}/api/cpp/cmake/SlintMacro.cmake")
+find_package(Slint REQUIRED)
 
 add_executable(${PROJECT_NAME}
     src/main.cpp
@@ -112,15 +78,8 @@ if(TARGET rosbag2_cpp::rosbag2_cpp)
     target_link_libraries(${PROJECT_NAME} PRIVATE rosbag2_cpp::rosbag2_cpp)
 endif()
 
-set_target_properties(${PROJECT_NAME} PROPERTIES
-    BUILD_RPATH "${ASR_SDM_SLINT_BUILD}"
-    INSTALL_RPATH "$ORIGIN/..")
-
 install(TARGETS ${PROJECT_NAME}
     RUNTIME DESTINATION lib/${PROJECT_NAME})
-
-install(FILES "${ASR_SDM_SLINT_LIBRARY}"
-    DESTINATION lib)
 
 install(DIRECTORY config
     DESTINATION share/${PROJECT_NAME})
