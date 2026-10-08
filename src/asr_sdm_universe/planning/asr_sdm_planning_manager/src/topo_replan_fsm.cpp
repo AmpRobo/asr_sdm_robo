@@ -464,7 +464,7 @@ void TopoReplanFSM::checkCollisionCallback()
     double dist;
     bool safe = planning_manager_->checkTrajCollision(dist);
     if (!safe) {
-      if (dist > 0.5) {
+      if (dist > planning_manager_->pp_.clearance_) {
         SPDLOG_WARN("current traj {} m to collision", dist);
         collide_ = true;
         changeFSMExecState(REPLAN_TRAJ, "SAFETY");

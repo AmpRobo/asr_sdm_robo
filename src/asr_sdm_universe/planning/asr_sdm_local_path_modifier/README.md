@@ -118,48 +118,58 @@ so this is not handled.
 
 #### Sample allocation
 
-`generateSamples()` runs once per `createGraph`, right after the box is set,
-and generates exactly `max_sample_num` samples (2000). ESDF voxel `i` of the box
-gets the share
+Samples are drawn one at a time inside the main loop (see below), not
+generated in advance. Each sample picks region cell `r` (0.5 m) with
+probability
 
 ```text
-P_i = (1 - v_i) / sum_j (1 - v_j)
+P_r = (1 - v_r) / sum_s (1 - v_s)
 ```
 
-where `v_i` is the region value of the voxel, i.e. the score of the
-`region_valuation_buffer_` cell that contains it. Low-value regions (far from
-obstacles, or with one dominant gradient direction) therefore receive more
-samples than high-value ones. Cells never evaluated (`-1`) count as `v = 0`.
+and is then uniform over the whole cell. `v_r` is the score of the cell in
+`region_valuation_buffer_`, and the sum runs over the cells whose centre lies
+inside the box and the map. Low-value regions (far from obstacles, or with one
+dominant gradient direction) therefore receive more samples than high-value
+ones, and cells with `v = 1` receive none. Cells never evaluated (`-1`) count
+as `v = 0`, i.e. the largest weight.
 
-`v_i` is the same for every voxel of a region cell (0.5 m), so the samples are
-allocated per region cell; a cell holds 125 voxels at the 0.1 m map resolution:
+`buildSampleCells()` runs once per `createGraph`, right after the box is set.
+It lists the region cells whose centre lies inside the box and the map, with
+weight `1 - v`, and sets up a `std::discrete_distribution` over them. The log
+shows `[Topo]: region sampling cells: N, build time: T`. This time is not part
+of the `max_sample_time` budget.
 
-1. List the region cells that overlap the box and the map. A cell whose eight
-   corners are all inside is fully covered; for the others, count how many of
-   their voxel-sized parts have the centre inside. The cell weight is
-   `(1 - v) * covered fraction`, i.e. the sum of `1 - v_i` over its voxels in
-   the box.
-2. Allocate `max_sample_num` in proportion to the cell weights with the
-   largest remainder method: each cell gets the integer part of its quota, and
-   the remaining samples go to the cells with the largest fractional parts, so
-   the counts add up to exactly `max_sample_num`.
-3. Draw each cell's samples uniform inside the cell. A point outside the box or
-   the map is redrawn, so a partly covered cell spreads its samples over its
-   covered part.
-4. Shuffle the list. The log shows
-   `[Topo]: region sampling cells: N, samples: S, build time: T`.
+`getRegionSample()` then draws one sample:
 
-If no cell qualifies (the box lies outside the map, or every `v` is 1), the
-list is filled with `max_sample_num` uniform samples of the whole box: each
-local coordinate uniform in `[-r, r]`.
+1. Pick a cell at random with probability `(1 - v) / sum of (1 - v)`.
+2. Draw `x, y, z` uniform in `[0, 1)` and map them onto the whole cell:
+   `p = cell min corner + cell_size * (x, y, z)`. Every draw gives a sample;
+   nothing is redrawn.
+
+The draws are independent, so the number of samples per cell varies from graph
+to graph.
+
+The sampled region is the union of the listed cells, not exactly the box.
+Every point of a cell is within half its diagonal (about 0.43 m) of its
+centre, so samples can stick out of the box by up to 0.43 m, and parts of the
+box within 0.43 m of its surface may get no samples.
+
+If no cell qualifies (the box lies outside the map, or every `v` is 1), each
+sample is uniform over the whole box instead: each local coordinate uniform in
+`[-r, r]`.
 
 #### What happens to each sample
 
-The main loop takes the samples in list order and stops at `max_sample_time`
-(accumulated) or the end of the list, whichever comes first. With the default
-5 ms budget the time limit is hit long before the 2000th sample (see
-`[Topo]: sample num: N, sample time: T`, T in seconds); the list is shuffled so that the processed part
-follows the same allocation.
+Each iteration of the main loop draws one point and checks its ESDF distance.
+A point with distance `<= 0` (inside an obstacle) is redrawn in the next
+iteration: it does not count toward `max_sample_num`, but its time counts
+toward `max_sample_time`, so a box full of obstacles still ends on time. Every
+other point is a sample. The loop stops once `max_sample_num` samples (2000)
+have been taken or the accumulated time reaches `max_sample_time`, whichever
+comes first. The time covers drawing, redrawing and processing. With the
+default 5 ms budget the time limit is usually hit long before the 2000th
+sample (see `[Topo]: sample num: N, redraw num: R, sample time: T`, T in
+seconds).
 
 1. Reject the sample if its ESDF distance is `<= clearance`.
 2. Find visible guards (line of sight through ESDF voxels, blocked at
@@ -178,8 +188,10 @@ follows the same allocation.
   `esdf_map.local_update_range` of the sensor, plus the sensor position.
   Outside it they are stale. Region cells never evaluated read `-1`, which
   gives never-observed parts of the box the largest weight.
-- Sampling outside the map is no longer possible while the distribution is
-  non-empty; the uniform fallback still samples the whole box.
+- Region cell samples stay inside the map as long as the map size is a
+  multiple of `region_valuation_resolution` (true for the shipped configs);
+  they may stick out of the box by up to 0.43 m. The uniform fallback samples
+  the whole box, which may extend outside the map.
 - Nodes keep `clearance` (0.3 m) from obstacles, but edges are only checked
   against one voxel (0.1 m). The B-spline clearance cost in the manager pushes
   the final trajectory away.
@@ -193,7 +205,7 @@ follows the same allocation.
 | `sample_inflate_z` | 3.0 | Half-height along z (up / down) [m] |
 | `clearance` | 0.3 | Min ESDF distance for a node; also the collision-range threshold in the manager [m] |
 | `max_sample_time` | 0.005 | Accumulated sampling budget [s] |
-| `max_sample_num` | 2000 | Samples generated per graph and allocated to region cells |
+| `max_sample_num` | 2000 | Max samples drawn per graph, one per main-loop iteration; each in a region cell picked with probability proportional to its value |
 | `max_raw_path` | 300 | DFS raw path cap |
 | `max_raw_path2` | 25 | Raw paths kept, fewest nodes first |
 | `reserve_num` | 6 | Max selected paths |
@@ -437,37 +449,46 @@ p_world   = R · p_local + c,   p_local ∈ [-sample_r, +sample_r]
 
 #### 采样点分配
 
-每次 `createGraph` 在确定采样盒之后调用一次 `generateSamples()`，正好生成
-`max_sample_num`（2000）个采样点。采样盒里 ESDF 体素 `i` 分到的比例是：
+采样点不是预先生成好的，而是在主循环里一个一个抽（见下文）。每个采样点选中 region
+格子 `r`（0.5 m）的概率是：
 
 ```text
-P_i = (1 - v_i) / sum_j (1 - v_j)
+P_r = (1 - v_r) / sum_s (1 - v_s)
 ```
 
-其中 `v_i` 是该体素的 region value，也就是包含它的 `region_valuation_buffer_` 格子的
-分数。所以 region value 低的地方（离障碍物远，或梯度方向单一）比 region value 高的地方
-得到更多采样点。从未评估过的格子（`-1`）按 `v = 0` 处理。
+选中后在整个格子里均匀取点。`v_r` 是该格子在 `region_valuation_buffer_` 里的分数，
+求和范围是中心落在采样盒和地图里的那些格子。所以 region value 低的地方（离障碍物远，
+或梯度方向单一）比 region value 高的地方得到更多采样点，`v = 1` 的格子不会有采样点。
+从未评估过的格子（`-1`）按 `v = 0` 处理，也就是权重最大。
 
-同一个 region 格子（0.5 m）里所有体素的 `v_i` 都相同，所以按 region 格子分配；地图
-分辨率为 0.1 m 时，一个格子包含 125 个体素：
+每次 `createGraph` 在确定采样盒之后调用一次 `buildSampleCells()`，列出中心落在采样盒和
+地图里的 region 格子，权重是 `1 - v`，用这些权重建一个 `std::discrete_distribution`。
+日志会打印 `[Topo]: region sampling cells: N, build time: T`。这段时间不计入
+`max_sample_time`。
 
-1. 列出和采样盒、地图相交的 region 格子。8 个角点都在里面的格子算完全覆盖；其余格子
-   统计它的体素大小的小块里有多少个中心落在里面。格子权重是 `(1 - v) × 覆盖比例`，
-   也就是它落在采样盒里的那些体素的 `1 - v_i` 之和。
-2. 按格子权重分配 `max_sample_num`，用最大余数法：每个格子先拿配额的整数部分，剩下的
-   点给小数部分最大的那些格子，所以各格子的点数加起来正好是 `max_sample_num`。
-3. 在每个格子里均匀随机生成它分到的点。点落在采样盒外或地图外就重抽，所以部分覆盖的
-   格子会把点分布在它被覆盖的那部分里。
-4. 打乱整个列表。日志会打印 `[Topo]: region sampling cells: N, samples: S, build time: T`。
+之后 `getRegionSample()` 每次抽一个采样点：
 
-如果一个格子都选不出来（采样盒在地图外，或所有 `v` 都是 1），就用 `max_sample_num` 个
-在整个采样盒里均匀采的点填满列表：每个局部坐标都在 `[-r, r]` 上均匀取值。
+1. 按 `(1 - v) / (1 - v) 的总和` 的概率随机选一个格子。
+2. 生成三个在 `[0, 1)` 上均匀分布的数 `x, y, z`，映射到整个格子：
+   `p = 格子最小角点 + cell_size × (x, y, z)`。每次都能得到一个采样点，不会重抽。
+
+每次抽取相互独立，所以每个格子分到的点数每次建图都会波动。
+
+实际的采样区域是这些格子拼起来的区域，不完全等于采样盒。格子里任一点离格子中心不超过
+半条对角线（约 0.43 m），所以采样点可能超出采样盒最多 0.43 m，而采样盒表面以内 0.43 m
+的部分可能采不到点。
+
+如果一个格子都选不出来（采样盒在地图外，或所有 `v` 都是 1），每个采样点就改为
+在整个采样盒里均匀采：每个局部坐标都在 `[-r, r]` 上均匀取值。
 
 #### 每个采样点怎么处理
 
-主循环按列表顺序取点，累计时间达到 `max_sample_time` 或列表取完时停止，哪个先到算哪个。
-默认的 5 ms 预算下，远没到第 2000 个点时间就用完了（看日志 `[Topo]: sample num: N, sample time: T`，T 单位为秒）；
-列表打乱过，所以处理到的那部分点也符合同样的分配。
+主循环每轮抽一个点，先查它的 ESDF 距离。距离 `<= 0`（在障碍物里）的点在下一轮重抽：
+它不计入 `max_sample_num`，但耗时计入 `max_sample_time`，所以采样盒全是障碍物时也会按时
+结束。其余的点才算采样点。采样点数达到 `max_sample_num`（2000），或累计时间达到
+`max_sample_time` 时停止，哪个先到算哪个。计时包括抽点、重抽和处理点。默认的 5 ms 预算下，
+通常远没到第 2000 个点时间就用完了（看日志
+`[Topo]: sample num: N, redraw num: R, sample time: T`，T 单位为秒）。
 
 1. ESDF 距离 `<= clearance` 的点直接丢掉。
 2. 找它能看到的 guard（沿 ESDF 体素做视线检查，距离 `<= resolution` 就算被挡）：
@@ -482,7 +503,9 @@ P_i = (1 - v_i) / sum_j (1 - v_j)
 - ESDF 和 region value 只在地图最近一次更新的盒子里刷新。这个盒子是传感器周围
   `esdf_map.local_update_range` 内障碍物点的包围盒，再并上传感器位置。盒子外面是旧值。
   从未评估过的 region 格子是 `-1`，会让采样盒里从未观测过的部分拿到最大的权重。
-- 只要分布非空，就不会采到地图外的点；退回的均匀采样仍然覆盖整个采样盒。
+- 只要地图尺寸是 `region_valuation_resolution` 的整数倍（现有配置都是），从 region 格子
+  采的点就不会落到地图外，但可能超出采样盒最多 0.43 m。退回的均匀采样覆盖整个采样盒，
+  采样盒伸出地图时会采到地图外。
 - 节点离障碍物至少 `clearance`（0.3 m），但边只按一个体素（0.1 m）检查。最终轨迹靠
   manager 里 B 样条的距离代价推开。
 
@@ -495,7 +518,7 @@ P_i = (1 - v_i) / sum_j (1 - v_j)
 | `sample_inflate_z` | 3.0 | z 方向（上下）半高 [m] |
 | `clearance` | 0.3 | 节点离障碍物的最小 ESDF 距离；也是 manager 判断碰撞区间的阈值 [m] |
 | `max_sample_time` | 0.005 | 累计采样时间预算 [s] |
-| `max_sample_num` | 2000 | 每次建图生成并分配到各 region 格子的采样点总数 |
+| `max_sample_num` | 2000 | 每次建图最多抽的采样点数，主循环每轮抽一个；每个点按格子价值成比例的概率选 region 格子 |
 | `max_raw_path` | 300 | DFS 枚举的原始路径上限 |
 | `max_raw_path2` | 25 | 保留的原始路径数，节点少的优先 |
 | `reserve_num` | 6 | 最终保留的路径数上限 |

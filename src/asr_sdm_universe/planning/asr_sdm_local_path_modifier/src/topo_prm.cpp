@@ -7,8 +7,7 @@
 
 #include <algorithm>
 #include <cmath>
-#include <functional>
-#include <limits>
+#include <random>
 #include <thread>
 
 namespace amprobo
@@ -27,6 +26,7 @@ void TopologyPRM::init(const std::shared_ptr<rclcpp::Node> & nh)
   graph_.clear();
   eng_ = default_random_engine(rd_());
   rand_pos_ = uniform_real_distribution<double>(-1.0, 1.0);
+  rand_unit_ = uniform_real_distribution<double>(0.0, 1.0);
 
   // init parameter
   node_->declare_parameter("topo_prm.sample_inflate_x", -1.0);
@@ -153,28 +153,33 @@ list<GraphNode::Ptr> TopologyPRM::createGraph(Eigen::Vector3d start, Eigen::Vect
   rotation_.col(1) = ytf;
   rotation_.col(2) = ztf;
 
-  generateSamples();
+  buildSampleCells();
 
   int node_id = 1;
 
   /* ---------- main loop ---------- */
   int sample_num = 0;
+  int redraw_num = 0;
   double sample_time = 0.0;
   Eigen::Vector3d pt;
   rclcpp::Time t1, t2;
-  while (sample_time < max_sample_time_ && sample_num < static_cast<int>(samples_.size())) {
+  while (sample_time < max_sample_time_ && sample_num < max_sample_num_) {
     t1 = node_->now();
 
-    pt = samples_[sample_num];
-    ++sample_num;
+    pt = getRegionSample();
     double dist;
     Eigen::Vector3d grad;
     // edt_environment_->evaluateEDTWithGrad(pt, -1.0, dist, grad);
     dist = edt_environment_->evaluateCoarseEDT(pt, -1.0);
+    // A point closer than topo_prm.clearance is redrawn without counting toward
+    // max_sample_num; its time still counts, so a box full of obstacles ends
+    // on max_sample_time.
     if (dist <= clearance_) {
+      ++redraw_num;
       sample_time += (node_->now() - t1).seconds();
       continue;
     }
+    ++sample_num;
 
     /* find visible guard */
     vector<GraphNode::Ptr> visib_guards = findVisibGuard(pt);
@@ -206,7 +211,9 @@ list<GraphNode::Ptr> TopologyPRM::createGraph(Eigen::Vector3d start, Eigen::Vect
   }
 
   /* print record */
-  SPDLOG_INFO("[Topo]: sample num: {}, sample time: {:.4f}", sample_num, sample_time);
+  SPDLOG_INFO(
+    "[Topo]: sample num: {}, redraw num: {}, sample time: {:.4f}", sample_num, redraw_num,
+    sample_time);
 
   pruneGraph();
   // std::cout << "[Topo]: node num: " << graph_.size() << std::endl;
@@ -267,16 +274,14 @@ bool TopologyPRM::needConnection(GraphNode::Ptr g1, GraphNode::Ptr g2, Eigen::Ve
   return true;
 }
 
-/* Region valuation cell r receives n_r of the max_sample_num samples, n_r in
- * proportion to (1 - v_r) times the number of its voxels inside the sample box
- * and the map, i.e. to the sum of 1 - v_i over those voxels. Its samples are
- * uniform over the part of the cell inside the box. Unevaluated cells (-1) weigh
- * like a score of 0. */
-void TopologyPRM::generateSamples()
+/* Lists the region valuation cells whose center lies inside the sample box and
+ * the map. A sample picks cell r with probability (1 - v_r) / sum of (1 - v)
+ * over these cells. Unevaluated cells (-1) weigh like a score of 0. */
+void TopologyPRM::buildSampleCells()
 {
   const rclcpp::Time t1 = node_->now();
   const ESDFMap::Ptr & map = edt_environment_->esdf_map_;
-  samples_.clear();
+  sample_cells_.clear();
 
   const double cell_size = map->getRegionValuationResolution();
   const double half = 0.5 * cell_size;
@@ -285,8 +290,8 @@ void TopologyPRM::generateSamples()
   map->posToRegionIndex(translation_ - half_extent, min_id);
   map->posToRegionIndex(translation_ + half_extent, max_id);
 
-  // Scalar copies: boundary cells are tested on every voxel, which is slow
-  // through Eigen in an unoptimized build.
+  // Scalar copies: every cell of the box's bounding box is tested, which is
+  // slow through Eigen in an unoptimized build.
   Eigen::Vector3d map_origin, map_size;
   map->getRegion(map_origin, map_size);
   double rot[3][3], box_center[3], box_half[3], map_min[3], map_max[3];
@@ -298,116 +303,56 @@ void TopologyPRM::generateSamples()
     map_min[i] = map_origin(i) + 1e-4;
     map_max[i] = map_origin(i) + map_size(i) - 1e-4;
   }
-  // Largest |local_j| - sample_r_j over the box axes; positive outside the box.
-  auto box_excess = [&](const double p[3]) {
-    double excess = -std::numeric_limits<double>::infinity();
-    for (int j = 0; j < 3; ++j) {
-      const double local = rot[0][j] * (p[0] - box_center[0]) +
-                           rot[1][j] * (p[1] - box_center[1]) +
-                           rot[2][j] * (p[2] - box_center[2]);
-      excess = std::max(excess, std::fabs(local) - box_half[j]);
-    }
-    return excess;
-  };
   auto in_region = [&](const double p[3]) {
     for (int k = 0; k < 3; ++k) {
       if (p[k] < map_min[k] || p[k] > map_max[k]) return false;
     }
-    return box_excess(p) <= 0.0;
+    for (int j = 0; j < 3; ++j) {
+      const double local = rot[0][j] * (p[0] - box_center[0]) +
+                           rot[1][j] * (p[1] - box_center[1]) +
+                           rot[2][j] * (p[2] - box_center[2]);
+      if (std::fabs(local) > box_half[j]) return false;
+    }
+    return true;
   };
 
-  // Every point of a cell is within half its diagonal of the cell center.
-  const double reach = std::sqrt(3.0) * half;
-  // A partly covered cell is measured on sub^3 voxel sized parts; with the map
-  // aligned to the region grid, these are its voxels.
-  const int sub = std::max(1, static_cast<int>(std::lround(cell_size / resolution_)));
-  const double part_size = cell_size / sub;
-
-  vector<Eigen::Vector3d> cells;
   vector<double> weights;
-  double weight_sum = 0.0;
   Eigen::Vector3i id;
-  double center[3], p[3];
+  double center[3];
   for (id(0) = min_id(0); id(0) <= max_id(0); ++id(0))
     for (id(1) = min_id(1); id(1) <= max_id(1); ++id(1))
       for (id(2) = min_id(2); id(2) <= max_id(2); ++id(2)) {
         for (int k = 0; k < 3; ++k) center[k] = map_origin(k) + (id(k) + 0.5) * cell_size;
-        if (box_excess(center) > reach) continue;
+        if (!in_region(center)) continue;
 
-        const double value_weight = 1.0 - std::clamp(map->getRegionValue(id), 0.0, 1.0);
-        if (value_weight <= 0.0) continue;
+        const double weight = 1.0 - std::clamp(map->getRegionValue(id), 0.0, 1.0);
+        if (weight <= 0.0) continue;
 
-        // The box and the map are convex, so a cell with all corners inside is inside.
-        bool covered = true;
-        for (int corner = 0; corner < 8 && covered; ++corner) {
-          for (int k = 0; k < 3; ++k) p[k] = center[k] + (((corner >> k) & 1) ? half : -half);
-          covered = in_region(p);
-        }
-
-        double inside_ratio = 1.0;
-        if (!covered) {
-          int inside_num = 0;
-          for (int a = 0; a < sub; ++a) {
-            p[0] = center[0] - half + (a + 0.5) * part_size;
-            for (int b = 0; b < sub; ++b) {
-              p[1] = center[1] - half + (b + 0.5) * part_size;
-              for (int c = 0; c < sub; ++c) {
-                p[2] = center[2] - half + (c + 0.5) * part_size;
-                if (in_region(p)) ++inside_num;
-              }
-            }
-          }
-          if (inside_num == 0) continue;
-          inside_ratio = static_cast<double>(inside_num) / (sub * sub * sub);
-        }
-
-        cells.emplace_back(center[0], center[1], center[2]);
-        weights.push_back(value_weight * inside_ratio);
-        weight_sum += weights.back();
+        sample_cells_.emplace_back(center[0] - half, center[1] - half, center[2] - half);
+        weights.push_back(weight);
       }
 
-  if (cells.empty()) {
-    for (int i = 0; i < max_sample_num_; ++i) samples_.push_back(getUniformSample());
-    SPDLOG_INFO("[Topo]: no region sampling cell, {} uniform samples", samples_.size());
+  if (sample_cells_.empty()) {
+    SPDLOG_INFO("[Topo]: no region sampling cell, sampling the whole box uniformly");
     return;
   }
-
-  // Largest remainder: each cell gets the integer part of its quota, and the
-  // samples left over go to the cells with the largest fractional parts.
-  vector<int> counts(cells.size());
-  vector<pair<double, size_t>> remainders(cells.size());
-  int assigned = 0;
-  for (size_t i = 0; i < cells.size(); ++i) {
-    const double quota = max_sample_num_ * weights[i] / weight_sum;
-    counts[i] = static_cast<int>(quota);
-    assigned += counts[i];
-    remainders[i] = {quota - counts[i], i};
-  }
-  const size_t left =
-    std::min(static_cast<size_t>(std::max(0, max_sample_num_ - assigned)), cells.size());
-  std::partial_sort(
-    remainders.begin(), remainders.begin() + left, remainders.end(), std::greater<>());
-  for (size_t i = 0; i < left; ++i) ++counts[remainders[i].second];
-
-  // Points of a partly covered cell that fall outside the box or the map are redrawn.
-  samples_.reserve(max_sample_num_);
-  for (size_t i = 0; i < cells.size(); ++i)
-    for (int k = 0; k < counts[i]; ++k)
-      for (int attempt = 0; attempt < 1000; ++attempt) {
-        for (int j = 0; j < 3; ++j) p[j] = cells[i](j) + half * rand_pos_(eng_);
-        if (in_region(p)) {
-          samples_.emplace_back(p[0], p[1], p[2]);
-          break;
-        }
-      }
-
-  // The time budget usually ends the main loop before the list does; shuffling
-  // keeps the processed part spread like the whole list.
-  std::shuffle(samples_.begin(), samples_.end(), eng_);
+  pick_cell_ = discrete_distribution<int>(weights.begin(), weights.end());
 
   SPDLOG_INFO(
-    "[Topo]: region sampling cells: {}, samples: {}, build time: {:.4f}", cells.size(),
-    samples_.size(), (node_->now() - t1).seconds());
+    "[Topo]: region sampling cells: {}, build time: {:.4f}", sample_cells_.size(),
+    (node_->now() - t1).seconds());
+}
+
+/* One sample: a cell picked by pick_cell_, then a point uniform over the whole
+ * cell. Without cells, uniform over the box. */
+Eigen::Vector3d TopologyPRM::getRegionSample()
+{
+  if (sample_cells_.empty()) return getUniformSample();
+
+  const Eigen::Vector3d & corner = sample_cells_[pick_cell_(eng_)];
+  const double cell_size = edt_environment_->esdf_map_->getRegionValuationResolution();
+  const Eigen::Vector3d unit(rand_unit_(eng_), rand_unit_(eng_), rand_unit_(eng_));
+  return corner + cell_size * unit;
 }
 
 Eigen::Vector3d TopologyPRM::getUniformSample()

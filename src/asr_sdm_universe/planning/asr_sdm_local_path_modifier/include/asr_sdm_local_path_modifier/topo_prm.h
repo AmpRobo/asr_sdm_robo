@@ -105,13 +105,16 @@ private:
   random_device rd_;
   default_random_engine eng_;
   uniform_real_distribution<double> rand_pos_;
+  uniform_real_distribution<double> rand_unit_;
 
   Eigen::Vector3d sample_r_;
   Eigen::Vector3d translation_;
   Eigen::Matrix3d rotation_;
 
-  // Samples of the current createGraph, in random order.
-  vector<Eigen::Vector3d> samples_;
+  // Min corners of the region valuation cells sampled in the current
+  // createGraph, and the distribution that picks one of them per sample.
+  vector<Eigen::Vector3d> sample_cells_;
+  discrete_distribution<int> pick_cell_;
 
   // roadmap data structure, 0:start, 1:goal, 2-n: others
   list<GraphNode::Ptr> graph_;
@@ -149,7 +152,8 @@ private:
 
   /* ---------- helper ---------- */
   Eigen::Vector3d getUniformSample();
-  void generateSamples();
+  void buildSampleCells();
+  Eigen::Vector3d getRegionSample();
   vector<GraphNode::Ptr> findVisibGuard(Eigen::Vector3d pt);  // find pairs of visibile guard
   bool needConnection(
     GraphNode::Ptr g1, GraphNode::Ptr g2,
