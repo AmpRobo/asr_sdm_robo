@@ -68,7 +68,9 @@ public:
   // Remove every marker this helper has published, including goals and heading.
   void clearAll();
 
-  // draw basic shapes
+  // draw basic shapes. An empty list deletes marker `id`; otherwise the marker is
+  // replaced in place by a single ADD. Deleting before re-adding lets RViz render
+  // a frame in between with the marker missing.
   void displaySphereList(
     const vector<Eigen::Vector3d> & list, double resolution, const Eigen::Vector4d & color, int id,
     int pub_id = 0);

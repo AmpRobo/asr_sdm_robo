@@ -67,9 +67,12 @@ void PlanningVisualization::displaySphereList(
   mk.header.frame_id = "world";
   mk.header.stamp = node_->now();
   mk.type = visualization_msgs::msg::Marker::SPHERE_LIST;
-  mk.action = visualization_msgs::msg::Marker::DELETE;
   mk.id = id;
-  pubs_[pub_id]->publish(mk);
+  if (list.empty()) {
+    mk.action = visualization_msgs::msg::Marker::DELETE;
+    pubs_[pub_id]->publish(mk);
+    return;
+  }
 
   mk.action = visualization_msgs::msg::Marker::ADD;
   mk.pose.orientation.x = 0.0;
@@ -105,9 +108,12 @@ void PlanningVisualization::displayCubeList(
   mk.header.frame_id = "world";
   mk.header.stamp = node_->now();
   mk.type = visualization_msgs::msg::Marker::CUBE_LIST;
-  mk.action = visualization_msgs::msg::Marker::DELETE;
   mk.id = id;
-  pubs_[pub_id]->publish(mk);
+  if (list.empty()) {
+    mk.action = visualization_msgs::msg::Marker::DELETE;
+    pubs_[pub_id]->publish(mk);
+    return;
+  }
 
   mk.action = visualization_msgs::msg::Marker::ADD;
   mk.pose.orientation.x = 0.0;
@@ -144,9 +150,12 @@ void PlanningVisualization::displayLineList(
   mk.header.frame_id = "world";
   mk.header.stamp = node_->now();
   mk.type = visualization_msgs::msg::Marker::LINE_LIST;
-  mk.action = visualization_msgs::msg::Marker::DELETE;
   mk.id = id;
-  pubs_[pub_id]->publish(mk);
+  if (list1.empty()) {
+    mk.action = visualization_msgs::msg::Marker::DELETE;
+    pubs_[pub_id]->publish(mk);
+    return;
+  }
 
   mk.action = visualization_msgs::msg::Marker::ADD;
   mk.pose.orientation.x = 0.0;
@@ -181,7 +190,7 @@ void PlanningVisualization::drawBsplinesPhase1(vector<fast_planner::NonUniformBs
 {
   vector<Eigen::Vector3d> empty;
 
-  for (int i = 0; i < last_bspline_phase1_num_; ++i) {
+  for (int i = int(bsplines.size()); i < last_bspline_phase1_num_; ++i) {
     displaySphereList(empty, size, Eigen::Vector4d(1, 0, 0, 1), BSPLINE + i % 100);
     displaySphereList(empty, size, Eigen::Vector4d(1, 0, 0, 1), BSPLINE_CTRL_PT + i % 100);
   }
@@ -198,7 +207,7 @@ void PlanningVisualization::drawBsplinesPhase2(vector<fast_planner::NonUniformBs
 {
   vector<Eigen::Vector3d> empty;
 
-  for (int i = 0; i < last_bspline_phase2_num_; ++i) {
+  for (int i = int(bsplines.size()); i < last_bspline_phase2_num_; ++i) {
     displaySphereList(empty, size, Eigen::Vector4d(1, 0, 0, 1), BSPLINE + (50 + i) % 100);
     displaySphereList(empty, size, Eigen::Vector4d(1, 0, 0, 1), BSPLINE_CTRL_PT + (50 + i) % 100);
   }
@@ -281,7 +290,7 @@ void PlanningVisualization::drawTopoPathsPhase2(
 {
   // clear drawn paths
   Eigen::Vector4d color1(1, 1, 1, 1);
-  for (int i = 0; i < last_topo_path1_num_; ++i) {
+  for (int i = int(paths.size()); i < last_topo_path1_num_; ++i) {
     vector<Eigen::Vector3d> empty;
     displayLineList(empty, empty, line_width, color1, SELECT_PATH + i % 100, 1);
     displaySphereList(empty, line_width, color1, PATH + i % 100, 1);
@@ -309,7 +318,7 @@ void PlanningVisualization::drawTopoPathsPhase1(
 {
   // clear drawn paths
   Eigen::Vector4d color1(1, 1, 1, 1);
-  for (int i = 0; i < last_topo_path2_num_; ++i) {
+  for (int i = int(paths.size()); i < last_topo_path2_num_; ++i) {
     vector<Eigen::Vector3d> empty;
     displayLineList(empty, empty, size, color1, FILTERED_PATH + i % 100, 1);
   }

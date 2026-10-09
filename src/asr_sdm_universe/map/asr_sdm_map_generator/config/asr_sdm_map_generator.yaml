@@ -27,7 +27,9 @@ random_map_sensing:
 
     sensing:
       radius: 10.0
-      rate: 10.0
+      # Republishes the whole global map each tick; RViz and the planner's ESDF both
+      # re-process it. Clicked obstacles are published immediately regardless.
+      rate: 5.0
       publish_local: false
       enable_click_map: true
 
