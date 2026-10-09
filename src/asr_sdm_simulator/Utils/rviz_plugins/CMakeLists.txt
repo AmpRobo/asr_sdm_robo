@@ -10,6 +10,7 @@ find_package(rclcpp REQUIRED)
 find_package(pluginlib REQUIRED)
 find_package(rviz_common REQUIRED)
 find_package(rviz_rendering REQUIRED)
+find_package(rviz_default_plugins REQUIRED)
 find_package(nav_msgs REQUIRED)
 find_package(geometry_msgs REQUIRED)
 find_package(std_msgs REQUIRED)
@@ -26,6 +27,7 @@ qt5_wrap_cpp(MOC_FILES
   src/probmap_display.h
   src/aerialmap_display.h
   src/multi_probmap_display.h
+  src/color_bar_display.h
 )
 
 set(SOURCE_FILES
@@ -35,6 +37,7 @@ set(SOURCE_FILES
   src/probmap_display.cpp
   src/aerialmap_display.cpp
   src/multi_probmap_display.cpp
+  src/color_bar_display.cpp
   ${MOC_FILES}
 )
 
@@ -47,6 +50,7 @@ target_include_directories(${PROJECT_NAME} PRIVATE
 target_link_libraries(${PROJECT_NAME}
   rviz_common::rviz_common
   rviz_rendering::rviz_rendering
+  rviz_default_plugins::rviz_default_plugins
   Qt5::Core
   Qt5::Widgets
 )
@@ -76,7 +80,7 @@ install(DIRECTORY config
   DESTINATION share/${PROJECT_NAME})
 
 ament_export_dependencies(
-  rclcpp pluginlib rviz_common rviz_rendering
+  rclcpp pluginlib rviz_common rviz_rendering rviz_default_plugins
   nav_msgs geometry_msgs std_msgs multi_map_server tf2 tf2_geometry_msgs)
 
 ament_package()

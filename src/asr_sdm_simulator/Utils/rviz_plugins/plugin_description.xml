@@ -39,4 +39,13 @@
     </description>
   </class>
 
+  <class name="rviz_plugins/ColorBar"
+         type="rviz_plugins::ColorBarDisplay"
+         base_class_type="rviz_common::Display">
+    <description>
+      Color bar legend in a corner of the 3D view for a PointCloud2 display
+      colored by intensity with the rainbow palette
+    </description>
+  </class>
+
 </library>

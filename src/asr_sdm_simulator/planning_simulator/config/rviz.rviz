@@ -228,6 +228,20 @@ Visualization Manager:
       Use Fixed Frame: true
       Use rainbow: true
       Value: true
+    - Class: rviz_plugins/ColorBar
+      Enabled: true
+      Font Size: 11
+      Hidden Below: 0.1
+      Invert Rainbow: true
+      Length: 200
+      Max Value: 1
+      Min Value: 0
+      Name: Region Valuation Color Bar
+      Position: Top Right
+      Ticks: 6
+      Title: Region valuation
+      Value: true
+      Width: 14
     - Class: rviz_default_plugins/Axes
       Enabled: true
       Length: 1
