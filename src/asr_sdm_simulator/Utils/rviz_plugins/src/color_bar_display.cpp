@@ -191,6 +191,8 @@ QImage ColorBarDisplay::render() const
   font.setPixelSize(std::max(1, static_cast<int>(std::lround(font_size_property_->getInt() * s))));
   QFont title_font = font;
   title_font.setBold(true);
+  title_font.setPixelSize(
+    std::max(1, static_cast<int>(std::lround((font_size_property_->getInt() - 3) * s))));
   const QFontMetrics fm(font);
   const QFontMetrics title_fm(title_font);
 
