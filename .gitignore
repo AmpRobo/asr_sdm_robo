@@ -54,3 +54,6 @@ venvs/
 # Local development / debugging artifacts
 output/
 output_compare/
+
+# VSCode
+.vscode/
