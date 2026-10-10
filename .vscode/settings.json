@@ -73,5 +73,6 @@
         "variant": "cpp"
     },
     "python-envs.defaultPackageManager": "ms-python.python:conda",
-    "python-envs.pythonProjects": []
+    "python-envs.pythonProjects": [],
+    "cmake.autoDetectSourceDirectory": false
 }
