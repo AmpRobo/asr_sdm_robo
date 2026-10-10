@@ -220,8 +220,8 @@ void Astar::retrievePath(NodePtr end_node)
 std::vector<Eigen::Vector3d> Astar::getPath()
 {
   vector<Eigen::Vector3d> path;
-  for (int i = 0; i < path_nodes_.size(); ++i) {
-    path.push_back(path_nodes_[i]->position);
+  for (const NodePtr & node : path_nodes_) {
+    path.push_back(node->position);
   }
   return path;
 }
