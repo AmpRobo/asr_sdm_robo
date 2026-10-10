@@ -70,8 +70,16 @@ void TopoReplanFSM::init(const std::shared_ptr<rclcpp::Node> & nh)
   waypoint_sub_ = node_->create_subscription<nav_msgs::msg::Path>(
     "/waypoint_generator/waypoints", 1,
     std::bind(&TopoReplanFSM::waypointCallback, this, std::placeholders::_1));
+  // Own group so a goal pose is recorded while the FSM timer is inside a plan.
+  // The executor is multi-threaded; the default group would queue it until the
+  // plan returned and the stale trajectory had already been published.
+  goal_callback_group_ =
+    node_->create_callback_group(rclcpp::CallbackGroupType::MutuallyExclusive);
+  rclcpp::SubscriptionOptions goal_options;
+  goal_options.callback_group = goal_callback_group_;
   goalpose_sub_ = node_->create_subscription<geometry_msgs::msg::PoseStamped>(
-    "/goal_pose", 1, std::bind(&TopoReplanFSM::goalposeCallback, this, std::placeholders::_1));
+    "/goal_pose", 10, std::bind(&TopoReplanFSM::goalposeCallback, this, std::placeholders::_1),
+    goal_options);
   initialpose_sub_ = node_->create_subscription<geometry_msgs::msg::PoseWithCovarianceStamped>(
     initialpose_topic, 10,
     std::bind(&TopoReplanFSM::initialposeCallback, this, std::placeholders::_1));
@@ -106,7 +114,13 @@ void TopoReplanFSM::acceptTarget(
   const nav_msgs::msg::Path & path, const Eigen::Vector3d & arrival_heading)
 {
   std::lock_guard<std::mutex> lock(mutex_);
-  if (path.poses[0].pose.position.z < -0.1) return;
+  installTarget(path, arrival_heading, false);
+}
+
+bool TopoReplanFSM::installTarget(
+  const nav_msgs::msg::Path & path, const Eigen::Vector3d & arrival_heading, bool interrupt)
+{
+  if (path.poses.empty() || path.poses[0].pose.position.z < -0.1) return false;
   SPDLOG_INFO("Triggered!");
 
   end_heading_ = arrival_heading;
@@ -150,9 +164,39 @@ void TopoReplanFSM::acceptTarget(
   have_target_ = true;
   trigger_ = true;
 
+  if (interrupt) {
+    // A goal pose replaces the trajectory being followed and any repair of it.
+    // The new one starts from the robot's current pose on the next GEN_NEW_TRAJ.
+    SPDLOG_INFO("new goal pose, replan.");
+    if (exec_state_ == INIT && !have_odom_) return true;
+    if (exec_state_ != GEN_NEW_TRAJ) changeFSMExecState(GEN_NEW_TRAJ, "GOAL");
+    return true;
+  }
+
   if (exec_state_ == WAIT_TARGET) {
     changeFSMExecState(GEN_NEW_TRAJ, "TRIG");
   }
+  return true;
+}
+
+bool TopoReplanFSM::applyPendingGoal()
+{
+  nav_msgs::msg::Path path;
+  Eigen::Vector3d heading;
+  {
+    std::lock_guard<std::mutex> lock(goal_mutex_);
+    if (!pending_goal_) return false;
+    pending_goal_ = false;
+    path = pending_path_;
+    heading = pending_heading_;
+  }
+  return installTarget(path, heading, true);
+}
+
+bool TopoReplanFSM::goalSuperseded(uint64_t epoch)
+{
+  std::lock_guard<std::mutex> lock(goal_mutex_);
+  return pending_goal_ || goal_epoch_.load(std::memory_order_acquire) != epoch;
 }
 
 void TopoReplanFSM::waypointCallback(const nav_msgs::msg::Path::SharedPtr msg)
@@ -165,6 +209,8 @@ void TopoReplanFSM::waypointCallback(const nav_msgs::msg::Path::SharedPtr msg)
 
 void TopoReplanFSM::goalposeCallback(const geometry_msgs::msg::PoseStamped::SharedPtr msg)
 {
+  if (msg->pose.position.z < -0.1) return;
+
   nav_msgs::msg::Path path;
   path.header = msg->header;
   path.poses.push_back(*msg);
@@ -176,7 +222,14 @@ void TopoReplanFSM::goalposeCallback(const geometry_msgs::msg::PoseStamped::Shar
   Eigen::Vector3d heading = Eigen::Vector3d::Zero();
   if (orient.norm() > 1.0e-6) heading = orient.normalized().toRotationMatrix().col(0);
 
-  acceptTarget(path, heading);
+  {
+    std::lock_guard<std::mutex> lock(goal_mutex_);
+    pending_path_ = std::move(path);
+    pending_heading_ = heading;
+    pending_goal_ = true;
+    goal_epoch_.fetch_add(1, std::memory_order_release);
+  }
+  SPDLOG_INFO("goal pose interrupts the current plan");
 }
 
 void TopoReplanFSM::initialposeCallback(
@@ -267,6 +320,9 @@ void TopoReplanFSM::printFSMExecState()
 void TopoReplanFSM::execFSMCallback()
 {
   std::lock_guard<std::mutex> lock(mutex_);
+  // A goal that arrived during the previous plan is applied before this tick
+  // chooses a state, so EXEC_TRAJ cannot keep following the old target.
+  applyPendingGoal();
   static int fsm_num = 0;
   fsm_num++;
   if (fsm_num == 100) {
@@ -308,6 +364,7 @@ void TopoReplanFSM::execFSMCallback()
       new_pub_->publish(std_msgs::msg::Empty());
       /* topo path finding and optimization */
       bool success = callTopologicalTraj(1);
+      if (applyPendingGoal()) break;
       if (success) {
         changeFSMExecState(EXEC_TRAJ, "FSM");
       } else {
@@ -357,6 +414,7 @@ void TopoReplanFSM::execFSMCallback()
       setHeadingStateFromTraj(t_cur);
 
       bool success = callTopologicalTraj(2);
+      if (applyPendingGoal()) break;
       if (success) {
         changeFSMExecState(EXEC_TRAJ, "FSM");
       } else {
@@ -380,6 +438,7 @@ void TopoReplanFSM::execFSMCallback()
 
       // bool success = callSearchAndOptimization();
       bool success = callTopologicalTraj(1);
+      if (applyPendingGoal()) break;
       if (success) {
         changeFSMExecState(EXEC_TRAJ, "FSM");
       } else {
@@ -487,85 +546,99 @@ bool TopoReplanFSM::callSearchAndOptimization()
 
 bool TopoReplanFSM::callTopologicalTraj(int step)
 {
+  const uint64_t epoch = goal_epoch_.load(std::memory_order_acquire);
+  if (goalSuperseded(epoch)) return false;
+
+  const auto aborted = [this, epoch]() { return goalSuperseded(epoch); };
   bool plan_success;
 
   planning_manager_->setStartMotion(start_vel_, start_acc_, start_yaw_, start_pitch_);
 
   if (step == 1) {
-    plan_success = planning_manager_->planGlobalTraj(start_pt_);
+    plan_success = planning_manager_->planGlobalTraj(start_pt_, aborted);
   } else {
-    plan_success = planning_manager_->topoReplan(collide_);
+    plan_success = planning_manager_->topoReplan(collide_, aborted);
   }
 
-  if (plan_success) {
-    planning_manager_->planHeading(start_yaw_, start_pitch_);
-
-    LocalTrajData * locdat = &planning_manager_->local_data_;
-
-    /* publish newest trajectory to server */
-
-    /* publish traj */
-    asr_sdm_planning_manager::msg::Bspline bspline;
-    bspline.order = 3;
-    bspline.start_time = locdat->start_time_;
-    bspline.traj_id = locdat->traj_id_;
-
-    Eigen::MatrixXd pos_pts = locdat->position_traj_.getControlPoint();
-
-    for (int i = 0; i < pos_pts.rows(); ++i) {
-      geometry_msgs::msg::Point pt;
-      pt.x = pos_pts(i, 0);
-      pt.y = pos_pts(i, 1);
-      pt.z = pos_pts(i, 2);
-      bspline.pos_pts.push_back(pt);
-    }
-
-    Eigen::VectorXd knots = locdat->position_traj_.getKnot();
-    for (int i = 0; i < knots.rows(); ++i) {
-      bspline.knots.push_back(knots(i));
-    }
-
-    Eigen::MatrixXd yaw_pts = locdat->yaw_traj_.getControlPoint();
-    for (int i = 0; i < yaw_pts.rows(); ++i) {
-      double yaw = yaw_pts(i, 0);
-      bspline.yaw_pts.push_back(yaw);
-    }
-    bspline.yaw_dt = locdat->yaw_traj_.getInterval();
-
-    Eigen::MatrixXd pitch_pts = locdat->pitch_traj_.getControlPoint();
-    for (int i = 0; i < pitch_pts.rows(); ++i) {
-      double pitch = pitch_pts(i, 0);
-      bspline.pitch_pts.push_back(pitch);
-    }
-    bspline.pitch_dt = locdat->pitch_traj_.getInterval();
-
-    bspline_pub_->publish(bspline);
-
-    /* visualize new trajectories */
-    MidPlanData * plan_data = &planning_manager_->plan_data_;
-    visualization_->drawPolynomialTraj(
-      planning_manager_->global_data_.global_traj_, 0.05, Eigen::Vector4d(0, 0, 0, 1), 0);
-    visualization_->drawBspline(
-      locdat->position_traj_, 0.08, Eigen::Vector4d(1.0, 0.0, 0.0, 1), false, 0.15,
-      Eigen::Vector4d(1.0, 1.0, 1.0, 1), 99, 99);
-    visualization_->drawBsplinesPhase2(plan_data->topo_traj_pos2_, 0.075);
-
-    if (step == 2 && collide_) {
-      visualization_->drawTopoPathsPhase1(plan_data->topo_filtered_paths_, 0.05);
-      visualization_->drawTopoPathsPhase2(plan_data->topo_select_paths_, 0.075);
-    } else {
-      vector<vector<Eigen::Vector3d>> empty_paths;
-      visualization_->drawTopoPathsPhase1(empty_paths, 0.05);
-      visualization_->drawTopoPathsPhase2(empty_paths, 0.075);
-    }
-
-    visualization_->drawHeadingTraj(
-      locdat->position_traj_, locdat->yaw_traj_, locdat->pitch_traj_, plan_data->dt_yaw_);
-
-    return true;
-  } else {
+  if (goalSuperseded(epoch)) {
+    SPDLOG_INFO("new goal pose arrived, discarding this plan");
     return false;
   }
+  if (!plan_success) return false;
+
+  planning_manager_->planHeading(start_yaw_, start_pitch_);
+  if (goalSuperseded(epoch)) {
+    SPDLOG_INFO("new goal pose arrived, discarding this plan");
+    return false;
+  }
+
+  LocalTrajData * locdat = &planning_manager_->local_data_;
+
+  /* publish newest trajectory to server */
+
+  /* publish traj */
+  asr_sdm_planning_manager::msg::Bspline bspline;
+  bspline.order = 3;
+  bspline.start_time = locdat->start_time_;
+  bspline.traj_id = locdat->traj_id_;
+
+  Eigen::MatrixXd pos_pts = locdat->position_traj_.getControlPoint();
+
+  for (int i = 0; i < pos_pts.rows(); ++i) {
+    geometry_msgs::msg::Point pt;
+    pt.x = pos_pts(i, 0);
+    pt.y = pos_pts(i, 1);
+    pt.z = pos_pts(i, 2);
+    bspline.pos_pts.push_back(pt);
+  }
+
+  Eigen::VectorXd knots = locdat->position_traj_.getKnot();
+  for (int i = 0; i < knots.rows(); ++i) {
+    bspline.knots.push_back(knots(i));
+  }
+
+  Eigen::MatrixXd yaw_pts = locdat->yaw_traj_.getControlPoint();
+  for (int i = 0; i < yaw_pts.rows(); ++i) {
+    double yaw = yaw_pts(i, 0);
+    bspline.yaw_pts.push_back(yaw);
+  }
+  bspline.yaw_dt = locdat->yaw_traj_.getInterval();
+
+  Eigen::MatrixXd pitch_pts = locdat->pitch_traj_.getControlPoint();
+  for (int i = 0; i < pitch_pts.rows(); ++i) {
+    double pitch = pitch_pts(i, 0);
+    bspline.pitch_pts.push_back(pitch);
+  }
+  bspline.pitch_dt = locdat->pitch_traj_.getInterval();
+
+  if (goalSuperseded(epoch)) {
+    SPDLOG_INFO("new goal pose arrived, discarding this plan");
+    return false;
+  }
+  bspline_pub_->publish(bspline);
+
+  /* visualize new trajectories */
+  MidPlanData * plan_data = &planning_manager_->plan_data_;
+  visualization_->drawPolynomialTraj(
+    planning_manager_->global_data_.global_traj_, 0.05, Eigen::Vector4d(0, 0, 0, 1), 0);
+  visualization_->drawBspline(
+    locdat->position_traj_, 0.08, Eigen::Vector4d(1.0, 0.0, 0.0, 1), false, 0.15,
+    Eigen::Vector4d(1.0, 1.0, 1.0, 1), 99, 99);
+  visualization_->drawBsplinesPhase2(plan_data->topo_traj_pos2_, 0.075);
+
+  if (step == 2 && collide_) {
+    visualization_->drawTopoPathsPhase1(plan_data->topo_filtered_paths_, 0.05);
+    visualization_->drawTopoPathsPhase2(plan_data->topo_select_paths_, 0.075);
+  } else {
+    vector<vector<Eigen::Vector3d>> empty_paths;
+    visualization_->drawTopoPathsPhase1(empty_paths, 0.05);
+    visualization_->drawTopoPathsPhase2(empty_paths, 0.075);
+  }
+
+  visualization_->drawHeadingTraj(
+    locdat->position_traj_, locdat->yaw_traj_, locdat->pitch_traj_, plan_data->dt_yaw_);
+
+  return true;
 }
 
 void TopoReplanFSM::regionValuationVisCallback()

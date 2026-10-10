@@ -445,8 +445,19 @@ bool PlanningManager::checkTrajCollision(double & distance)
 
 // SECTION topological replanning
 
-bool PlanningManager::planGlobalTraj(const Eigen::Vector3d & start_pos)
+namespace
 {
+bool planningAborted(const std::function<bool()> & aborted)
+{
+  return static_cast<bool>(aborted) && aborted();
+}
+}  // namespace
+
+bool PlanningManager::planGlobalTraj(
+  const Eigen::Vector3d & start_pos, const std::function<bool()> & aborted)
+{
+  if (planningAborted(aborted)) return false;
+
   // Clear any previous topological search results before building a new global reference.
   plan_data_.clearTopoPaths();
 
@@ -455,10 +466,14 @@ bool PlanningManager::planGlobalTraj(const Eigen::Vector3d & start_pos)
   // Min-snap then fits that polyline and the first local segment is truncated
   // from it.
   vector<Eigen::Vector3d> points;
-  if (!buildGuidanceGlobalWaypoints(start_pos, points)) {
+  const bool guidance = buildGuidanceGlobalWaypoints(start_pos, points, aborted);
+  if (planningAborted(aborted)) return false;
+  if (!guidance) {
     points = buildGlobalWaypoints(start_pos);
   }
+  if (planningAborted(aborted)) return false;
   PolynomialTraj global_traj = fitGlobalMinSnapTraj(points);
+  if (planningAborted(aborted)) return false;
   auto time_now = node_->now();
   global_data_.setGlobalTraj(global_traj, time_now);
 
@@ -468,7 +483,8 @@ bool PlanningManager::planGlobalTraj(const Eigen::Vector3d & start_pos)
 }
 
 bool PlanningManager::buildGuidanceGlobalWaypoints(
-  const Eigen::Vector3d & start_pos, vector<Eigen::Vector3d> & points)
+  const Eigen::Vector3d & start_pos, vector<Eigen::Vector3d> & points,
+  const std::function<bool()> & aborted)
 {
   points.clear();
   if (!guidance_planner_) return false;
@@ -490,6 +506,10 @@ bool PlanningManager::buildGuidanceGlobalWaypoints(
   points.push_back(curr);
 
   for (size_t i = 0; i < anchors.size(); ++i) {
+    if (planningAborted(aborted)) {
+      points.clear();
+      return false;
+    }
     const Eigen::Vector3d & goal = anchors[i];
     if ((goal - curr).norm() < 1.0e-3) continue;
 
@@ -505,6 +525,10 @@ bool PlanningManager::buildGuidanceGlobalWaypoints(
     }
 
     const int status = guidance_planner_->search(curr, yaw, pitch, goal, end_yaw, end_pitch);
+    if (planningAborted(aborted)) {
+      points.clear();
+      return false;
+    }
     if (status != GuidancePlanner::REACH_END) {
       SPDLOG_WARN(
         "guidance planner failed between ({:.2f},{:.2f},{:.2f}) and ({:.2f},{:.2f},{:.2f})",
@@ -699,8 +723,10 @@ void PlanningManager::initLocalTrajFromGlobal(const rclcpp::Time & time_now)
   SPDLOG_INFO("global trajectory generated.");
 }
 
-bool PlanningManager::topoReplan(bool collide)
+bool PlanningManager::topoReplan(bool collide, const std::function<bool()> & aborted)
 {
+  if (planningAborted(aborted)) return false;
+
   rclcpp::Time t1, t2;
 
   /* truncate a new local segment for replanning */
@@ -712,9 +738,14 @@ bool PlanningManager::topoReplan(bool collide)
   Eigen::MatrixXd ctrl_pts =
     reparamLocalTraj(t_now, pp_.local_traj_len_, local_traj_dt, local_traj_duration);
   fast_planner::NonUniformBspline init_traj(ctrl_pts, 3, local_traj_dt);
+  const rclcpp::Time previous_start_time = local_data_.start_time_;
   local_data_.start_time_ = time_now;
 
   if (!collide) {  // simply truncate the segment and do nothing
+    if (planningAborted(aborted)) {
+      local_data_.start_time_ = previous_start_time;
+      return false;
+    }
     // refineTraj(init_traj, time_inc);
     extendWindowToLocalEnd(t_now, init_traj, local_traj_dt, local_traj_duration);
     local_data_.position_traj_ = init_traj;
@@ -725,6 +756,11 @@ bool PlanningManager::topoReplan(bool collide)
     plan_data_.initial_local_segment_ = init_traj;
     vector<Eigen::Vector3d> colli_start, colli_end, start_pts, end_pts;
     findCollisionRange(colli_start, colli_end, start_pts, end_pts);
+
+    if (planningAborted(aborted)) {
+      local_data_.start_time_ = previous_start_time;
+      return false;
+    }
 
     if (colli_start.size() == 1 && colli_end.size() == 0) {
       SPDLOG_WARN("Init traj ends in obstacle, no replanning.");
@@ -744,6 +780,10 @@ bool PlanningManager::topoReplan(bool collide)
         colli_start.front(), colli_end.back(), start_pts, end_pts, graph, raw_paths, filtered_paths,
         select_paths);
 
+      if (planningAborted(aborted)) {
+        local_data_.start_time_ = previous_start_time;
+        return false;
+      }
       if (select_paths.size() == 0) {
         SPDLOG_WARN("No path.");
         return false;
@@ -765,6 +805,11 @@ bool PlanningManager::topoReplan(bool collide)
         // select_paths[i], origin_len, i);
       }
       for (size_t i = 0; i < select_paths.size(); ++i) optimize_threads[i].join();
+
+      if (planningAborted(aborted)) {
+        local_data_.start_time_ = previous_start_time;
+        return false;
+      }
 
       double t_opt = (node_->now() - t1).seconds();
       SPDLOG_INFO("[planner]: optimization time: {}", t_opt);
@@ -1362,8 +1407,8 @@ int main(int argc, char ** argv)
 
     std::this_thread::sleep_for(std::chrono::seconds(1));
 
-    // Use a multi-threaded executor so the FSM timers and subscription callbacks
-    // can run concurrently across multiple threads.
+    // Multi-threaded so a 2D goal pose can be recorded while the FSM timer is
+    // still inside a plan, and that plan can be discarded.
     rclcpp::executors::MultiThreadedExecutor executor;
     executor.add_node(nh);
     executor.spin();

@@ -13,6 +13,8 @@
 #include <asr_sdm_trajectory_optimizer/bspline_optimizer.h>
 #include <bspline/non_uniform_bspline.h>
 
+#include <functional>
+
 namespace amprobo
 {
 
@@ -27,8 +29,11 @@ public:
   ~PlanningManager();
 
   /* main planning interface */
-  bool planGlobalTraj(const Eigen::Vector3d & start_pos);
-  bool topoReplan(bool collide);
+  // aborted is polled around the long searches. When it returns true the
+  // attempt stops before it replaces the trajectory being followed.
+  bool planGlobalTraj(
+    const Eigen::Vector3d & start_pos, const std::function<bool()> & aborted = {});
+  bool topoReplan(bool collide, const std::function<bool()> & aborted = {});
 
   void planHeading(const Eigen::Vector3d & start_yaw, const Eigen::Vector3d & start_pitch);
   void setStartMotion(
@@ -72,7 +77,8 @@ private:
   /* global trajectory helpers */
   vector<Eigen::Vector3d> buildGlobalWaypoints(const Eigen::Vector3d & start_pos);
   bool buildGuidanceGlobalWaypoints(
-    const Eigen::Vector3d & start_pos, vector<Eigen::Vector3d> & points);
+    const Eigen::Vector3d & start_pos, vector<Eigen::Vector3d> & points,
+    const std::function<bool()> & aborted);
   void insertNonholonomicStartArc(vector<Eigen::Vector3d> & points);
   PolynomialTraj fitGlobalMinSnapTraj(const vector<Eigen::Vector3d> & points);
   void initLocalTrajFromGlobal(const rclcpp::Time & time_now);

@@ -24,6 +24,7 @@
 #include <asr_sdm_trajectory_visualizer/planning_visualization.h>
 
 #include <algorithm>
+#include <atomic>
 #include <iostream>
 #include <memory>
 #include <mutex>
@@ -69,7 +70,17 @@ private:
   /* ROS utils */
   std::shared_ptr<rclcpp::Node> node_;
   std::mutex mutex_;
+  // A 2D goal pose is stored here, off mutex_, so it can arrive while a plan
+  // still holds mutex_. The FSM applies it on the next chance and drops any
+  // plan that started before this epoch.
+  std::mutex goal_mutex_;
+  nav_msgs::msg::Path pending_path_;
+  Eigen::Vector3d pending_heading_{Eigen::Vector3d::Zero()};
+  bool pending_goal_{false};
+  std::atomic<uint64_t> goal_epoch_{0};
+
   rclcpp::TimerBase::SharedPtr exec_timer_, safety_timer_, vis_timer_, frontier_timer_;
+  rclcpp::CallbackGroup::SharedPtr goal_callback_group_;
   rclcpp::Subscription<nav_msgs::msg::Path>::SharedPtr waypoint_sub_;
   rclcpp::Subscription<geometry_msgs::msg::PoseStamped>::SharedPtr goalpose_sub_;
   rclcpp::Subscription<geometry_msgs::msg::PoseWithCovarianceStamped>::SharedPtr
@@ -89,14 +100,24 @@ private:
   void setHeadingStateFromTraj(double t_cur);
   // Drop the current target and trajectory. Caller must hold mutex_.
   void resetPlanning(const std::string & pos_call);
+  // Install a target. Caller must hold mutex_. interrupt replaces the plan or
+  // trajectory already in progress with a new one from the current pose.
+  bool installTarget(
+    const nav_msgs::msg::Path & path, const Eigen::Vector3d & arrival_heading, bool interrupt);
+  // Copy a queued goal pose into the planner. Caller must hold mutex_.
+  bool applyPendingGoal();
+  // True when a goal pose was queued after epoch was sampled.
+  bool goalSuperseded(uint64_t epoch);
 
   /* ROS functions */
   void execFSMCallback();
   void checkCollisionCallback();
   // Publish region_valuation_buffer_ as an XYZI cloud, intensity = region score.
   void regionValuationVisCallback();
-  // Take a new target. arrival_heading is the body axis to hold once there, or
-  // zero when the caller has no orientation to offer.
+  // Take a waypoint path. A 2D goal pose does not come through here: it is
+  // queued so it can preempt a plan that is still running. arrival_heading is
+  // the body axis to hold once there, or zero when the caller has no
+  // orientation to offer.
   void acceptTarget(const nav_msgs::msg::Path & path, const Eigen::Vector3d & arrival_heading);
   void waypointCallback(const nav_msgs::msg::Path::SharedPtr msg);
   void goalposeCallback(const geometry_msgs::msg::PoseStamped::SharedPtr msg);
