@@ -11,7 +11,7 @@ component TitleButton inherits Rectangle {
     callback clicked;
 
     width: 48px;
-    height: 36px;
+    height: 100%;
 
     touch := TouchArea {
         width: 100%;
@@ -904,7 +904,7 @@ component SimulatorPage inherits VerticalLayout {
     property <int> kind: 0;
     property <int> control: 0;
     property <int> teleop: 1;
-    property <int> planning: 1;
+    property <int> planning: 0;
     property <bool> follow-log: true;
     property <int> log-font-px: 12;
     property <string> log-seed: UiState.simulator-log;
@@ -919,11 +919,11 @@ component SimulatorPage inherits VerticalLayout {
 
     changed log-seed => { root.pin-log-view(); }
     changed log-font-px => { root.pin-log-view(); }
-    // Match the selected launch file: planning enables control, logging leaves it off.
+    // planning_simulator enables control and planning. logging_simulator leaves all three off.
     changed kind => {
         root.control = root.kind == 0 ? 0 : 1;
         root.teleop = 1;
-        root.planning = 1;
+        root.planning = root.kind == 0 ? 0 : 1;
     }
 
     function launch-package() -> string {
@@ -1143,7 +1143,7 @@ export component MainWindow inherits Window {
 
     VerticalLayout {
         Rectangle {
-            height: 36px;
+            height: 40px;
             background: AppTheme.header-background;
             border-width: 1px;
             border-color: AppTheme.border;
@@ -1153,25 +1153,72 @@ export component MainWindow inherits Window {
                     double-clicked => { UiActions.toggle-window-maximized(); }
                 }
                 HorizontalLayout {
-                    padding-left: 8px;
-                    spacing: 8px;
-                    Rectangle {
-                        width: 33px;
-                        vertical-stretch: 1;
-                        Image {
-                            y: (parent.height - self.height) / 2;
+                    padding-left: 10px;
+                    spacing: 0;
+                    HorizontalLayout {
+                        spacing: 8px;
+                        padding-right: 16px;
+                        horizontal-stretch: 0;
+                        Rectangle {
                             width: 33px;
-                            height: 24px;
-                            source: @image-url("../pic/logo_title.png");
-                            image-fit: contain;
+                            vertical-stretch: 1;
+                            Image {
+                                y: (parent.height - self.height) / 2;
+                                width: 33px;
+                                height: 24px;
+                                source: @image-url("../pic/logo_title.png");
+                                image-fit: contain;
+                            }
+                        }
+                        Text {
+                            text: AppText.t("appTitle");
+                            color: AppTheme.text-primary;
+                            font-size: 15px;
+                            font-weight: 700;
+                            vertical-alignment: center;
                         }
                     }
-                    Text {
-                        text: AppText.t("appTitle");
-                        color: AppTheme.text-secondary;
-                        font-size: 14px;
-                        font-weight: 700;
-                        vertical-alignment: center;
+                    Rectangle {
+                        width: 1px;
+                        height: 18px;
+                        background: AppTheme.border;
+                        cross-axis-self-alignment: center;
+                    }
+                    HorizontalLayout {
+                        spacing: 8px;
+                        padding-left: 16px;
+                        horizontal-stretch: 0;
+                        Text {
+                            text: AppText.t("theme");
+                            color: AppTheme.text-secondary;
+                            font-size: 13px;
+                            vertical-alignment: center;
+                        }
+                        ComboBox {
+                            horizontal-stretch: 0;
+                            cross-axis-self-alignment: center;
+                            model: [AppText.t("darkTheme"), AppText.t("lightTheme")];
+                            selected => {
+                                AppTheme.dark = self.current-index == 0;
+                                Palette.color-scheme = AppTheme.dark ? ColorScheme.dark : ColorScheme.light;
+                                UiActions.appearance-changed();
+                            }
+                        }
+                        Text {
+                            text: AppText.t("language");
+                            color: AppTheme.text-secondary;
+                            font-size: 13px;
+                            vertical-alignment: center;
+                        }
+                        ComboBox {
+                            horizontal-stretch: 0;
+                            cross-axis-self-alignment: center;
+                            model: [AppText.t("english"), AppText.t("chinese")];
+                            selected => {
+                                AppText.zh = self.current-index == 1;
+                                UiActions.appearance-changed();
+                            }
+                        }
                     }
                     Rectangle { horizontal-stretch: 1; }
                     TitleButton { label: "–"; clicked => { root.minimized = true; } }
@@ -1186,32 +1233,6 @@ export component MainWindow inherits Window {
                     }
                 }
             }
-        }
-
-        Rectangle {
-            background: AppTheme.header-background;
-        HorizontalLayout {
-            padding: 10px;
-            spacing: 16px;
-            Text { text: AppText.t("theme"); color: AppTheme.text-secondary; vertical-alignment: center; }
-            ComboBox {
-                model: [AppText.t("darkTheme"), AppText.t("lightTheme")];
-                selected => {
-                    AppTheme.dark = self.current-index == 0;
-                    Palette.color-scheme = AppTheme.dark ? ColorScheme.dark : ColorScheme.light;
-                    UiActions.appearance-changed();
-                }
-            }
-            Text { text: AppText.t("language"); color: AppTheme.text-secondary; vertical-alignment: center; }
-            ComboBox {
-                model: [AppText.t("english"), AppText.t("chinese")];
-                selected => {
-                    AppText.zh = self.current-index == 1;
-                    UiActions.appearance-changed();
-                }
-            }
-            Rectangle { horizontal-stretch: 1; }
-        }
         }
 
         HorizontalLayout {

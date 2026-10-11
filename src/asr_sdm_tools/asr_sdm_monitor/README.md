@@ -603,7 +603,7 @@ Both launch files accept the same three switches. Each switch is `enable` or `di
 | **teleop** | `asr_sdm_teleop` |
 | **planning** | `asr_sdm_planning_manager` |
 
-Opening the page selects **planning_simulator**, with control enabled and teleop and planning disabled. Switching to **logging_simulator** sets all three switches to disable, matching that launch file. The switches can be changed again before **Start**.
+Opening the page selects **planning_simulator**, with control and planning enabled and teleop disabled. Switching to **logging_simulator** sets all three switches to disable, matching that launch file. The switches can be changed again before **Start**.
 
 #### Buttons and controls
 
@@ -1241,7 +1241,7 @@ Live 与录制行为：
 | **teleop** | `asr_sdm_teleop` |
 | **planning** | `asr_sdm_planning_manager` |
 
-打开页面时默认选择 **planning_simulator**，control 为 enable，teleop 和 planning 为 disable。改成 **logging_simulator** 后，三个开关都会设为 disable，与该 launch 文件的默认值一致。启动前仍可以再改这三个开关。
+打开页面时默认选择 **planning_simulator**，control 和 planning 为 enable，teleop 为 disable。改成 **logging_simulator** 后，三个开关都会设为 disable，与该 launch 文件的默认值一致。启动前仍可以再改这三个开关。
 
 #### 按钮和控件
 
