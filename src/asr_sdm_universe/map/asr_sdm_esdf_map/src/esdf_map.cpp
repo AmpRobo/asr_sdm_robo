@@ -1032,6 +1032,7 @@ void ESDFMap::updateRegionValuation()
         Eigen::Vector3d gradient_sum = Eigen::Vector3d::Zero();
         Eigen::Matrix3d tensor_sum = Eigen::Matrix3d::Zero();
         double weight_sum = 0.0;
+        int sample_num = 0;
 
         for (id(0) = begin(0); id(0) < end(0); ++id(0))
           for (id(1) = begin(1); id(1) < end(1); ++id(1))
@@ -1051,6 +1052,7 @@ void ESDFMap::updateRegionValuation()
               gradient_sum += weight * direction;
               tensor_sum += weight * direction * direction.transpose();
               weight_sum += weight;
+              ++sample_num;
             }
 
         const int address = toRegionAddress(region_id);
@@ -1072,17 +1074,18 @@ void ESDFMap::updateRegionValuation()
         md_.region_tensor_eigenvalues_[address] = eigenvalues;
         md_.region_tensor_eigenvectors_[address] = solver.eigenvectors();
 
-        /* ========== region score: normalized eigenvalue entropy ========== */
+        /* ========== region score: normalized eigenvalue entropy times mean omega ========== */
         // The eigenvalues of T sum to 1; rounding can leave them slightly negative,
-        // and 0 * log(0) is taken as 0.
+        // and 0 * log(0) is taken as 0. Mean omega is over the voxels that entered T.
         double entropy = 0.0;
         for (int k = 0; k < 3; ++k) {
           const double lambda = std::max(0.0, eigenvalues(k));
           if (lambda > 0.0) entropy -= lambda * std::log(lambda);
         }
         entropy /= std::log(3.0);
+        const double omega = weight_sum / static_cast<double>(sample_num);
 
-        md_.region_valuation_buffer_[address] = entropy;
+        md_.region_valuation_buffer_[address] = entropy * omega;
       }
 }
 
