@@ -229,9 +229,10 @@ bool checkVelocityMapping(BodyModel & body_model)
     const auto limited_cmd = controller.limitCommand(cmd);
 
     const Eigen::VectorXd q = configurationFor(body_model, state);
+    const asr::Vec3 omega = asr::headBodyAngularVelocity(
+      limited_cmd.vel.angular.y, limited_cmd.vel.angular.z, state.head_frame);
     const Eigen::VectorXd v = body_model.toVelocity(
-      limited_cmd.vel.linear.x, limited_cmd.vel.angular.y, limited_cmd.vel.angular.z,
-      toEigen(joint_velocity.theta_dot));
+      limited_cmd.vel.linear.x, omega.y, omega.z, toEigen(joint_velocity.theta_dot), omega.x);
 
     body_model.updateKinematics(q);
     const auto points_at_q = body_model.computeBodyPoints();

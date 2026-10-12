@@ -173,6 +173,18 @@ double saturate(double value, double limit)
   return std::max(-limit, std::min(value, limit));
 }
 
+double headPitch(const Mat3 & head_frame)
+{
+  const Vec3 forward = column(head_frame, 0);
+  return std::atan2(-forward.z, std::hypot(forward.x, forward.y));
+}
+
+Vec3 headBodyAngularVelocity(double pitch_rate, double yaw_rate, const Mat3 & head_frame)
+{
+  const double pitch = headPitch(head_frame);
+  return {-std::sin(pitch) * yaw_rate, pitch_rate, std::cos(pitch) * yaw_rate};
+}
+
 FrontUnitFollowingController3D::FrontUnitFollowingController3D(
   const FrontUnitController3DParameters & params)
 : params_(params)
@@ -214,10 +226,10 @@ asr_sdm_control_msgs::msg::RobotCommand FrontUnitFollowingController3D::toHeadFo
 }
 
 asr_sdm_control_msgs::msg::RobotCommand FrontUnitFollowingController3D::limitCommand(
-  const asr_sdm_control_msgs::msg::RobotCommand & cmd) const
+  const asr_sdm_control_msgs::msg::RobotCommand & cmd, double head_pitch) const
 {
   asr_sdm_control_msgs::msg::RobotCommand limited_cmd = cmd;
-  const double omega = std::hypot(cmd.vel.angular.y, cmd.vel.angular.z);
+  const double omega = std::hypot(cmd.vel.angular.y, std::cos(head_pitch) * cmd.vel.angular.z);
   if (omega < 1.0e-6) {
     return limited_cmd;
   }
@@ -284,14 +296,17 @@ Vec2 FrontUnitFollowingController3D::computePitchYawRateReference(
 JointVelocity3D FrontUnitFollowingController3D::computeJointVelocity(
   const asr_sdm_control_msgs::msg::RobotCommand & cmd, const SimulationState3D & state) const
 {
-  const asr_sdm_control_msgs::msg::RobotCommand limited_cmd = limitCommand(cmd);
+  const asr_sdm_control_msgs::msg::RobotCommand limited_cmd =
+    limitCommand(cmd, headPitch(state.head_frame));
   JointVelocity3D output;
   const auto frames = linkFrames(state.head_frame, state.joints.theta);
   const auto axes = linkAxes(frames);
   const Vec3 head_axis = column(state.head_frame, 0);
   const Vec3 head_velocity = limited_cmd.vel.linear.x * head_axis;
-  const Vec3 headOmega = limited_cmd.vel.angular.z * column(state.head_frame, 2) +
-    limited_cmd.vel.angular.y * column(state.head_frame, 1);
+  const Vec3 omegaBody = headBodyAngularVelocity(
+    limited_cmd.vel.angular.y, limited_cmd.vel.angular.z, state.head_frame);
+  const Vec3 headOmega = omegaBody.x * column(state.head_frame, 0) +
+    omegaBody.y * column(state.head_frame, 1) + omegaBody.z * column(state.head_frame, 2);
 
   std::array<Vec3, kNum3dLinks + 1> jointPointVel{};
   std::array<Vec3, kNum3dLinks> linkOmega{};
@@ -323,7 +338,8 @@ JointVelocity3D FrontUnitFollowingController3D::computeJointVelocity(
 JointVelocity3D FrontUnitFollowingController3D::step(
   const asr_sdm_control_msgs::msg::RobotCommand & cmd, double dt, SimulationState3D & state) const
 {
-  const asr_sdm_control_msgs::msg::RobotCommand limited_cmd = limitCommand(cmd);
+  const asr_sdm_control_msgs::msg::RobotCommand limited_cmd =
+    limitCommand(cmd, headPitch(state.head_frame));
   const JointVelocity3D output = computeJointVelocity(limited_cmd, state);
   const double jointLimit = std::abs(params_.joint_limit);
   for (size_t joint = 0; joint < kNum3dJoints; ++joint) {
@@ -338,10 +354,23 @@ JointVelocity3D FrontUnitFollowingController3D::step(
   const Vec3 head_axis = column(state.head_frame, 0);
   const Vec3 head_velocity = limited_cmd.vel.linear.x * head_axis;
   state.head_position = state.head_position + head_velocity * dt;
-  state.head_frame = orthonormalize(
-    multiply(
-      multiply(state.head_frame, rotationZ(limited_cmd.vel.angular.z * dt)),
-      rotationY(limited_cmd.vel.angular.y * dt)));
+  const Vec3 rotation_vector = dt * headBodyAngularVelocity(
+    limited_cmd.vel.angular.y, limited_cmd.vel.angular.z, state.head_frame);
+  const double angle = norm(rotation_vector);
+  Mat3 increment = identityFrame();
+  if (angle > 1.0e-12) {
+    const Vec3 k = rotation_vector / angle;
+    const double s = std::sin(angle);
+    const double c = std::cos(angle);
+    const Mat3 kx = {{{0.0, -k.z, k.y}, {k.z, 0.0, -k.x}, {-k.y, k.x, 0.0}}};
+    const Mat3 kx2 = multiply(kx, kx);
+    for (size_t i = 0; i < 3; ++i) {
+      for (size_t j = 0; j < 3; ++j) {
+        increment.v[i][j] += s * kx.v[i][j] + (1.0 - c) * kx2.v[i][j];
+      }
+    }
+  }
+  state.head_frame = orthonormalize(multiply(state.head_frame, increment));
   state.time += dt;
   state.link_frames = linkFrames(state.head_frame, state.joints.theta);
   state.link_axes = linkAxes(state.link_frames);

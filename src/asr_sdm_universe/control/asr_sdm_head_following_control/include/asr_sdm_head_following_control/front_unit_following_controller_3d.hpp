@@ -111,6 +111,15 @@ std::array<Vec3, kNum3dPoints> bodyPoints(
 
 double saturate(double value, double limit);
 
+// The commanded angular.y / angular.z are pitch / yaw Euler rates of the head (R = Rz(yaw) * Ry(pitch)),
+// which is what the planner and the MPC model use. Returns the equivalent angular velocity in the
+// head frame, (-sin(pitch) * yaw_rate, pitch_rate, cos(pitch) * yaw_rate), with pitch taken from
+// head_frame. Rotating the head by this keeps the roll at zero.
+Vec3 headBodyAngularVelocity(double pitch_rate, double yaw_rate, const Mat3 & head_frame);
+
+// Pitch of the head's forward axis (R = Rz(yaw) * Ry(pitch)).
+double headPitch(const Mat3 & head_frame);
+
 class FrontUnitFollowingController3D
 {
 public:
@@ -119,8 +128,12 @@ public:
   SimulationState3D makeInitialState() const;
   asr_sdm_control_msgs::msg::RobotCommand toHeadFollowingCommand(
     const asr_sdm_control_msgs::msg::RobotCommand & cmd) const;
+  // Bounds the heading turn rate sqrt(pitch_rate^2 + cos(head_pitch)^2 * yaw_rate^2) by
+  // max_curvature * v, the same path curvature |v x a| / |v|^3 the planner reports. The yaw
+  // Euler rate turns the heading only by cos(pitch) of itself, so head_pitch must be the
+  // current head pitch; the default 0 gives the conservative hypot(pitch_rate, yaw_rate).
   asr_sdm_control_msgs::msg::RobotCommand limitCommand(
-    const asr_sdm_control_msgs::msg::RobotCommand & cmd) const;
+    const asr_sdm_control_msgs::msg::RobotCommand & cmd, double head_pitch = 0.0) const;
   JointVelocity3D computeJointVelocity(
     const asr_sdm_control_msgs::msg::RobotCommand & cmd, const SimulationState3D & state) const;
   JointVelocity3D step(

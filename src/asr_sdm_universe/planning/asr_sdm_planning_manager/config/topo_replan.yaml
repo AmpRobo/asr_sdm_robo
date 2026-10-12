@@ -90,9 +90,11 @@
       # The head is driven as a nonholonomic body: yaw and pitch follow the
       # trajectory tangent, so their limits constrain the position trajectory.
       nonholonomic: true
-      # Mirror the rate limits enforced by asr_sdm_control_manager.
-      max_yaw_rate: 0.2
-      max_pitch_rate: 0.2
+      # Mirror the rate limits enforced by asr_sdm_control_manager
+      # (max_pitch_rate 0.5; the combined yaw/pitch rate is further bounded
+      # there by max_curvature 3.5 * v).
+      max_yaw_rate: 0.5
+      max_pitch_rate: 0.5
       min_vel: 0.1
       # Largest factor by which refinement may stretch the duration of a local
       # segment. A topological detour is longer than the segment it replaces but
@@ -104,8 +106,8 @@
     # Turning radii match max_vel / max_yaw_rate and max_vel / max_pitch_rate.
     guidance_planner:
       dubins_path_3d:
-        yaw_radius: 1.0
-        pitch_radius: 1.0
+        yaw_radius: 2.5
+        pitch_radius: 2.5
         sample_ds: 0.1
         margin: 0.2
         position_tol: 0.05

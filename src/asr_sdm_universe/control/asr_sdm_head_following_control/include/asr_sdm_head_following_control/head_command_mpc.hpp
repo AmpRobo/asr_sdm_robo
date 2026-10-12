@@ -27,6 +27,9 @@ struct HeadCommandMPCParameters
   double max_pitch_rate = 0.5;
   double min_yaw_rate = -0.5;
   double max_yaw_rate = 0.5;
+  // sqrt(wy^2 + cos^2(pitch) * wz^2) <= max_curvature * v; keep equal to the controller's
+  // limitCommand value.
+  double max_curvature = 3.5;
 };
 
 struct HeadCommandMPCResult

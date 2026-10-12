@@ -70,10 +70,11 @@ public:
     const Eigen::Vector3d & head_position, const Eigen::Matrix3d & head_frame,
     const JointVector & theta) const;
   /// The head twist is expressed in the head frame: forward along x, pitch about
-  /// y, yaw about z.
+  /// y, yaw about z. roll_rate (about x) is zero unless the caller converts Euler rates
+  /// to a body-frame angular velocity, which is needed while the head is pitched.
   Eigen::VectorXd toVelocity(
     double linear_velocity, double pitch_rate, double yaw_rate,
-    const JointVector & theta_dot) const;
+    const JointVector & theta_dot, double roll_rate = 0.0) const;
 
   void updateKinematics(const Eigen::VectorXd & q);
   void updateKinematics(const Eigen::VectorXd & q, const Eigen::VectorXd & v);

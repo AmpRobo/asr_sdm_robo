@@ -63,7 +63,8 @@ class HeadCommandMPC::Impl
 public:
   explicit Impl(const HeadCommandMPCParameters & params)
   : params_(params),
-    problem_(std::make_shared<HeadCommandProblemDescription>(makeCostWeights(params))),
+    problem_(std::make_shared<HeadCommandProblemDescription>(
+        makeCostWeights(params), static_cast<typeRNum>(params.max_curvature))),
     solver_(grampc::Solver(problem_))
   {
     const std::vector<typeRNum> xdes(5, 0.0);
@@ -92,6 +93,9 @@ public:
     solver_->setopt_int("Nhor", params_.Nhor);
     solver_->setopt_int("MaxGradIter", params_.max_grad_iter);
     solver_->setopt_int("MaxMultIter", 1);
+    // The curvature inequality is handled by penalty/multiplier updates. With the default
+    // PenaltyMin (1) it is negligible next to the tracking cost, so start from a stiffer penalty.
+    solver_->setopt_real("PenaltyMin", static_cast<typeRNum>(1.0e2));
     solver_->setopt_string("Integrator", "erk2");
     solver_->setopt_string("TerminalCost", "on");
   }
@@ -142,9 +146,21 @@ public:
       static_cast<typeRNum>(feedforward_cmd.vel.angular.y),
       static_cast<typeRNum>(feedforward_cmd.vel.angular.z)};
 
+    // The curvature limit couples turn rate to v, and v cannot be negative. If the target lies
+    // behind the head, stopping (v = 0, no turn) is a cost minimum that also satisfies the limit,
+    // so the head would never turn towards the target. Keep the planned speed as a floor: the
+    // MPC may only speed up, and the planned speed is what makes the planned turn feasible.
+    const typeRNum v_floor = static_cast<typeRNum>(std::clamp(
+      static_cast<double>(feedforward_cmd.vel.linear.x), params_.min_linear_velocity,
+      params_.max_linear_velocity));
+    std::vector<typeRNum> umin = {
+      v_floor, static_cast<typeRNum>(params_.min_pitch_rate),
+      static_cast<typeRNum>(params_.min_yaw_rate)};
+
     solver_->setparam_real("t0", 0.0);
     solver_->setparam_real_vector("x0", x0.data());
     solver_->setparam_real_vector("udes", udes.data());
+    solver_->setparam_real_vector("umin", umin.data());
     solver_->run();
 
     const typeGRAMPCsol * sol = solver_->getSolution();

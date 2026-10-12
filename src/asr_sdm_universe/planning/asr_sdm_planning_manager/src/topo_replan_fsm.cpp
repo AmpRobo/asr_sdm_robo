@@ -6,12 +6,20 @@
 #include <sensor_msgs/point_cloud2_iterator.hpp>
 
 #include <chrono>
+#include <cmath>
 #include <functional>
 #include <mutex>
 #include <string>
 
 namespace amprobo
 {
+
+static double wrapToPi(double angle)
+{
+  while (angle > M_PI) angle -= 2.0 * M_PI;
+  while (angle < -M_PI) angle += 2.0 * M_PI;
+  return angle;
+}
 
 void TopoReplanFSM::init(const std::shared_ptr<rclcpp::Node> & nh)
 {
@@ -380,6 +388,106 @@ void TopoReplanFSM::execFSMCallback()
       double t_cur = (time_now - global_data->global_start_time_).seconds();
 
       if (t_cur > global_data->global_duration_ - 1e-2) {
+        // The trajectory time is up, but the tracking controller may lag or stall
+        // (e.g. curvature limit vs. MPC output), so verify the robot actually reached the goal.
+        constexpr double arrival_pos_tolerance = 0.2;  // m
+        constexpr int max_pos_adjust_attempts = 3;
+        static int pos_adjust_count = 0;
+        if (have_odom_) {
+          const double pos_error = (odom_pos_ - target_point_).norm();
+          if (pos_error > arrival_pos_tolerance) {
+            if (pos_adjust_count < max_pos_adjust_attempts) {
+              pos_adjust_count++;
+              SPDLOG_WARN(
+                "trajectory finished but goal not reached: position error {:.2f} m "
+                "(tolerance {:.2f} m), replanning from current state (attempt {}/{})",
+                pos_error, arrival_pos_tolerance, pos_adjust_count, max_pos_adjust_attempts);
+              changeFSMExecState(GEN_NEW_TRAJ, "FSM");
+              return;
+            }
+            SPDLOG_WARN(
+              "goal not reached after {} replans, position error {:.2f} m, giving up",
+              max_pos_adjust_attempts, pos_error);
+          }
+        }
+        pos_adjust_count = 0;
+
+        const bool has_heading = end_heading_.squaredNorm() > 1.0e-12;
+        if (has_heading && have_odom_) {
+          const Eigen::Matrix3d rot = odom_orient_.toRotationMatrix();
+          const double current_yaw = atan2(rot(1, 0), rot(0, 0));
+          const double goal_yaw = atan2(end_heading_(1), end_heading_(0));
+          const double heading_error = std::fabs(wrapToPi(goal_yaw - current_yaw));
+          constexpr double heading_tolerance = 15.0 * M_PI / 180.0;
+
+          // Limit replan attempts to avoid infinite loop. Shared by the retry and the success
+          // branch below so that a success actually clears the counter.
+          static int heading_adjust_count = 0;
+          static double last_heading_error = 180.0;
+
+          SPDLOG_INFO(
+            "trajectory finished: heading error {:.1f} deg (tolerance {:.1f} deg)",
+            heading_error * 180.0 / M_PI, heading_tolerance * 180.0 / M_PI);
+
+          if (heading_error > heading_tolerance) {
+            const double dist_to_goal = (odom_pos_ - target_point_).norm();
+
+            // If very close to goal, short trajectories cannot achieve large heading changes;
+            // accept a relaxed tolerance instead of replanning forever.
+            if (dist_to_goal < 1.0) {
+              constexpr double relaxed_tolerance = 25.0 * M_PI / 180.0;
+              if (heading_error < relaxed_tolerance) {
+                SPDLOG_WARN(
+                  "distance to goal {:.2f} m < 1.0 m, accepting heading error {:.1f} deg "
+                  "(relaxed tolerance {:.1f} deg)",
+                  dist_to_goal, heading_error * 180.0 / M_PI, relaxed_tolerance * 180.0 / M_PI);
+                have_target_ = false;
+                changeFSMExecState(WAIT_TARGET, "FSM");
+                return;
+              }
+            }
+
+            SPDLOG_INFO(
+              "heading not reached, distance to goal {:.2f} m, attempt replanning",
+              dist_to_goal);
+
+            if (heading_error >= last_heading_error - 1.0) {
+              heading_adjust_count++;
+              SPDLOG_WARN(
+                "heading adjustment attempt {}, error {:.1f} deg (previous {:.1f} deg)",
+                heading_adjust_count, heading_error * 180.0 / M_PI,
+                last_heading_error * 180.0 / M_PI);
+
+              if (heading_adjust_count >= 5) {
+                SPDLOG_WARN(
+                  "heading adjustment failed after {} attempts, accepting current heading",
+                  heading_adjust_count);
+                heading_adjust_count = 0;
+                last_heading_error = 180.0;
+                have_target_ = false;
+                changeFSMExecState(WAIT_TARGET, "FSM");
+                return;
+              }
+            } else {
+              heading_adjust_count = 1;
+            }
+
+            last_heading_error = heading_error;
+
+            start_pt_ = odom_pos_;
+            start_vel_ = odom_vel_;
+            start_acc_.setZero();
+            start_yaw_(0) = current_yaw;
+            start_pitch_(0) = atan2(rot(2, 0), sqrt(rot(0, 0) * rot(0, 0) + rot(1, 0) * rot(1, 0)));
+            // target_point_ and end_heading_ unchanged; replan with current state.
+            changeFSMExecState(GEN_NEW_TRAJ, "FSM");
+            return;
+          } else {
+            heading_adjust_count = 0;
+            last_heading_error = 180.0;
+          }
+        }
+
         have_target_ = false;
         changeFSMExecState(WAIT_TARGET, "FSM");
         return;

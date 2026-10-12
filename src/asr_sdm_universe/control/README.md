@@ -51,7 +51,7 @@ Launch name: `asr_sdm_kinematic_controller`. Topic names come from
 
 | Topic | Type | Role |
 |---|---|---|
-| `/control/asr_sdm/robot_cmd` | `asr_sdm_control_msgs/msg/RobotCommand` | Velocity command in `vel`. Uses `vel.linear.x` (forward), `vel.angular.y` (pitch rate), `vel.angular.z` (yaw rate) |
+| `/control/asr_sdm/robot_cmd` | `asr_sdm_control_msgs/msg/RobotCommand` | Velocity command in `vel`. Uses `vel.linear.x` (forward), `vel.angular.y` (pitch Euler rate), `vel.angular.z` (yaw Euler rate, `R = Rz(yaw) * Ry(pitch)`; the controller converts them to a body-frame angular velocity so no roll builds up) |
 | `/control/initial_pose` | `geometry_msgs/msg/PoseWithCovarianceStamped` | Reset pose (e.g. RViz 2D Pose Estimate) |
 
 **Publish**
@@ -143,7 +143,7 @@ robot_cmd
 
 | Topic | 类型 | 内容 |
 |---|---|---|
-| `/control/asr_sdm/robot_cmd` | `asr_sdm_control_msgs/msg/RobotCommand` | 速度指令在 `vel`。只用 `vel.linear.x`（前进）、`vel.angular.y`（俯仰角速度）、`vel.angular.z`（偏航角速度） |
+| `/control/asr_sdm/robot_cmd` | `asr_sdm_control_msgs/msg/RobotCommand` | 速度指令在 `vel`。只用 `vel.linear.x`（前进）、`vel.angular.y`（俯仰欧拉角速率）、`vel.angular.z`（偏航欧拉角速率，`R = Rz(yaw) * Ry(pitch)`；控制器会换算成机体系角速度，避免产生滚转） |
 | `/control/initial_pose` | `geometry_msgs/msg/PoseWithCovarianceStamped` | 重置位姿（如 RViz 2D Pose Estimate） |
 
 **Publish**

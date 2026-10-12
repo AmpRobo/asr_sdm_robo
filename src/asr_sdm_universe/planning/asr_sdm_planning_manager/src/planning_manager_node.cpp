@@ -38,6 +38,11 @@ Eigen::Vector3d headingBodyX(double yaw, double pitch)
 }
 
 constexpr double MIN_HEADING_SPEED = 0.02;
+// Tightest seeded turn: the radius the controller can actually drive, 1 / max_curvature
+// (asr_sdm_control_manager max_curvature 3.5 1/m = 0.29 m). A larger floor rejected arcs for
+// goals closer than that, and the min-snap fit then cut a hard corner (curvature > 20 1/m)
+// that the controller can only follow by saturating. Keep in sync with max_curvature.
+constexpr double MIN_TURN_RADIUS = 1.0 / 3.5;
 
 double wrapToPi(double angle)
 {
@@ -375,7 +380,9 @@ void PlanningManager::setStartMotion(
   if (pp_.nonholonomic_ && dir.squaredNorm() > 1.0e-12) {
     const Eigen::Vector3d heading = dir.normalized();
     double speed = start_vel.norm();
-    if (speed < pp_.min_vel_) speed = pp_.min_vel_;
+    // A replan can start while the tracker is overshooting (odom speed far above max_vel);
+    // pinning the min-snap start velocity there is infeasible by construction.
+    speed = std::min(std::max(speed, pp_.min_vel_), std::max(pp_.max_vel_, pp_.min_vel_));
     start_vel_plan_ = speed * heading;
     start_acc_plan_ = start_acc.dot(heading) * heading;
     SPDLOG_INFO(
@@ -588,7 +595,7 @@ vector<Eigen::Vector3d> PlanningManager::buildGlobalWaypoints(const Eigen::Vecto
 
   points.insert(points.begin(), start_pos);
 
-  if (pp_.nonholonomic_) insertNonholonomicStartArc(points);
+  if (pp_.nonholonomic_) insertNonholonomicTurnArcs(points);
 
   // Insert intermediate points when consecutive waypoints are farther than dist_thresh.
   vector<Eigen::Vector3d> inter_points;
@@ -618,29 +625,26 @@ vector<Eigen::Vector3d> PlanningManager::buildGlobalWaypoints(const Eigen::Vecto
   return inter_points;
 }
 
-void PlanningManager::insertNonholonomicStartArc(vector<Eigen::Vector3d> & points)
+/* Circular arc that turns a body at `start`, facing the unit vector `heading`, until it can run
+ * straight to `goal`. The straight run leaves the circle tangentially, so the path is G1 at the
+ * junction and the goal is reached exactly. (A circle that merely spans start to goal does not
+ * exit towards the goal: its end heading is off by half the turned angle.) The start itself is
+ * not part of `arc`; `arc` is empty when no turn is needed. Returns false when the goal is too
+ * close for any admissible radius; `arc` is then empty. */
+bool PlanningManager::nonholonomicTurnArc(
+  const Eigen::Vector3d & start, const Eigen::Vector3d & heading, const Eigen::Vector3d & goal,
+  vector<Eigen::Vector3d> & arc, double & ang, double & radius) const
 {
-  if (points.size() < 2) return;
-
-  const Eigen::Vector3d start = points.front();
-  const Eigen::Vector3d goal = points[1];
-  Eigen::Vector3d heading = headingBodyX(start_yaw_(0), start_pitch_(0));
-  if (heading.squaredNorm() < 1.0e-12) return;
-  heading.normalize();
-
+  arc.clear();
+  ang = 0.0;
+  radius = 0.0;
   const Eigen::Vector3d to_goal = goal - start;
   const double dist = to_goal.norm();
-  if (dist < 1.0e-3) return;
+  if (dist < 1.0e-3) return true;
   const Eigen::Vector3d goal_dir = to_goal / dist;
 
-  const double ang = std::acos(std::max(-1.0, std::min(1.0, heading.dot(goal_dir))));
-  if (ang < 0.15) return;
-
-  const double omega = std::max(1.0e-3, std::min(pp_.max_yaw_rate_, pp_.max_pitch_rate_));
-  const double radius = std::max(pp_.max_vel_, pp_.min_vel_) / omega;
-  const double arc_len = std::min(ang * radius, 0.5 * dist);
-  if (arc_len < 0.5) return;
-  const double alpha = arc_len / radius;
+  ang = std::acos(std::max(-1.0, std::min(1.0, heading.dot(goal_dir))));
+  if (ang < 0.15) return true;
 
   Eigen::Vector3d axis = heading.cross(goal_dir);
   if (axis.squaredNorm() < 1.0e-12) {
@@ -650,22 +654,160 @@ void PlanningManager::insertNonholonomicStartArc(vector<Eigen::Vector3d> & point
   axis.normalize();
   const Eigen::Vector3d radial = axis.cross(heading);
 
-  const int n = std::max(1, static_cast<int>(std::lround(arc_len / 4.0)));
-  vector<Eigen::Vector3d> arc;
+  const double gx = to_goal.dot(heading);
+  const double gy = std::max(0.0, to_goal.dot(radial));
+
+  // Nominal radius is what the rate limits allow at full speed. A goal inside that circle is
+  // unreachable by a tangent exit, so shrink the radius to keep the goal outside it with some
+  // room, but never below the platform's minimum turning radius (control max_curvature 3.5).
+  const double omega = std::max(1.0e-3, std::min(pp_.max_yaw_rate_, pp_.max_pitch_rate_));
+  radius = std::max(pp_.max_vel_, pp_.min_vel_) / omega;
+  if (gy > 1.0e-9) radius = std::min(radius, 0.9 * dist * dist / (2.0 * gy));
+  if (radius < MIN_TURN_RADIUS) return false;
+
+  const double qx = gx, qy = gy - radius;
+  const double tangent_len = std::sqrt(std::max(0.0, qx * qx + qy * qy - radius * radius));
+  double alpha = std::atan2(qy, qx) + std::atan2(radius, tangent_len);
+  if (alpha < 0.0) alpha += 2.0 * M_PI;
+  if (alpha * radius < 0.3) return true;
+
+  // At least one seed per 20 deg of rotation: a short arc can still cover a large angle, and a
+  // single seed would make min-snap cut a hard corner.
+  const int n = std::max(
+    {1, static_cast<int>(std::lround(alpha * radius / 4.0)),
+     static_cast<int>(std::ceil(alpha / (20.0 * M_PI / 180.0)))});
   arc.reserve(static_cast<size_t>(n));
   for (int k = 1; k <= n; ++k) {
     const double theta = alpha * static_cast<double>(k) / static_cast<double>(n);
-    const Eigen::Vector3d pt =
-      start + radius * (heading * std::sin(theta) + radial * (1.0 - std::cos(theta)));
-    if ((pt - goal).norm() < 0.5) break;
-    arc.push_back(pt);
+    arc.push_back(
+      start + radius * (heading * std::sin(theta) + radial * (1.0 - std::cos(theta))));
   }
-  if (arc.empty()) return;
+  return true;
+}
 
-  points.insert(points.begin() + 1, arc.begin(), arc.end());
-  SPDLOG_INFO(
-    "nonholonomic start arc: heading error {:.1f} deg, {} seed waypoints, radius {:.2f} m",
-    ang * 180.0 / M_PI, static_cast<int>(arc.size()), radius);
+/* Seed the turns a nonholonomic body must make as arc + tangent line + arc, so that every
+ * junction is G1 and min-snap does not have to smooth out heading jumps (which it does by
+ * curling far tighter than the platform can follow).
+ *
+ * Start arc: from the current pose turn until the body faces the next waypoint.
+ * Arrival arc: the terminal tangent is pinned to goal_heading_. Run time backwards: from the
+ * goal, facing against goal_heading_, turn towards the preceding waypoint; the arc points,
+ * reversed, are the approach.
+ *
+ * With only the goal ahead the two arcs are coupled: the start arc must aim at the entrance of
+ * the arrival arc and the arrival arc must aim at the exit of the start arc. A fixed-point
+ * iteration settles that. When the goal is too close for both arcs to fit tangentially, the body
+ * first drives straight along its heading until they do (turn-around). If even that finds no
+ * fit, only the start arc is kept and the arrival heading is left to min-snap. */
+void PlanningManager::insertNonholonomicTurnArcs(vector<Eigen::Vector3d> & points)
+{
+  if (points.size() < 2) return;
+
+  Eigen::Vector3d start_heading = headingBodyX(start_yaw_(0), start_pitch_(0));
+  if (start_heading.squaredNorm() < 1.0e-12) return;
+  start_heading.normalize();
+
+  const Eigen::Vector3d start = points.front();
+  const Eigen::Vector3d goal = points.back();
+  const bool coupled = points.size() == 2;
+
+  vector<Eigen::Vector3d> start_arc, arrival_arc;
+  double start_ang = 0.0, start_radius = 0.0, arrival_ang = 0.0, arrival_radius = 0.0;
+  bool use_arrival = false;
+
+  if (goal_heading_.squaredNorm() > 1.0e-12) {
+    const Eigen::Vector3d back_heading = -goal_heading_.normalized();
+    // Fixed point of the coupled start/arrival arcs for a body leaving `origin` along
+    // start_heading. Fills start_arc / arrival_arc and returns true on convergence.
+    auto solveCoupled = [&](const Eigen::Vector3d & origin) {
+      constexpr int MAX_ITER = 20;
+      Eigen::Vector3d start_exit = origin;
+      for (int it = 0; it < MAX_ITER; ++it) {
+        if (!nonholonomicTurnArc(
+              goal, back_heading, start_exit, arrival_arc, arrival_ang, arrival_radius)) {
+          return false;
+        }
+        const Eigen::Vector3d arrival_entry = arrival_arc.empty() ? goal : arrival_arc.back();
+        if (!nonholonomicTurnArc(
+              origin, start_heading, arrival_entry, start_arc, start_ang, start_radius)) {
+          return false;
+        }
+        const Eigen::Vector3d exit = start_arc.empty() ? origin : start_arc.back();
+        if ((exit - start_exit).norm() < 0.01) return true;
+        start_exit = exit;
+      }
+      return false;
+    };
+
+    if (coupled) {
+      use_arrival = solveCoupled(start);
+      // Goal too close (or too far behind) to turn around in place: drive on along the current
+      // heading until there is room for both arcs, then turn and come back. The run-out is a
+      // straight continuation of the heading, so the path stays G1 at the run-out point.
+      constexpr int MAX_RUNOUT_STEPS = 20;
+      const double step = 0.5 * MIN_TURN_RADIUS;
+      for (int i = 1; i <= MAX_RUNOUT_STEPS && !use_arrival; ++i) {
+        const Eigen::Vector3d runout = start + step * i * start_heading;
+        if (solveCoupled(runout)) {
+          use_arrival = true;
+          start_arc.insert(start_arc.begin(), runout);
+          SPDLOG_INFO(
+            "nonholonomic turn-around: goal too close to turn at the current pose, driving "
+            "{:.2f} m straight first",
+            step * i);
+        }
+      }
+    } else {
+      use_arrival = nonholonomicTurnArc(
+        goal, back_heading, points[points.size() - 2], arrival_arc, arrival_ang, arrival_radius);
+    }
+    if (!use_arrival) {
+      arrival_arc.clear();
+      SPDLOG_WARN("nonholonomic arrival arc: goal too close for a tangent approach, skipped");
+    }
+  }
+
+  if (!use_arrival || !coupled) {
+    if (!nonholonomicTurnArc(start, start_heading, points[1], start_arc, start_ang, start_radius)) {
+      start_arc.clear();
+      // The waypoint lies inside the tightest turning circle, so no tangent exit exists from the
+      // current pose. The body can only drive on along its heading until the waypoint is
+      // outside that circle, then turn: seed that straight run in front of the arc instead of
+      // letting min-snap cut a corner the platform cannot follow.
+      constexpr int MAX_DETOUR_STEPS = 8;
+      const double step = 0.5 * MIN_TURN_RADIUS;
+      bool found = false;
+      for (int i = 1; i <= MAX_DETOUR_STEPS && !found; ++i) {
+        const Eigen::Vector3d detour = start + step * i * start_heading;
+        if (nonholonomicTurnArc(detour, start_heading, points[1], start_arc, start_ang, start_radius)) {
+          start_arc.insert(start_arc.begin(), detour);
+          found = true;
+          SPDLOG_INFO(
+            "nonholonomic start arc: next waypoint inside the turning circle, driving {:.2f} m "
+            "straight before the turn",
+            step * i);
+        }
+      }
+      if (!found) {
+        start_arc.clear();
+        SPDLOG_WARN("nonholonomic start arc: next waypoint too close for a tangent turn, skipped");
+      }
+    }
+  }
+
+  // Insert the arrival arc first so that index 1 still follows the start for the start arc.
+  if (!arrival_arc.empty()) {
+    points.insert(points.end() - 1, arrival_arc.rbegin(), arrival_arc.rend());
+    SPDLOG_INFO(
+      "nonholonomic arrival arc: heading error {:.1f} deg, {} seed waypoints, radius {:.2f} m",
+      arrival_ang * 180.0 / M_PI, static_cast<int>(arrival_arc.size()), arrival_radius);
+  }
+  if (!start_arc.empty()) {
+    points.insert(points.begin() + 1, start_arc.begin(), start_arc.end());
+    SPDLOG_INFO(
+      "nonholonomic start arc: heading error {:.1f} deg, {} seed waypoints, radius {:.2f} m",
+      start_ang * 180.0 / M_PI, static_cast<int>(start_arc.size()), start_radius);
+  }
 }
 
 PolynomialTraj PlanningManager::fitGlobalMinSnapTraj(const vector<Eigen::Vector3d> & points)

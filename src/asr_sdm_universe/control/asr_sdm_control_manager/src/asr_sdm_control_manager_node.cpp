@@ -164,7 +164,7 @@ private:
       "kinematic_controller.joint_rate_limit", 2.0);
     controller_params_.joint_limit = model_params_.joint_limit;
     controller_params_.max_curvature = node_->declare_parameter<double>(
-      "kinematic_controller.max_curvature", 1.2);
+      "kinematic_controller.max_curvature", 3.5);
     controller_params_.curvature_velocity_epsilon = node_->declare_parameter<double>(
       "kinematic_controller.curvature_velocity_epsilon", 1.0e-6);
     controller_params_.damping = node_->declare_parameter<double>(
@@ -200,6 +200,7 @@ private:
       "grampc_compensation.r_angular", 0.05);
     mpc_params_.terminal_position_scale = node_->declare_parameter<double>(
       "grampc_compensation.terminal_position_scale", 4.0);
+    mpc_params_.max_curvature = controller_params_.max_curvature;
     mpc_params_.min_linear_velocity = controller_params_.min_linear_velocity;
     mpc_params_.max_linear_velocity = controller_params_.max_linear_velocity;
     mpc_params_.min_pitch_rate = controller_params_.min_pitch_rate;
@@ -354,8 +355,10 @@ private:
     for (size_t i = 0; i < asr::kNum3dJointDofs; ++i) {
       theta_dot[static_cast<int>(i)] = joint_velocity.theta_dot[i];
     }
-    return model_->toVelocity(
-      cmd.vel.linear.x, cmd.vel.angular.y, cmd.vel.angular.z, theta_dot);
+    // angular.y / angular.z are pitch / yaw Euler rates; the model integrates body-frame twist.
+    const asr::Vec3 omega = asr::headBodyAngularVelocity(
+      cmd.vel.angular.y, cmd.vel.angular.z, state_.head_frame);
+    return model_->toVelocity(cmd.vel.linear.x, omega.y, omega.z, theta_dot, omega.x);
   }
 
   void copyModelGeometryToState()
@@ -435,6 +438,10 @@ private:
       robot_cmd = asr_sdm_control_msgs::msg::RobotCommand();
       timed_out = true;
     }
+    // MPC solves under the curvature limit; do limitCommand first so the compensator and the
+    // limiter are not applied twice in opposite directions.
+    robot_cmd = controller_->limitCommand(robot_cmd, asr::headPitch(state_.head_frame));
+
     if (!timed_out && mpc_ && asr::HeadCommandMPC::hasPositionReference(cmd_raw_)) {
       const auto compensated = mpc_->compensate(cmd_raw_, robot_cmd, state_);
       robot_cmd = compensated.command;
@@ -447,7 +454,6 @@ private:
           robot_cmd.vel.linear.x, robot_cmd.vel.angular.y, robot_cmd.vel.angular.z);
       }
     }
-    robot_cmd = controller_->limitCommand(robot_cmd);
 
     latest_joint_velocity_ = controller_->computeJointVelocity(robot_cmd, state_);
     if (isZeroCommand(robot_cmd)) {
@@ -541,12 +547,14 @@ private:
     odometry.twist.twist.linear.x = cmd.vel.linear.x * forward.x;
     odometry.twist.twist.linear.y = cmd.vel.linear.x * forward.y;
     odometry.twist.twist.linear.z = cmd.vel.linear.x * forward.z;
+    const auto omega_body = asr::headBodyAngularVelocity(
+      cmd.vel.angular.y, cmd.vel.angular.z, state_.head_frame);
     odometry.twist.twist.angular.x =
-      cmd.vel.angular.y * pitch_axis.x + cmd.vel.angular.z * yaw_axis.x;
+      omega_body.x * forward.x + omega_body.y * pitch_axis.x + omega_body.z * yaw_axis.x;
     odometry.twist.twist.angular.y =
-      cmd.vel.angular.y * pitch_axis.y + cmd.vel.angular.z * yaw_axis.y;
+      omega_body.x * forward.y + omega_body.y * pitch_axis.y + omega_body.z * yaw_axis.y;
     odometry.twist.twist.angular.z =
-      cmd.vel.angular.y * pitch_axis.z + cmd.vel.angular.z * yaw_axis.z;
+      omega_body.x * forward.z + omega_body.y * pitch_axis.z + omega_body.z * yaw_axis.z;
     pub_odom_->publish(odometry);
   }
 

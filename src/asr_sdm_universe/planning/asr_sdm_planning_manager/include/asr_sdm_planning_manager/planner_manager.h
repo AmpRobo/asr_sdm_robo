@@ -79,7 +79,10 @@ private:
   bool buildGuidanceGlobalWaypoints(
     const Eigen::Vector3d & start_pos, vector<Eigen::Vector3d> & points,
     const std::function<bool()> & aborted);
-  void insertNonholonomicStartArc(vector<Eigen::Vector3d> & points);
+  bool nonholonomicTurnArc(
+    const Eigen::Vector3d & start, const Eigen::Vector3d & heading, const Eigen::Vector3d & goal,
+    vector<Eigen::Vector3d> & arc, double & ang, double & radius) const;
+  void insertNonholonomicTurnArcs(vector<Eigen::Vector3d> & points);
   PolynomialTraj fitGlobalMinSnapTraj(const vector<Eigen::Vector3d> & points);
   void initLocalTrajFromGlobal(const rclcpp::Time & time_now);
 
