@@ -136,6 +136,22 @@ Mat3 orthonormalize(const Mat3 & frame)
   return fromColumns(ex, ey, ez);
 }
 
+double headPitch(const Mat3 & frame)
+{
+  return std::atan2(-frame.v[2][0], std::hypot(frame.v[0][0], frame.v[1][0]));
+}
+
+Vec3 headBodyAngularVelocity(double pitch_rate, double yaw_rate, const Mat3 & frame)
+{
+  // pitch_rate / yaw_rate are Euler rates of R = Rz(yaw)·Ry(pitch): the planner's yaw_dot /
+  // pitch_dot, and the states the MPC predicts (ẋ_yaw = u_z, ẋ_pitch = u_y). The head twist is
+  // a body-frame quantity: ω_body = Ryᵀ(pitch)·[0,0,ψ̇] + [0,θ̇,0] = (-ψ̇·sin p, θ̇, ψ̇·cos p).
+  // Using (0, θ̇, ψ̇) instead gives a world yaw rate of only ψ̇·cos p (less than the MPC
+  // predicts) and lets roll drift away from zero whenever the head is pitched.
+  const double pitch = headPitch(frame);
+  return {-yaw_rate * std::sin(pitch), pitch_rate, yaw_rate * std::cos(pitch)};
+}
+
 std::array<Mat3, kNum3dLinks> linkFrames(
   const Mat3 & head_frame, const std::array<double, kNum3dJointDofs> & theta)
 {
@@ -214,23 +230,50 @@ asr_sdm_control_msgs::msg::RobotCommand FrontUnitFollowingController3D::toHeadFo
 }
 
 asr_sdm_control_msgs::msg::RobotCommand FrontUnitFollowingController3D::limitCommand(
-  const asr_sdm_control_msgs::msg::RobotCommand & cmd) const
+  const asr_sdm_control_msgs::msg::RobotCommand & cmd, double pitch) const
 {
   asr_sdm_control_msgs::msg::RobotCommand limited_cmd = cmd;
-  const double omega = std::hypot(cmd.vel.angular.y, cmd.vel.angular.z);
+  // Match the MPC path-curvature measure: sqrt(ωp² + cos²(pitch)·ωy²).
+  // Using hypot(ωp, ωy) over-penalizes yaw when pitched and forces unnecessary
+  // speed-ups that overshoot the reference during 3D turns.
+  const double cp = std::cos(pitch);
+  const double omega = std::sqrt(
+    cmd.vel.angular.y * cmd.vel.angular.y +
+    cp * cp * cmd.vel.angular.z * cmd.vel.angular.z);
   if (omega < 1.0e-6) {
     return limited_cmd;
   }
 
   const double max_curvature = std::max(0.0, params_.max_curvature);
-  const double velocity_epsilon = std::max(std::abs(params_.curvature_velocity_epsilon), 1.0e-6);
-  const double omega_limit =
-    max_curvature * std::max(std::abs(cmd.vel.linear.x), velocity_epsilon);
+  if (max_curvature < 1.0e-12) {
+    limited_cmd.vel.angular.y = 0.0;
+    limited_cmd.vel.angular.z = 0.0;
+    return limited_cmd;
+  }
+
+  // κ = ω / v. Prefer raising speed so the commanded turn stays feasible; only
+  // scale angular rates when even vmax cannot support the requested curvature.
+  const double v_abs = std::abs(cmd.vel.linear.x);
+  const double omega_limit = max_curvature * v_abs;
   if (omega <= omega_limit) {
     return limited_cmd;
   }
 
-  const double scale = omega_limit / omega;
+  // Prefer raising speed so commanded turn rates stay feasible. Cap the boost so
+  // we do not sprint far ahead of the timed reference on gentle segments.
+  const double v_cap = std::min(
+    params_.max_linear_velocity, std::max(v_abs * 1.6, v_abs + 0.20));
+  const double v_needed = omega / max_curvature;
+  if (v_needed <= v_cap) {
+    limited_cmd.vel.linear.x = std::clamp(
+      v_needed, params_.min_linear_velocity, params_.max_linear_velocity);
+    return limited_cmd;
+  }
+
+  limited_cmd.vel.linear.x = std::clamp(
+    v_cap, params_.min_linear_velocity, params_.max_linear_velocity);
+  const double omega_at_cap = max_curvature * limited_cmd.vel.linear.x;
+  const double scale = omega_at_cap / omega;
   limited_cmd.vel.angular.y *= scale;
   limited_cmd.vel.angular.z *= scale;
   return limited_cmd;
@@ -284,14 +327,15 @@ Vec2 FrontUnitFollowingController3D::computePitchYawRateReference(
 JointVelocity3D FrontUnitFollowingController3D::computeJointVelocity(
   const asr_sdm_control_msgs::msg::RobotCommand & cmd, const SimulationState3D & state) const
 {
-  const asr_sdm_control_msgs::msg::RobotCommand limited_cmd = limitCommand(cmd);
+  const asr_sdm_control_msgs::msg::RobotCommand limited_cmd =
+    limitCommand(cmd, headPitch(state.head_frame));
   JointVelocity3D output;
   const auto frames = linkFrames(state.head_frame, state.joints.theta);
   const auto axes = linkAxes(frames);
   const Vec3 head_axis = column(state.head_frame, 0);
   const Vec3 head_velocity = limited_cmd.vel.linear.x * head_axis;
-  const Vec3 headOmega = limited_cmd.vel.angular.z * column(state.head_frame, 2) +
-    limited_cmd.vel.angular.y * column(state.head_frame, 1);
+  const Vec3 headOmega = multiply(state.head_frame, headBodyAngularVelocity(
+    limited_cmd.vel.angular.y, limited_cmd.vel.angular.z, state.head_frame));
 
   std::array<Vec3, kNum3dLinks + 1> jointPointVel{};
   std::array<Vec3, kNum3dLinks> linkOmega{};
@@ -323,7 +367,8 @@ JointVelocity3D FrontUnitFollowingController3D::computeJointVelocity(
 JointVelocity3D FrontUnitFollowingController3D::step(
   const asr_sdm_control_msgs::msg::RobotCommand & cmd, double dt, SimulationState3D & state) const
 {
-  const asr_sdm_control_msgs::msg::RobotCommand limited_cmd = limitCommand(cmd);
+  const asr_sdm_control_msgs::msg::RobotCommand limited_cmd =
+    limitCommand(cmd, headPitch(state.head_frame));
   const JointVelocity3D output = computeJointVelocity(limited_cmd, state);
   const double jointLimit = std::abs(params_.joint_limit);
   for (size_t joint = 0; joint < kNum3dJoints; ++joint) {

@@ -27,6 +27,12 @@ struct HeadCommandMPCParameters
   double max_pitch_rate = 0.5;
   double min_yaw_rate = -0.5;
   double max_yaw_rate = 0.5;
+  // sqrt(wy^2 + cos^2(pitch) * wz^2) <= max_curvature * v; keep equal to the controller's
+  // limitCommand value.
+  double max_curvature = 3.5;
+  // Safety margin for curvature constraint: MPC uses (max_curvature * v * margin), so limitCommand
+  // has room to scale without violating the constraint. Range [0, 1], recommend 0.85.
+  double curvature_safety_margin = 0.85;
 };
 
 struct HeadCommandMPCResult

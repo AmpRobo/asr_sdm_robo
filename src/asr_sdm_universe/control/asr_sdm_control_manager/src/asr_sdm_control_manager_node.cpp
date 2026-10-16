@@ -50,6 +50,16 @@ const std::array<std::string, 8> kRotorJointNames = {
   "joint_screwdrive_segment_0__screw_rotor_right_0__3",
 };
 
+// Moves prev towards target by at most max_rate * dt; max_rate <= 0 disables the limit.
+double rateLimited(double target, double prev, double max_rate, double dt)
+{
+  if (max_rate <= 0.0) {
+    return target;
+  }
+  const double max_step = max_rate * dt;
+  return prev + std::clamp(target - prev, -max_step, max_step);
+}
+
 int32_t scaleToInt32(double value, double scale, int32_t min_value, int32_t max_value)
 {
   const double scaled = value * scale;
@@ -164,7 +174,7 @@ private:
       "kinematic_controller.joint_rate_limit", 2.0);
     controller_params_.joint_limit = model_params_.joint_limit;
     controller_params_.max_curvature = node_->declare_parameter<double>(
-      "kinematic_controller.max_curvature", 1.2);
+      "kinematic_controller.max_curvature", 3.5);
     controller_params_.curvature_velocity_epsilon = node_->declare_parameter<double>(
       "kinematic_controller.curvature_velocity_epsilon", 1.0e-6);
     controller_params_.damping = node_->declare_parameter<double>(
@@ -200,6 +210,14 @@ private:
       "grampc_compensation.r_angular", 0.05);
     mpc_params_.terminal_position_scale = node_->declare_parameter<double>(
       "grampc_compensation.terminal_position_scale", 4.0);
+    // 0 disables the corresponding limit.
+    mpc_max_linear_accel_ = node_->declare_parameter<double>(
+      "grampc_compensation.max_linear_accel", 1.0);
+    mpc_max_angular_accel_ = node_->declare_parameter<double>(
+      "grampc_compensation.max_angular_accel", 4.0);
+    mpc_params_.max_curvature = controller_params_.max_curvature;
+    mpc_params_.curvature_safety_margin = node_->declare_parameter<double>(
+      "grampc_compensation.curvature_safety_margin", 0.85);
     mpc_params_.min_linear_velocity = controller_params_.min_linear_velocity;
     mpc_params_.max_linear_velocity = controller_params_.max_linear_velocity;
     mpc_params_.min_pitch_rate = controller_params_.min_pitch_rate;
@@ -236,6 +254,8 @@ private:
     joint_position_limit_rad_ = node_->declare_parameter<double>(
       "joint_position_limit_rad", model_params_.joint_limit);
     control_period_ms_ = node_->declare_parameter<int>("control_period_ms", 20);
+    diagnostics_period_ms_ = node_->declare_parameter<int>(
+      "grampc_compensation.diagnostics_period_ms", 20);
     mpc_params_.dt = static_cast<double>(control_period_ms_) / 1000.0;
     cmd_timeout_sec_ = node_->declare_parameter<double>("cmd_timeout_sec", 0.3);
     screw_velocity_scale_ = node_->declare_parameter<double>(
@@ -354,8 +374,10 @@ private:
     for (size_t i = 0; i < asr::kNum3dJointDofs; ++i) {
       theta_dot[static_cast<int>(i)] = joint_velocity.theta_dot[i];
     }
-    return model_->toVelocity(
-      cmd.vel.linear.x, cmd.vel.angular.y, cmd.vel.angular.z, theta_dot);
+    // angular.y / angular.z are pitch / yaw Euler rates; the model integrates body-frame twist.
+    const asr::Vec3 omega = asr::headBodyAngularVelocity(
+      cmd.vel.angular.y, cmd.vel.angular.z, state_.head_frame);
+    return model_->toVelocity(cmd.vel.linear.x, omega.y, omega.z, theta_dot, omega.x);
   }
 
   void copyModelGeometryToState()
@@ -420,12 +442,19 @@ private:
 
   void onControlTimer()
   {
+    const auto callback_start = std::chrono::steady_clock::now();
     const rclcpp::Time current_time = node_->now();
     double dt = (current_time - last_control_time_).seconds();
     if (dt <= 0.0 || dt > 0.1) {
       dt = static_cast<double>(control_period_ms_) / 1000.0;
     }
     last_control_time_ = current_time;
+    double diagnostic_mpc_ms = 0.0;
+    asr::Vec3 diagnostic_error{};
+    asr_sdm_control_msgs::msg::RobotCommand diagnostic_mpc_output{};
+    asr_sdm_control_msgs::msg::RobotCommand diagnostic_rate_output{};
+    bool diagnostic_applied = false;
+    bool diagnostic_ready = false;
 
     asr_sdm_control_msgs::msg::RobotCommand robot_cmd = cmd_cur_;
     bool timed_out = false;
@@ -435,9 +464,68 @@ private:
       robot_cmd = asr_sdm_control_msgs::msg::RobotCommand();
       timed_out = true;
     }
-    if (!timed_out && mpc_ && asr::HeadCommandMPC::hasPositionReference(cmd_raw_)) {
+    // MPC solves under the curvature limit; do limitCommand first so the compensator and the
+    // limiter are not applied twice in opposite directions.
+    robot_cmd = controller_->limitCommand(robot_cmd, asr::headPitch(state_.head_frame));
+
+    // After the planner finishes a segment it often keeps trajectory_flag=READY with a frozen
+    // goal pose and zero velocity. Running the position MPC then chases that pose with large
+    // free commands (v→vmax) and walks the head farther off the path. Only compensate while
+    // the planner is still commanding motion (or publishing a nonzero reference velocity).
+    // However, if there is significant position error, continue MPC compensation even if
+    // planner velocity is small, to allow the robot to reach the target.
+    const double planner_v = std::abs(cmd_cur_.vel.linear.x);
+    const double planner_w = std::hypot(cmd_cur_.vel.angular.y, cmd_cur_.vel.angular.z);
+    const double ref_speed = std::hypot(
+      cmd_raw_.velocity.x, cmd_raw_.velocity.y, cmd_raw_.velocity.z);
+    const double position_error = std::hypot(
+      cmd_raw_.position.x - state_.head_position.x,
+      cmd_raw_.position.y - state_.head_position.y,
+      cmd_raw_.position.z - state_.head_position.z);
+    constexpr double kPlannerMotionEps = 1.0e-3;
+    constexpr double kPositionErrorThreshold = 0.05;  // 5cm error threshold
+    const bool planner_motion_active =
+      planner_v > kPlannerMotionEps || planner_w > kPlannerMotionEps ||
+      ref_speed > kPlannerMotionEps || position_error > kPositionErrorThreshold;
+
+    if (
+      !timed_out && mpc_ && planner_motion_active &&
+      asr::HeadCommandMPC::hasPositionReference(cmd_raw_))
+    {
+      const auto mpc_start = std::chrono::steady_clock::now();
       const auto compensated = mpc_->compensate(cmd_raw_, robot_cmd, state_);
+      const auto mpc_end = std::chrono::steady_clock::now();
+      const auto mpc_output = compensated.command;
       robot_cmd = compensated.command;
+      // The MPC re-solves every cycle and can jump between solutions (speed boosts, pitch rate
+      // flipping sign), which shows up as stutter. Bound the change per cycle relative to the
+      // previous MPC output; the first cycle of a run is not limited.
+      if (compensated.applied) {
+        if (have_last_mpc_cmd_) {
+          robot_cmd.vel.linear.x = rateLimited(
+            robot_cmd.vel.linear.x, last_mpc_cmd_.vel.linear.x, mpc_max_linear_accel_, dt);
+          robot_cmd.vel.angular.y = rateLimited(
+            robot_cmd.vel.angular.y, last_mpc_cmd_.vel.angular.y, mpc_max_angular_accel_, dt);
+          robot_cmd.vel.angular.z = rateLimited(
+            robot_cmd.vel.angular.z, last_mpc_cmd_.vel.angular.z, mpc_max_angular_accel_, dt);
+        }
+      }
+      // The MPC enforces the curvature limit only through a penalty with few iterations, so its
+      // output can exceed it. computeJointVelocity() limits internally, so without limiting here
+      // the head would integrate the unlimited rates while the joints follow the limited ones.
+      const auto rate_limited_cmd = robot_cmd;
+      robot_cmd = controller_->limitCommand(robot_cmd, asr::headPitch(state_.head_frame));
+      diagnostic_mpc_ms =
+        std::chrono::duration<double, std::milli>(mpc_end - mpc_start).count();
+      diagnostic_error = compensated.position_error;
+      diagnostic_mpc_output = mpc_output;
+      diagnostic_rate_output = rate_limited_cmd;
+      diagnostic_applied = compensated.applied;
+      diagnostic_ready = true;
+      have_last_mpc_cmd_ = compensated.applied;
+      if (have_last_mpc_cmd_) {
+        last_mpc_cmd_ = robot_cmd;
+      }
       const auto now = std::chrono::steady_clock::now();
       if (compensated.applied && now - last_compensation_log_ >= std::chrono::seconds(1)) {
         last_compensation_log_ = now;
@@ -446,8 +534,10 @@ private:
           compensated.position_error.x, compensated.position_error.y, compensated.position_error.z,
           robot_cmd.vel.linear.x, robot_cmd.vel.angular.y, robot_cmd.vel.angular.z);
       }
+    } else {
+      // MPC not active (teleop, timeout, idle planner, no trajectory): clear rate-limit state.
+      have_last_mpc_cmd_ = false;
     }
-    robot_cmd = controller_->limitCommand(robot_cmd);
 
     latest_joint_velocity_ = controller_->computeJointVelocity(robot_cmd, state_);
     if (isZeroCommand(robot_cmd)) {
@@ -458,6 +548,25 @@ private:
     publishRobotState(robot_cmd, latest_joint_velocity_, dt);
     if (publish_control_cmd_ && pub_control_cmd_) {
       publishActuatorCmd(robot_cmd);
+    }
+    const auto callback_end = std::chrono::steady_clock::now();
+    if (diagnostic_ready && diagnostics_period_ms_ > 0 &&
+      callback_end - last_diagnostic_log_ >= std::chrono::milliseconds(diagnostics_period_ms_))
+    {
+      const double callback_ms =
+        std::chrono::duration<double, std::milli>(callback_end - callback_start).count();
+      SPDLOG_INFO(
+        "grampc diagnostic dt={:.4f} mpc_ms={:.3f} callback_ms={:.3f} applied={} "
+        "e=({:.4f},{:.4f},{:.4f}) raw=({:.3f},{:.3f},{:.3f}) "
+        "rate=({:.3f},{:.3f},{:.3f}) final=({:.3f},{:.3f},{:.3f})",
+        dt, diagnostic_mpc_ms, callback_ms, diagnostic_applied,
+        diagnostic_error.x, diagnostic_error.y, diagnostic_error.z,
+        diagnostic_mpc_output.vel.linear.x, diagnostic_mpc_output.vel.angular.y,
+        diagnostic_mpc_output.vel.angular.z,
+        diagnostic_rate_output.vel.linear.x, diagnostic_rate_output.vel.angular.y,
+        diagnostic_rate_output.vel.angular.z,
+        robot_cmd.vel.linear.x, robot_cmd.vel.angular.y, robot_cmd.vel.angular.z);
+      last_diagnostic_log_ = callback_end;
     }
   }
 
@@ -541,12 +650,14 @@ private:
     odometry.twist.twist.linear.x = cmd.vel.linear.x * forward.x;
     odometry.twist.twist.linear.y = cmd.vel.linear.x * forward.y;
     odometry.twist.twist.linear.z = cmd.vel.linear.x * forward.z;
+    const auto omega_body = asr::headBodyAngularVelocity(
+      cmd.vel.angular.y, cmd.vel.angular.z, state_.head_frame);
     odometry.twist.twist.angular.x =
-      cmd.vel.angular.y * pitch_axis.x + cmd.vel.angular.z * yaw_axis.x;
+      omega_body.x * forward.x + omega_body.y * pitch_axis.x + omega_body.z * yaw_axis.x;
     odometry.twist.twist.angular.y =
-      cmd.vel.angular.y * pitch_axis.y + cmd.vel.angular.z * yaw_axis.y;
+      omega_body.x * forward.y + omega_body.y * pitch_axis.y + omega_body.z * yaw_axis.y;
     odometry.twist.twist.angular.z =
-      cmd.vel.angular.y * pitch_axis.z + cmd.vel.angular.z * yaw_axis.z;
+      omega_body.x * forward.z + omega_body.y * pitch_axis.z + omega_body.z * yaw_axis.z;
     pub_odom_->publish(odometry);
   }
 
@@ -586,6 +697,10 @@ private:
   asr_sdm_control_msgs::msg::RobotCommand cmd_raw_{};
   asr_sdm_control_msgs::msg::RobotCommand cmd_cur_{};
   asr::JointVelocity3D latest_joint_velocity_{};
+  asr_sdm_control_msgs::msg::RobotCommand last_mpc_cmd_{};
+  bool have_last_mpc_cmd_{false};
+  double mpc_max_linear_accel_{1.0};
+  double mpc_max_angular_accel_{4.0};
   std::array<double, kRotorJointNames.size()> rotor_positions_{};
 
   std::string robot_cmd_topic_;
@@ -606,6 +721,7 @@ private:
   double initial_z_{0.0};
   double initial_yaw_{0.0};
   int control_period_ms_{20};
+  int diagnostics_period_ms_{20};
   double cmd_timeout_sec_{0.3};
   bool enable_grampc_compensation_{true};
   double screw_velocity_scale_{21.277};
@@ -618,6 +734,7 @@ private:
   rclcpp::Time ignore_robot_cmd_until_{0, 0, RCL_ROS_TIME};
   std::chrono::steady_clock::time_point last_robot_cmd_log_{};
   std::chrono::steady_clock::time_point last_compensation_log_{};
+  std::chrono::steady_clock::time_point last_diagnostic_log_{};
   rclcpp::Subscription<asr_sdm_control_msgs::msg::RobotCommand>::SharedPtr sub_robot_cmd_;
   rclcpp::Subscription<geometry_msgs::msg::PoseWithCovarianceStamped>::SharedPtr sub_initialpose_;
   rclcpp::Publisher<std_msgs::msg::Float64MultiArray>::SharedPtr pub_controller_state_;

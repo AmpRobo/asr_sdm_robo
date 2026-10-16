@@ -69,11 +69,11 @@ public:
   Eigen::VectorXd toConfiguration(
     const Eigen::Vector3d & head_position, const Eigen::Matrix3d & head_frame,
     const JointVector & theta) const;
-  /// The head twist is expressed in the head frame: forward along x, pitch about
-  /// y, yaw about z.
+  /// The head twist is expressed in the head frame: forward along x; angular
+  /// rates about y, z, and x are body components, not Euler angle derivatives.
   Eigen::VectorXd toVelocity(
     double linear_velocity, double pitch_rate, double yaw_rate,
-    const JointVector & theta_dot) const;
+    const JointVector & theta_dot, double roll_rate = 0.0) const;
 
   void updateKinematics(const Eigen::VectorXd & q);
   void updateKinematics(const Eigen::VectorXd & q, const Eigen::VectorXd & v);
