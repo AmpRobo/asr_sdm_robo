@@ -134,12 +134,14 @@ Eigen::VectorXd AsrSdmKinematicModel::toConfiguration(
 }
 
 Eigen::VectorXd AsrSdmKinematicModel::toVelocity(
-  double linear_velocity, double pitch_rate, double yaw_rate, const JointVector & theta_dot) const
+  double linear_velocity, double pitch_rate, double yaw_rate, const JointVector & theta_dot,
+  double roll_rate) const
 {
   Eigen::VectorXd v = Eigen::VectorXd::Zero(model_.nv);
 
   const int head_idx = model_.joints[head_joint_id_].idx_v();
   v[head_idx + 0] = linear_velocity;
+  v[head_idx + 3] = roll_rate;
   v[head_idx + 4] = pitch_rate;
   v[head_idx + 5] = yaw_rate;
 

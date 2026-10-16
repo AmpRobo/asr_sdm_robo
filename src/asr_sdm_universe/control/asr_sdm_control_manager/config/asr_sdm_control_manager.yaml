@@ -23,7 +23,8 @@
       joint_velocity_limit: 2.0
       joint_effort_limit: 50.0
       joint_rate_limit: 2.0
-      max_curvature: 1.2
+      # Planner sharp 3D segments hit κ≈3 (ω≈0.75 at v≈0.25); keep margin.
+      max_curvature: 3.5
       curvature_velocity_epsilon: 0.001
       damping: 0.02
 
@@ -37,10 +38,12 @@
     cmd_timeout_sec: 0.3
     min_linear_velocity: 0.0
     max_linear_velocity: 1.0
-    min_pitch_rate: -0.5
-    max_pitch_rate: 0.5
-    min_yaw_rate: -0.5
-    max_yaw_rate: 0.5
+    # Simulation only: wide enough that planner peaks (>0.85 on sharp 3D turns) and lag recovery
+    # are not clipped. Curvature (max_curvature) still ties turn rate to forward speed.
+    min_pitch_rate: -1.5
+    max_pitch_rate: 1.5
+    min_yaw_rate: -1.5
+    max_yaw_rate: 1.5
     # Maps vel.linear.x (m/s) to screw angular velocity (rad/s): omega = v / r.
     # r ≈ 0.047 m (rotor visual radius). At 0.2 m/s ≈ 41 rpm.
     screw_velocity_scale: 21.277
@@ -51,12 +54,17 @@
       enable: true
       Thor: 0.4
       Nhor: 20
-      max_grad_iter: 4
-      q_position: 8.0
-      q_heading: 1.5
-      r_linear: 0.2
-      r_angular: 0.05
-      terminal_position_scale: 4.0
+      max_grad_iter: 5
+      q_position: 14.0
+      q_heading: 1.0
+      r_linear: 0.12
+      r_angular: 0.06
+      terminal_position_scale: 5.0
+      # Per-cycle change limit on the MPC output (0 disables). Smooths v / pitch / yaw rate jumps.
+      max_linear_accel: 1.5
+      max_angular_accel: 8.0
+      curvature_safety_margin: 0.9
+      diagnostics_period_ms: 20
 
     publish_control_cmd: false
     joint_angle_scale: 1.0

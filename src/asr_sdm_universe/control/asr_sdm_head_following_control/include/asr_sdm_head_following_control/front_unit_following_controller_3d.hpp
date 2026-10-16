@@ -102,6 +102,10 @@ Mat3 rotationY(double angle);
 Mat3 rotationZ(double angle);
 Mat3 frameFromAxis(const Vec3 & axis);
 Mat3 orthonormalize(const Mat3 & frame);
+double headPitch(const Mat3 & frame);
+// Convert command pitch/yaw Euler rates (R = Rz(yaw)·Ry(pitch)) to the head-frame angular
+// velocity (x, y, z), including the roll-cancelling x component when the head is pitched.
+Vec3 headBodyAngularVelocity(double pitch_rate, double yaw_rate, const Mat3 & frame);
 
 std::array<Mat3, kNum3dLinks> linkFrames(
   const Mat3 & head_frame, const std::array<double, kNum3dJointDofs> & theta);
@@ -119,8 +123,9 @@ public:
   SimulationState3D makeInitialState() const;
   asr_sdm_control_msgs::msg::RobotCommand toHeadFollowingCommand(
     const asr_sdm_control_msgs::msg::RobotCommand & cmd) const;
+  // pitch is retained for existing callers; angular limiting uses commanded rates directly.
   asr_sdm_control_msgs::msg::RobotCommand limitCommand(
-    const asr_sdm_control_msgs::msg::RobotCommand & cmd) const;
+    const asr_sdm_control_msgs::msg::RobotCommand & cmd, double pitch = 0.0) const;
   JointVelocity3D computeJointVelocity(
     const asr_sdm_control_msgs::msg::RobotCommand & cmd, const SimulationState3D & state) const;
   JointVelocity3D step(
