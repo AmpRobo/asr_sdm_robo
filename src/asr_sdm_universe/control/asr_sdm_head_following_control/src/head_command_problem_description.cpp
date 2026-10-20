@@ -14,8 +14,11 @@ typeRNum wrap(typeRNum angle)
 }
 }  // namespace
 
-HeadCommandProblemDescription::HeadCommandProblemDescription(const std::array<typeRNum, 13> & p_cost)
-: ProblemDescription(5, 3, 0, 0, 0, 0, 0), p_cost_(p_cost)
+HeadCommandProblemDescription::HeadCommandProblemDescription(
+  const std::array<typeRNum, 13> & p_cost, typeRNum max_curvature,
+  typeRNum curvature_safety_margin)
+: ProblemDescription(5, 3, 0, 0, 1, 0, 0), p_cost_(p_cost), max_curvature_(max_curvature),
+  curvature_safety_margin_(curvature_safety_margin)
 {
 }
 
@@ -140,6 +143,43 @@ void HeadCommandProblemDescription::dldu(
   out[0] = typeRNum(2) * p_cost_[5] * (u[0] - udes[0]);
   out[1] = typeRNum(2) * p_cost_[6] * (u[1] - udes[1]);
   out[2] = typeRNum(2) * p_cost_[7] * (u[2] - udes[2]);
+}
+
+// Curvature limit: ωp² + cos²(pitch)·ωy² - (κmax·v·α)² <= 0, where α is curvature_safety_margin.
+// The heading turn rate of the Euler rates, i.e. the path curvature the planner reports. 
+// At v = 0 this forces zero turn rate, which is exactly what limitCommand applies afterwards.
+// The safety margin α < 1 leaves headroom for limitCommand to adjust without violating the constraint.
+void HeadCommandProblemDescription::hfct(
+  grampc::VectorRef out, ctypeRNum /*t*/, grampc::VectorConstRef x, grampc::VectorConstRef u,
+  grampc::VectorConstRef /*p*/, const grampc::GrampcParam & /*param*/)
+{
+  const typeRNum k_safe = max_curvature_ * curvature_safety_margin_;
+  const typeRNum k2 = k_safe * k_safe;
+  const typeRNum cp = std::cos(x[4]);
+  out[0] = u[1] * u[1] + cp * cp * u[2] * u[2] - k2 * u[0] * u[0];
+}
+
+void HeadCommandProblemDescription::dhdx_vec(
+  grampc::VectorRef out, ctypeRNum /*t*/, grampc::VectorConstRef x, grampc::VectorConstRef u,
+  grampc::VectorConstRef /*p*/, grampc::VectorConstRef vec, const grampc::GrampcParam & /*param*/)
+{
+  for (int i = 0; i < 5; ++i) {
+    out[i] = 0;
+  }
+  // d/dpitch of cos²(pitch)·ωy² = -sin(2·pitch)·ωy²
+  out[4] = vec[0] * (-std::sin(typeRNum(2) * x[4])) * u[2] * u[2];
+}
+
+void HeadCommandProblemDescription::dhdu_vec(
+  grampc::VectorRef out, ctypeRNum /*t*/, grampc::VectorConstRef x, grampc::VectorConstRef u,
+  grampc::VectorConstRef /*p*/, grampc::VectorConstRef vec, const grampc::GrampcParam & /*param*/)
+{
+  const typeRNum k_safe = max_curvature_ * curvature_safety_margin_;
+  const typeRNum k2 = k_safe * k_safe;
+  const typeRNum cp = std::cos(x[4]);
+  out[0] = vec[0] * typeRNum(-2) * k2 * u[0];
+  out[1] = vec[0] * typeRNum(2) * u[1];
+  out[2] = vec[0] * typeRNum(2) * cp * cp * u[2];
 }
 
 void HeadCommandProblemDescription::Vfct(

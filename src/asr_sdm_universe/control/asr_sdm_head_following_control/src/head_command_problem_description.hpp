@@ -13,7 +13,13 @@ namespace asr
 class HeadCommandProblemDescription : public grampc::ProblemDescription
 {
 public:
-  explicit HeadCommandProblemDescription(const std::array<typeRNum, 13> & p_cost);
+  /// max_curvature bounds sqrt(ωy² + cos²(pitch)·ωz²) <= max_curvature * v, matching the
+  /// post-MPC curvature limiter so the optimizer plans within what will be applied.
+  /// curvature_safety_margin ∈ (0, 1] reduces the effective max_curvature to account for
+  /// limitCommand post-processing. Use < 1.0 to leave headroom.
+  HeadCommandProblemDescription(
+    const std::array<typeRNum, 13> & p_cost, typeRNum max_curvature,
+    typeRNum curvature_safety_margin = 1.0);
 
   void setCostWeights(const std::array<typeRNum, 13> & p_cost);
   void setReference(
@@ -48,6 +54,18 @@ public:
     grampc::VectorRef out, ctypeRNum t, grampc::VectorConstRef x, grampc::VectorConstRef u,
     grampc::VectorConstRef p, const grampc::GrampcParam & param) override;
 
+  void hfct(
+    grampc::VectorRef out, ctypeRNum t, grampc::VectorConstRef x, grampc::VectorConstRef u,
+    grampc::VectorConstRef p, const grampc::GrampcParam & param) override;
+  void dhdx_vec(
+    grampc::VectorRef out, ctypeRNum t, grampc::VectorConstRef x, grampc::VectorConstRef u,
+    grampc::VectorConstRef p, grampc::VectorConstRef vec,
+    const grampc::GrampcParam & param) override;
+  void dhdu_vec(
+    grampc::VectorRef out, ctypeRNum t, grampc::VectorConstRef x, grampc::VectorConstRef u,
+    grampc::VectorConstRef p, grampc::VectorConstRef vec,
+    const grampc::GrampcParam & param) override;
+
   void Vfct(
     grampc::VectorRef out, ctypeRNum T, grampc::VectorConstRef x, grampc::VectorConstRef p,
     const grampc::GrampcParam & param) override;
@@ -61,6 +79,8 @@ private:
     typeRNum & eyaw, typeRNum & epitch) const;
 
   std::array<typeRNum, 13> p_cost_{};
+  typeRNum max_curvature_{0.0};
+  typeRNum curvature_safety_margin_{1.0};
   std::array<typeRNum, 3> p0_{};
   std::array<typeRNum, 3> v0_{};
   std::array<typeRNum, 3> a0_{};

@@ -76,6 +76,35 @@ int main()
     small_out.command.vel.linear.x < catch_up.command.vel.linear.x,
     "smaller error should request less extra speed");
 
+  // Planner finished (zero feedforward) while the head is far from a goal behind / beside it.
+  // The curvature limit forces turn rate to zero at v = 0, so the MPC must keep some speed
+  // or the head can never turn back toward the goal.
+  const auto stalled_goal = makePlanningCommand(-0.3, -0.4, 0.2, 0.0, 0.0, 0.0);
+  const auto zero_ff = makeFeedforward(0.0, 0.0, 0.0);
+  const auto behind = mpc.compensate(stalled_goal, zero_ff, state);
+  require(behind.applied, "goal behind the head should run GRAMPC");
+  require(behind.command.vel.linear.x > 0.05, "goal behind the head must not stall at v = 0");
+  require(
+    std::hypot(behind.command.vel.angular.y, behind.command.vel.angular.z) > 0.05,
+    "goal behind the head must command a turn");
+
+  // The MPC predicts yaw' = u_z and pitch' = u_y (Euler rates). The executed twist must match:
+  // the world-z component of the head angular velocity is exactly the yaw rate, even when pitched.
+  {
+    const double yaw_rate = 0.4;
+    const double pitch_rate = -0.2;
+    const asr::Mat3 pitched = asr::multiply(asr::rotationZ(0.3), asr::rotationY(0.6));
+    const asr::Vec3 body = asr::headBodyAngularVelocity(pitch_rate, yaw_rate, pitched);
+    const asr::Vec3 world = asr::multiply(pitched, body);
+    require(std::abs(world.z - yaw_rate) < 1.0e-9, "world yaw rate must equal commanded yaw rate");
+    require(std::abs(body.y - pitch_rate) < 1.0e-9, "body y rate must equal commanded pitch rate");
+    // Turn rate perpendicular to the heading is what the curvature limit constrains.
+    const double perp = std::hypot(body.y, body.z);
+    const double expected = std::sqrt(
+      pitch_rate * pitch_rate + std::pow(std::cos(0.6) * yaw_rate, 2));
+    require(std::abs(perp - expected) < 1.0e-9, "perpendicular rate must match curvature measure");
+  }
+
   std::cout << "head_command_mpc_test passed: v_ff=" << ff.vel.linear.x
             << " v_mpc_large=" << catch_up.command.vel.linear.x
             << " v_mpc_small=" << small_out.command.vel.linear.x
