@@ -9,7 +9,7 @@ random_map_sensing:
       z_size: 5.0
       obs_num: 30
       resolution: 0.1
-      circle_num: 10
+      circle_num: 6
       clear_radius: 2.0
       protect_x: 19.0
       protect_y: 0.0
@@ -24,6 +24,8 @@ random_map_sensing:
       z_l: 7.0
       z_h: 7.0
       theta: 7.0
+      # Tube diameter of each elliptical ring, in meters. 0 keeps a thin centerline.
+      thickness: 0.4
 
     sensing:
       radius: 10.0

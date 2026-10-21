@@ -32,6 +32,7 @@ private:
 
   bool isTooCloseToProtectedPoint(double x, double y) const;
   void addPillarObstacle(double x, double y, double width, pcl::PointCloud<pcl::PointXYZ> & cloud);
+  void addEllipseObstacle(double x, double y, double z, pcl::PointCloud<pcl::PointXYZ> & cloud);
 
   rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr local_map_pub_;
   rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr all_map_pub_;
@@ -88,6 +89,7 @@ private:
   double z_l_{7.0};
   double z_h_{7.0};
   double theta_{7.0};
+  double circle_thickness_{0.4};
   bool publish_local_{false};
   bool enable_click_map_{false};
   bool map_ok_{false};

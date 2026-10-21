@@ -70,6 +70,7 @@ void RandomForestSensing::declareParameters()
   declare_parameter("ObstacleShape.z_l", 7.0);
   declare_parameter("ObstacleShape.z_h", 7.0);
   declare_parameter("ObstacleShape.theta", 7.0);
+  declare_parameter("ObstacleShape.thickness", 0.4);
 
   declare_parameter("sensing.radius", 10.0);
   declare_parameter("sensing.rate", 10.0);
@@ -107,6 +108,7 @@ void RandomForestSensing::loadParameters()
   z_l_ = get_parameter("ObstacleShape.z_l").as_double();
   z_h_ = get_parameter("ObstacleShape.z_h").as_double();
   theta_ = get_parameter("ObstacleShape.theta").as_double();
+  circle_thickness_ = get_parameter("ObstacleShape.thickness").as_double();
 
   sensing_range_ = get_parameter("sensing.radius").as_double();
   sense_rate_ = get_parameter("sensing.rate").as_double();
@@ -156,18 +158,70 @@ void RandomForestSensing::addPillarObstacle(
   }
 }
 
+void RandomForestSensing::addEllipseObstacle(
+  double x, double y, double z, pcl::PointCloud<pcl::PointXYZ> & cloud)
+{
+  x = std::floor(x / resolution_) * resolution_ + resolution_ / 2.0;
+  y = std::floor(y / resolution_) * resolution_ + resolution_ / 2.0;
+  z = std::floor(z / resolution_) * resolution_ + resolution_ / 2.0;
+
+  const double theta = rand_theta_(eng_);
+  Eigen::Matrix3d rotate;
+  rotate << std::cos(theta), -std::sin(theta), 0.0, std::sin(theta), std::cos(theta), 0.0, 0.0,
+    0.0, 1.0;
+
+  const double radius1 = rand_radius_(eng_);
+  const double radius2 = rand_radius2_(eng_);
+  const Eigen::Vector3d center(x, y, z);
+
+  // Tube diameter. Zero keeps the original single-point centerline.
+  const double half = std::max(circle_thickness_, 0.0) * 0.5;
+  const int radial_steps =
+    resolution_ > 0.0 ? static_cast<int>(std::ceil(half / resolution_)) : 0;
+  const double half_sq = half * half;
+
+  const double max_radius = std::max(std::abs(radius1), std::abs(radius2));
+  double angle_step = resolution_ / 2.0;
+  if (half > 0.0 && max_radius > 1e-6 && resolution_ > 0.0) {
+    angle_step = resolution_ / max_radius;
+  }
+  if (angle_step <= 0.0) {
+    angle_step = M_PI / 16.0;
+  }
+
+  pcl::PointXYZ pt;
+  for (double angle = 0.0; angle < 2.0 * M_PI; angle += angle_step) {
+    const Eigen::Vector3d cpt(0.0, radius1 * std::cos(angle), radius2 * std::sin(angle));
+    for (int ix = -radial_steps; ix <= radial_steps; ++ix) {
+      for (int iy = -radial_steps; iy <= radial_steps; ++iy) {
+        for (int iz = -radial_steps; iz <= radial_steps; ++iz) {
+          const Eigen::Vector3d offset(ix * resolution_, iy * resolution_, iz * resolution_);
+          if (offset.squaredNorm() > half_sq + 1e-12) {
+            continue;
+          }
+          const Eigen::Vector3d world = rotate * (cpt + offset) + center;
+          pt.x = static_cast<float>(world(0));
+          pt.y = static_cast<float>(world(1));
+          pt.z = static_cast<float>(world(2));
+          cloud.points.push_back(pt);
+        }
+      }
+    }
+  }
+}
+
 void RandomForestSensing::generateRandomMap()
 {
   cloud_map_.clear();
 
   rand_x_ = std::uniform_real_distribution<double>(x_l_, x_h_);
   rand_y_ = std::uniform_real_distribution<double>(y_l_, y_h_);
+  rand_z_ = std::uniform_real_distribution<double>(z_l_, z_h_);
   rand_w_ = std::uniform_real_distribution<double>(w_l_, w_h_);
   rand_h_ = std::uniform_real_distribution<double>(h_l_, h_h_);
   rand_radius_ = std::uniform_real_distribution<double>(radius_l_, radius_h_);
   rand_radius2_ = std::uniform_real_distribution<double>(radius_l_, 1.2);
   rand_theta_ = std::uniform_real_distribution<double>(-theta_, theta_);
-  rand_z_ = std::uniform_real_distribution<double>(z_l_, z_h_);
 
   constexpr int kMaxAttemptsFactor = 100;
 
@@ -194,35 +248,13 @@ void RandomForestSensing::generateRandomMap()
   const int max_circle_attempts = std::max(circle_num_ * kMaxAttemptsFactor, 1);
   while (placed < circle_num_ && attempts < max_circle_attempts) {
     ++attempts;
-    double x = rand_x_(eng_);
-    double y = rand_y_(eng_);
-    double z = rand_z_(eng_);
+    const double x = rand_x_(eng_);
+    const double y = rand_y_(eng_);
+    const double z = rand_z_(eng_);
     if (isTooCloseToProtectedPoint(x, y)) {
       continue;
     }
-
-    x = std::floor(x / resolution_) * resolution_ + resolution_ / 2.0;
-    y = std::floor(y / resolution_) * resolution_ + resolution_ / 2.0;
-    z = std::floor(z / resolution_) * resolution_ + resolution_ / 2.0;
-
-    const double theta = rand_theta_(eng_);
-    Eigen::Matrix3d rotate;
-    rotate << std::cos(theta), -std::sin(theta), 0.0, std::sin(theta), std::cos(theta), 0.0, 0.0,
-      0.0, 1.0;
-
-    const double radius1 = rand_radius_(eng_);
-    const double radius2 = rand_radius2_(eng_);
-    const Eigen::Vector3d center(x, y, z);
-
-    pcl::PointXYZ pt;
-    for (double angle = 0.0; angle < 2.0 * M_PI; angle += resolution_ / 2.0) {
-      Eigen::Vector3d cpt(0.0, radius1 * std::cos(angle), radius2 * std::sin(angle));
-      cpt = rotate * cpt + center;
-      pt.x = static_cast<float>(cpt(0));
-      pt.y = static_cast<float>(cpt(1));
-      pt.z = static_cast<float>(cpt(2));
-      cloud_map_.points.push_back(pt);
-    }
+    addEllipseObstacle(x, y, z, cloud_map_);
     ++placed;
   }
   if (placed < circle_num_) {
