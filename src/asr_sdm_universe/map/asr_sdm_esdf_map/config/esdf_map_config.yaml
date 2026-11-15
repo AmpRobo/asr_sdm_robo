@@ -7,6 +7,9 @@ esdf_map:
       # Target grid resolution. ESDF computation and the RViz CUBE_LIST voxel
       # edge length both use this single parameter.
       resolution: 0.15
+      # Recompute region_valuation_buffer_ after every ESDF update. When false,
+      # every region stays unevaluated (-1) and region_valuation_sigma_d is unused.
+      use_region_evaluation: false
       # Cell size of region_valuation_buffer_. The buffer covers the same map
       # extent as distance_buffer_, on its own grid.
       region_valuation_resolution: 0.5

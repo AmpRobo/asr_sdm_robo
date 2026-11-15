@@ -276,12 +276,14 @@ bool TopologyPRM::needConnection(GraphNode::Ptr g1, GraphNode::Ptr g2, Eigen::Ve
 
 /* Lists the region valuation cells whose center lies inside the sample box and
  * the map. A sample picks cell r with probability (1 - v_r) / sum of (1 - v)
- * over these cells. Unevaluated cells (-1) weigh like a score of 0. */
+ * over these cells. Unevaluated cells (-1) weigh like a score of 0. With
+ * esdf_map.use_region_evaluation false no cell is listed. */
 void TopologyPRM::buildSampleCells()
 {
   const rclcpp::Time t1 = node_->now();
   const ESDFMap::Ptr & map = edt_environment_->esdf_map_;
   sample_cells_.clear();
+  if (!map->useRegionEvaluation()) return;
 
   const double cell_size = map->getRegionValuationResolution();
   const double half = 0.5 * cell_size;

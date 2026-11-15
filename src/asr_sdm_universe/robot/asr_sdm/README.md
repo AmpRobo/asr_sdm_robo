@@ -30,6 +30,16 @@ This directory contains the ROS 2 model, meshes, RViz configuration, and Gazebo 
 
 The model is fixed at four body links and three inter-segment joint groups. The number of segments cannot be changed at build time or runtime.
 
+## Visual Meshes
+
+The URDF `<visual>` elements use the decimated meshes in `meshes/visual/` (0.48 M triangles in the six files, 1.85 M as instanced in the robot, 23 MB). The full-resolution CAD meshes in `meshes/` (2.0 M triangles, 7.9 M as instanced, 97 MB) are kept as the reference geometry for mass properties; loading them made RViz stall for several seconds at startup. RViz shades STL meshes per face, so the face budgets in the script are chosen by face normals: the mean normal deviation from the originals stays below 0.4° and the surface deviation below 0.07 mm.
+
+After changing a mesh in `meshes/`, regenerate the visual copies (requires `pip install pymeshlab`) and rebuild the package:
+
+```bash
+python3 scripts/generate_visual_meshes.py
+```
+
 ## Build
 
 Run the following commands from the workspace root:

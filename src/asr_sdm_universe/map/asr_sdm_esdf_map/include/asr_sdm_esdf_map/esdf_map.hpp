@@ -40,6 +40,7 @@ struct MappingParameters {
   Eigen::Vector3i map_min_idx_, map_max_idx_;
   Eigen::Vector3d local_update_range_;
   double resolution_, resolution_inv_;
+  bool use_region_evaluation_;
   double region_valuation_resolution_, region_valuation_resolution_inv_;
   Eigen::Vector3i region_valuation_voxel_num_;
   double region_valuation_sigma_d_;
@@ -220,8 +221,10 @@ public:
   int getVoxelNum();
 
   // Centers and scores of the evaluated cells of region_valuation_buffer_;
-  // cells still at -1 are skipped.
+  // cells still at -1 are skipped. With esdf_map.use_region_evaluation false,
+  // every cell stays at -1.
   void getRegionValuation(vector<Eigen::Vector3d> & centers, vector<double> & scores);
+  bool useRegionEvaluation();
   double getRegionValuationResolution();
   // Region cell containing pos, clamped to the region grid. The center of cell
   // id is getOrigin() + (id + 0.5) * getRegionValuationResolution().

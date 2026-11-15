@@ -22,6 +22,7 @@
 
   <!-- ================= 单个节段 ================= -->
   <!-- 每节均包含主体和两个螺旋转子；末节不包含 A/Cross/B 关节单元。 -->
+  <!-- visual 使用 meshes/visual/ 下的减面网格，由 scripts/generate_visual_meshes.py 从 meshes/ 原始网格生成。 -->
   <xacro:macro name="snake_segment" params="idx parent:=''">
 
     <!-- 每个节段的主体和两个螺旋转子。 -->
@@ -38,7 +39,7 @@
               <origin rpy="0 0 0" xyz="-6.77842e-05 0.000168756 0.0781638" />
               <inertia ixx="0.0008368145831015" ixy="3.348578885e-07" ixz="1.3959146972e-06" iyy="0.0008365215316531" iyz="4.092756065e-07" izz="0.0001491920058212" />
             </inertial>
-          <visual><origin rpy="0 0 0" xyz="0 0 0" /><geometry><mesh filename="package://asr_sdm/meshes/screwdrive_segment_0.stl" /></geometry><material name="mat_screwdrive_segment_${idx}"><color rgba="0.678431 0.709804 0.741176 1" /></material></visual></link>
+          <visual><origin rpy="0 0 0" xyz="0 0 0" /><geometry><mesh filename="package://asr_sdm/meshes/visual/screwdrive_segment_0.stl" /></geometry><material name="mat_screwdrive_segment_${idx}"><color rgba="0.678431 0.709804 0.741176 1" /></material></visual></link>
         <link name="screw_rotor_left_${idx}">
             <collision>
               
@@ -52,7 +53,7 @@
               <origin rpy="-2.98023224e-08 0 0" xyz="0.0 0.0 0.0" />
               <inertia ixx="1.94327521911e-05" ixy="8.165e-13" ixz="-2.5e-15" iyy="1.94376384386e-05" iyz="-1.817e-13" izz="3.56879993201e-05" />
             </inertial>
-          <visual><origin rpy="0 0 0" xyz="0 0 0" /><geometry><mesh filename="package://asr_sdm/meshes/screw_rotor_left_0.stl" /></geometry><material name="mat_screw_rotor_left_${idx}"><color rgba="0.678431 0.709804 0.741176 1" /></material></visual></link>
+          <visual><origin rpy="0 0 0" xyz="0 0 0" /><geometry><mesh filename="package://asr_sdm/meshes/visual/screw_rotor_left_0.stl" /></geometry><material name="mat_screw_rotor_left_${idx}"><color rgba="0.678431 0.709804 0.741176 1" /></material></visual></link>
         <link name="screw_rotor_right_${idx}">
             <collision>
               
@@ -66,7 +67,7 @@
               <origin rpy="0 0 0" xyz="0.0 0.0 0.0" />
               <inertia ixx="1.94322695895e-05" ixy="8.147e-13" ixz="5.3e-15" iyy="1.94371557899e-05" iyz="1.806e-13" izz="3.5687294149e-05" />
             </inertial>
-          <visual><origin rpy="0 0 0" xyz="0 0 0" /><geometry><mesh filename="package://asr_sdm/meshes/screw_rotor_right_0.stl" /></geometry><material name="mat_screw_rotor_right_${idx}"><color rgba="0.678431 0.709804 0.741176 1" /></material></visual></link>
+          <visual><origin rpy="0 0 0" xyz="0 0 0" /><geometry><mesh filename="package://asr_sdm/meshes/visual/screw_rotor_right_0.stl" /></geometry><material name="mat_screw_rotor_right_${idx}"><color rgba="0.678431 0.709804 0.741176 1" /></material></visual></link>
         <joint name="joint_screwdrive_segment_0__screw_rotor_left_0__${idx}" type="continuous">
             <parent link="screwdrive_segment_${idx}" />
             <child link="screw_rotor_left_${idx}" />
@@ -101,7 +102,7 @@
               <visual>
                 <origin rpy="0 0 0" xyz="0 0 0" />
                 <geometry>
-                  <mesh filename="package://asr_sdm/meshes/joint_unit_a.stl" />
+                  <mesh filename="package://asr_sdm/meshes/visual/joint_unit_a.stl" />
                 </geometry>
                 <material name="mat_joint_unit_a_${idx}">
                   <color rgba="0.678431 0.709804 0.741176 1" />
@@ -125,7 +126,7 @@
               <visual>
                 <origin rpy="0 0 0" xyz="0 0 0" />
                 <geometry>
-                  <mesh filename="package://asr_sdm/meshes/joint_unit_cross.stl" />
+                  <mesh filename="package://asr_sdm/meshes/visual/joint_unit_cross.stl" />
                 </geometry>
                 <material name="mat_joint_unit_cross_${idx}">
                   <color rgba="0.678431 0.709804 0.741176 1" />
@@ -149,7 +150,7 @@
               <visual>
                 <origin rpy="0 0 0" xyz="0 0 0" />
                 <geometry>
-                  <mesh filename="package://asr_sdm/meshes/joint_unit_b.stl" />
+                  <mesh filename="package://asr_sdm/meshes/visual/joint_unit_b.stl" />
                 </geometry>
                 <material name="mat_joint_unit_b_${idx}">
                   <color rgba="0.678431 0.709804 0.741176 1" />

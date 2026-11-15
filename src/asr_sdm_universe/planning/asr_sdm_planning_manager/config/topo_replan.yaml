@@ -23,6 +23,9 @@
 
     esdf_map:
       resolution: 0.1
+      # Region valuation, and topo_prm's region-weighted sampling. When false,
+      # topo_prm samples uniformly over the whole box.
+      use_region_evaluation: false
       region_valuation_resolution: 0.5
       region_valuation_sigma_d: 3.0
       map_size_x: 40.0

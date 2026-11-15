@@ -156,7 +156,8 @@ box within 0.43 m of its surface may get no samples.
 
 If no cell qualifies (the box lies outside the map, or every `v` is 1), each
 sample is uniform over the whole box instead: each local coordinate uniform in
-`[-r, r]`.
+`[-r, r]`. The same happens on every graph when `esdf_map.use_region_evaluation`
+is false; the region sampling log line is then not printed.
 
 #### What happens to each sample
 
@@ -479,7 +480,8 @@ P_r = (1 - v_r) / sum_s (1 - v_s)
 的部分可能采不到点。
 
 如果一个格子都选不出来（采样盒在地图外，或所有 `v` 都是 1），每个采样点就改为
-在整个采样盒里均匀采：每个局部坐标都在 `[-r, r]` 上均匀取值。
+在整个采样盒里均匀采：每个局部坐标都在 `[-r, r]` 上均匀取值。`esdf_map.use_region_evaluation`
+为 false 时每次建图都这样采，也不会打印 region sampling 那行日志。
 
 #### 每个采样点怎么处理
 

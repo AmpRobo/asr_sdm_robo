@@ -80,6 +80,7 @@ void ESDFMap::initMap(const std::shared_ptr<rclcpp::Node> & nh)
   /* get parameter — ROS 2 dotted names correspond to esdf_map/ros1 slash keys */
   double x_size, y_size, z_size;
   node_->declare_parameter("esdf_map.resolution", -1.0);
+  node_->declare_parameter("esdf_map.use_region_evaluation", true);
   node_->declare_parameter("esdf_map.region_valuation_resolution", -1.0);
   node_->declare_parameter("esdf_map.region_valuation_sigma_d", -1.0);
   node_->declare_parameter("esdf_map.map_size_x", -1.0);
@@ -136,6 +137,7 @@ void ESDFMap::initMap(const std::shared_ptr<rclcpp::Node> & nh)
   node_->declare_parameter("esdf_map.frame_id", string("world"));
 
   mp_.resolution_ = node_->get_parameter("esdf_map.resolution").as_double();
+  mp_.use_region_evaluation_ = node_->get_parameter("esdf_map.use_region_evaluation").as_bool();
   mp_.region_valuation_resolution_ =
     node_->get_parameter("esdf_map.region_valuation_resolution").as_double();
   mp_.region_valuation_sigma_d_ =
@@ -201,7 +203,10 @@ void ESDFMap::initMap(const std::shared_ptr<rclcpp::Node> & nh)
     throw std::invalid_argument(
       "esdf_map.region_valuation_resolution must be finite and positive.");
   }
-  if (!std::isfinite(mp_.region_valuation_sigma_d_) || mp_.region_valuation_sigma_d_ <= 0.0) {
+  if (
+    mp_.use_region_evaluation_ &&
+    (!std::isfinite(mp_.region_valuation_sigma_d_) || mp_.region_valuation_sigma_d_ <= 0.0))
+  {
     throw std::invalid_argument("esdf_map.region_valuation_sigma_d must be finite and positive.");
   }
 
@@ -250,12 +255,16 @@ void ESDFMap::initMap(const std::shared_ptr<rclcpp::Node> & nh)
   md_.distance_buffer_neg_ = vector<double>(buffer_size, 10000);
   md_.distance_buffer_all_ = vector<double>(buffer_size, 10000);
   md_.region_valuation_buffer_ = vector<double>(region_valuation_buffer_size, -1.0);
-  md_.region_mean_gradient_ =
-    vector<Eigen::Vector3d>(region_valuation_buffer_size, Eigen::Vector3d::Zero());
-  md_.region_tensor_eigenvalues_ =
-    vector<Eigen::Vector3d>(region_valuation_buffer_size, Eigen::Vector3d::Zero());
-  md_.region_tensor_eigenvectors_ =
-    vector<Eigen::Matrix3d>(region_valuation_buffer_size, Eigen::Matrix3d::Identity());
+  if (mp_.use_region_evaluation_) {
+    md_.region_mean_gradient_ =
+      vector<Eigen::Vector3d>(region_valuation_buffer_size, Eigen::Vector3d::Zero());
+    md_.region_tensor_eigenvalues_ =
+      vector<Eigen::Vector3d>(region_valuation_buffer_size, Eigen::Vector3d::Zero());
+    md_.region_tensor_eigenvectors_ =
+      vector<Eigen::Matrix3d>(region_valuation_buffer_size, Eigen::Matrix3d::Identity());
+  } else {
+    SPDLOG_INFO("Region evaluation disabled; every region stays unevaluated (-1).");
+  }
   md_.count_hit_and_miss_ = vector<short>(buffer_size, 0);
   md_.count_hit_ = vector<short>(buffer_size, 0);
   md_.flag_rayend_ = vector<char>(buffer_size, -1);
@@ -992,6 +1001,8 @@ void ESDFMap::updateESDF3d()
 
 void ESDFMap::updateRegionValuation()
 {
+  if (!mp_.use_region_evaluation_) return;
+
   const Eigen::Vector3i & region_num = mp_.region_valuation_voxel_num_;
   const double region_to_voxel = mp_.region_valuation_resolution_ * mp_.resolution_inv_;
 
@@ -1727,6 +1738,11 @@ double ESDFMap::getResolution()
 Eigen::Vector3d ESDFMap::getOrigin()
 {
   return mp_.map_origin_;
+}
+
+bool ESDFMap::useRegionEvaluation()
+{
+  return mp_.use_region_evaluation_;
 }
 
 double ESDFMap::getRegionValuationResolution()
