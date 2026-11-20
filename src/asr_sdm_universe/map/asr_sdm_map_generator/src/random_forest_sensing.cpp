@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <chrono>
+#include <stdexcept>
 
 namespace asr_sdm_map_generator
 {
@@ -13,6 +14,10 @@ RandomForestSensing::RandomForestSensing(const rclcpp::NodeOptions & options)
 {
   declareParameters();
   loadParameters();
+
+  if (seed_ >= 0) {
+    eng_.seed(static_cast<std::default_random_engine::result_type>(seed_));
+  }
 
   local_map_pub_ = create_publisher<sensor_msgs::msg::PointCloud2>(local_cloud_topic_, 1);
   all_map_pub_ = create_publisher<sensor_msgs::msg::PointCloud2>(global_cloud_topic_, 1);
@@ -34,7 +39,7 @@ RandomForestSensing::RandomForestSensing(const rclcpp::NodeOptions & options)
   y_h_ = y_size_ / 2.0;
   obs_num_ = std::min(obs_num_, static_cast<int>(x_size_ * 10));
 
-  generateRandomMap();
+  generateMap();
 
   const auto period = std::chrono::duration<double>(1.0 / std::max(sense_rate_, 1e-3));
   sense_timer_ = create_wall_timer(
@@ -42,8 +47,8 @@ RandomForestSensing::RandomForestSensing(const rclcpp::NodeOptions & options)
     std::bind(&RandomForestSensing::publishSensedPoints, this));
 
   RCLCPP_INFO(
-    get_logger(), "random_map_sensing ready (obs=%d, circles=%d, publish_local=%s)", obs_num_,
-    circle_num_, publish_local_ ? "true" : "false");
+    get_logger(), "random_map_sensing ready (type=%s, publish_local=%s)", map_type_.c_str(),
+    publish_local_ ? "true" : "false");
 }
 
 void RandomForestSensing::declareParameters()
@@ -51,6 +56,8 @@ void RandomForestSensing::declareParameters()
   declare_parameter("init_state_x", 0.0);
   declare_parameter("init_state_y", 0.0);
 
+  declare_parameter("map.type", map_type_);
+  declare_parameter("map.seed", seed_);
   declare_parameter("map.x_size", 50.0);
   declare_parameter("map.y_size", 50.0);
   declare_parameter("map.z_size", 5.0);
@@ -72,6 +79,23 @@ void RandomForestSensing::declareParameters()
   declare_parameter("ObstacleShape.theta", 7.0);
   declare_parameter("ObstacleShape.thickness", 0.4);
 
+  declare_parameter("perlin3d.complexity", perlin3d_.complexity);
+  declare_parameter("perlin3d.fill", perlin3d_.fill);
+  declare_parameter("perlin3d.fractal", perlin3d_.fractal);
+  declare_parameter("perlin3d.attenuation", perlin3d_.attenuation);
+
+  declare_parameter("post2d.width_min", post2d_.width_min);
+  declare_parameter("post2d.width_max", post2d_.width_max);
+  declare_parameter("post2d.obstacle_number", post2d_.obstacle_number);
+
+  declare_parameter("maze2d.road_width", maze2d_.road_width);
+  declare_parameter("maze2d.add_wall_x", maze2d_.add_wall_x);
+  declare_parameter("maze2d.add_wall_y", maze2d_.add_wall_y);
+
+  declare_parameter("maze3d.num_nodes", maze3d_.num_nodes);
+  declare_parameter("maze3d.connectivity", maze3d_.connectivity);
+  declare_parameter("maze3d.road_radius", maze3d_.road_radius);
+
   declare_parameter("sensing.radius", 10.0);
   declare_parameter("sensing.rate", 10.0);
   declare_parameter("sensing.publish_local", false);
@@ -89,6 +113,8 @@ void RandomForestSensing::loadParameters()
   init_x_ = get_parameter("init_state_x").as_double();
   init_y_ = get_parameter("init_state_y").as_double();
 
+  map_type_ = get_parameter("map.type").as_string();
+  seed_ = static_cast<int>(get_parameter("map.seed").as_int());
   x_size_ = get_parameter("map.x_size").as_double();
   y_size_ = get_parameter("map.y_size").as_double();
   z_size_ = get_parameter("map.z_size").as_double();
@@ -109,6 +135,23 @@ void RandomForestSensing::loadParameters()
   z_h_ = get_parameter("ObstacleShape.z_h").as_double();
   theta_ = get_parameter("ObstacleShape.theta").as_double();
   circle_thickness_ = get_parameter("ObstacleShape.thickness").as_double();
+
+  perlin3d_.complexity = get_parameter("perlin3d.complexity").as_double();
+  perlin3d_.fill = get_parameter("perlin3d.fill").as_double();
+  perlin3d_.fractal = static_cast<int>(get_parameter("perlin3d.fractal").as_int());
+  perlin3d_.attenuation = get_parameter("perlin3d.attenuation").as_double();
+
+  post2d_.width_min = get_parameter("post2d.width_min").as_double();
+  post2d_.width_max = get_parameter("post2d.width_max").as_double();
+  post2d_.obstacle_number = static_cast<int>(get_parameter("post2d.obstacle_number").as_int());
+
+  maze2d_.road_width = get_parameter("maze2d.road_width").as_double();
+  maze2d_.add_wall_x = get_parameter("maze2d.add_wall_x").as_bool();
+  maze2d_.add_wall_y = get_parameter("maze2d.add_wall_y").as_bool();
+
+  maze3d_.num_nodes = static_cast<int>(get_parameter("maze3d.num_nodes").as_int());
+  maze3d_.connectivity = get_parameter("maze3d.connectivity").as_double();
+  maze3d_.road_radius = static_cast<int>(get_parameter("maze3d.road_radius").as_int());
 
   sensing_range_ = get_parameter("sensing.radius").as_double();
   sense_rate_ = get_parameter("sensing.rate").as_double();
@@ -133,6 +176,16 @@ bool RandomForestSensing::isTooCloseToProtectedPoint(double x, double y) const
   const double dx_protect = x - protect_x_;
   const double dy_protect = y - protect_y_;
   return std::sqrt(dx_protect * dx_protect + dy_protect * dy_protect) < clear_radius_;
+}
+
+void RandomForestSensing::clearProtectedArea(pcl::PointCloud<pcl::PointXYZ> & cloud) const
+{
+  auto & points = cloud.points;
+  points.erase(
+    std::remove_if(
+      points.begin(), points.end(),
+      [this](const pcl::PointXYZ & pt) { return isTooCloseToProtectedPoint(pt.x, pt.y); }),
+    points.end());
 }
 
 void RandomForestSensing::addPillarObstacle(
@@ -210,15 +263,53 @@ void RandomForestSensing::addEllipseObstacle(
   }
 }
 
-void RandomForestSensing::generateRandomMap()
+void RandomForestSensing::generateMap()
 {
   cloud_map_.clear();
 
+  // rand_w_/rand_h_ also size the click-added pillars, so set them for every map type.
+  rand_w_ = std::uniform_real_distribution<double>(w_l_, w_h_);
+  rand_h_ = std::uniform_real_distribution<double>(h_l_, h_h_);
+
+  const MapGrid grid{x_size_, y_size_, z_size_, resolution_};
+  if (map_type_ == "random_forest") {
+    generateRandomForest();
+  } else if (map_type_ == "perlin3d") {
+    generatePerlin3d(grid, perlin3d_, eng_, cloud_map_);
+  } else if (map_type_ == "post2d") {
+    generatePost2d(grid, post2d_, eng_, cloud_map_);
+  } else if (map_type_ == "maze2d") {
+    generateMaze2d(grid, maze2d_, eng_, cloud_map_);
+  } else if (map_type_ == "maze3d") {
+    generateMaze3d(grid, maze3d_, eng_, cloud_map_);
+  } else {
+    throw std::invalid_argument(
+      "Unknown map.type '" + map_type_ +
+      "' (expected random_forest, perlin3d, post2d, maze2d or maze3d)");
+  }
+  if (map_type_ != "random_forest") {
+    // Random forest rejects obstacles near the protected points while placing them.
+    clearProtectedArea(cloud_map_);
+  }
+
+  cloud_map_.width = cloud_map_.points.size();
+  cloud_map_.height = 1;
+  cloud_map_.is_dense = true;
+
+  if (!cloud_map_.empty()) {
+    kdtree_local_map_.setInputCloud(cloud_map_.makeShared());
+    map_ok_ = true;
+  }
+
+  RCLCPP_INFO(
+    get_logger(), "Generated %s map with %zu points", map_type_.c_str(), cloud_map_.points.size());
+}
+
+void RandomForestSensing::generateRandomForest()
+{
   rand_x_ = std::uniform_real_distribution<double>(x_l_, x_h_);
   rand_y_ = std::uniform_real_distribution<double>(y_l_, y_h_);
   rand_z_ = std::uniform_real_distribution<double>(z_l_, z_h_);
-  rand_w_ = std::uniform_real_distribution<double>(w_l_, w_h_);
-  rand_h_ = std::uniform_real_distribution<double>(h_l_, h_h_);
   rand_radius_ = std::uniform_real_distribution<double>(radius_l_, radius_h_);
   rand_radius2_ = std::uniform_real_distribution<double>(radius_l_, 1.2);
   rand_theta_ = std::uniform_real_distribution<double>(-theta_, theta_);
@@ -262,15 +353,6 @@ void RandomForestSensing::generateRandomMap()
       get_logger(), "Only placed %d/%d circle obstacles (clearance constraints)", placed,
       circle_num_);
   }
-
-  cloud_map_.width = cloud_map_.points.size();
-  cloud_map_.height = 1;
-  cloud_map_.is_dense = true;
-
-  kdtree_local_map_.setInputCloud(cloud_map_.makeShared());
-  map_ok_ = true;
-
-  RCLCPP_INFO(get_logger(), "Generated random map with %zu points", cloud_map_.points.size());
 }
 
 void RandomForestSensing::odometryCallback(const nav_msgs::msg::Odometry::ConstSharedPtr odom)
@@ -381,6 +463,7 @@ void RandomForestSensing::clickCallback(const geometry_msgs::msg::PoseStamped::C
   all_map_pub_->publish(global_map_msg);
 
   kdtree_local_map_.setInputCloud(cloud_map_.makeShared());
+  map_ok_ = true;
   RCLCPP_INFO(
     get_logger(), "Added click obstacle at (%.2f, %.2f), map points=%zu", x, y,
     cloud_map_.points.size());

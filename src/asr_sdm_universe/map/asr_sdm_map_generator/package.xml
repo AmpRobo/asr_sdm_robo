@@ -3,7 +3,7 @@
 <package format="3">
   <name>asr_sdm_map_generator</name>
   <version>0.0.0</version>
-  <description>Random forest / obstacle map generator for planning simulation (ROS 2)</description>
+  <description>Simulated obstacle map generator for planning simulation (ROS 2): random forest plus the mockamap perlin3d / post2d / maze2d / maze3d maps</description>
   <maintainer email="bzhouai@todo.todo">bzhouai</maintainer>
   <license>TODO</license>
 

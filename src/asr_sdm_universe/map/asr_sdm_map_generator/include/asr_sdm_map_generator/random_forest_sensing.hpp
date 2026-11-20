@@ -14,6 +14,8 @@
 #include <rclcpp/rclcpp.hpp>
 #include <sensor_msgs/msg/point_cloud2.hpp>
 
+#include "asr_sdm_map_generator/mock_maps.hpp"
+
 namespace asr_sdm_map_generator
 {
 
@@ -25,12 +27,14 @@ public:
 private:
   void declareParameters();
   void loadParameters();
-  void generateRandomMap();
+  void generateMap();
+  void generateRandomForest();
   void publishSensedPoints();
   void odometryCallback(const nav_msgs::msg::Odometry::ConstSharedPtr odom);
   void clickCallback(const geometry_msgs::msg::PoseStamped::ConstSharedPtr msg);
 
   bool isTooCloseToProtectedPoint(double x, double y) const;
+  void clearProtectedArea(pcl::PointCloud<pcl::PointXYZ> & cloud) const;
   void addPillarObstacle(double x, double y, double width, pcl::PointCloud<pcl::PointXYZ> & cloud);
   void addEllipseObstacle(double x, double y, double z, pcl::PointCloud<pcl::PointXYZ> & cloud);
 
@@ -62,6 +66,13 @@ private:
   std::string click_map_topic_{"/pcl_render_node/local_map"};
   std::string odometry_topic_{"odometry"};
   std::string add_static_obstacle_{"/simulator/planning_simulator/add_static_obstacle"};
+
+  std::string map_type_{"random_forest"};
+  int seed_{-1};
+  Perlin3dParams perlin3d_;
+  Post2dParams post2d_;
+  Maze2dParams maze2d_;
+  Maze3dParams maze3d_;
 
   int obs_num_{30};
   int circle_num_{30};

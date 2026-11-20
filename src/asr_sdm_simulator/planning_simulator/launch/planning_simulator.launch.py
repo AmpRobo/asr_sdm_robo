@@ -5,6 +5,7 @@ Node parameters live in config/planning_simulator.yaml.
 
     ros2 launch planning_simulator planning_simulator.launch.py
     ros2 launch planning_simulator planning_simulator.launch.py teleop:=enable
+    ros2 launch planning_simulator planning_simulator.launch.py map_type:=maze2d
 """
 
 import os
@@ -36,6 +37,7 @@ def generate_launch_description():
     teleop = LaunchConfiguration("teleop")
     planning = LaunchConfiguration("planning")
     log_collector = LaunchConfiguration("log_collector")
+    map_type = LaunchConfiguration("map_type")
 
     sim_odom = "/control/asr_sdm/odom"
     vins_odom = "/localization/video_inertial_navigation_systems/odometry"
@@ -69,6 +71,12 @@ def generate_launch_description():
         default_value="enable",
         choices=["enable", "disable"],
         description="Start asr_sdm_log_collector (merged rotating logs)")
+    map_type_arg = DeclareLaunchArgument(
+        "map_type",
+        default_value="perlin3d",
+        choices=["random_forest", "perlin3d", "post2d", "maze2d", "maze3d"],
+        description="asr_sdm_map_generator map type; per-type settings live in "
+                    "asr_sdm_map_generator/config/asr_sdm_map_generator.yaml")
 
     random_map_sensing = Node(
         package="asr_sdm_map_generator",
@@ -81,6 +89,7 @@ def generate_launch_description():
             {
                 "init_state_x": -5.0,
                 "init_state_y": 0.0,
+                "map.type": map_type,
                 "sensing.enable_click_map": True,
                 "topics.add_static_obstacle":
                     "/simulator/planning_simulator/add_static_obstacle",
@@ -194,6 +203,7 @@ def generate_launch_description():
         teleop_arg,
         planning_arg,
         log_collector_arg,
+        map_type_arg,
         random_map_sensing,
         odom_visualization,
         odom_visualization_control,
