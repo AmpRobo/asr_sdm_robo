@@ -18,6 +18,8 @@ find_package(image_transport REQUIRED)
 find_package(asr_sdm_perception_msgs REQUIRED)   # D2.1: SparseRot.msg
 
 find_package(OpenCV 4 REQUIRED)
+# camera_model's public headers (CataCamera.h) include ceres/rotation.h
+find_package(Ceres REQUIRED)
 
 include_directories("../camera_model/include")
 
@@ -40,7 +42,7 @@ ament_target_dependencies(feature_tracker_node
   rclcpp rcpputils std_msgs sensor_msgs geometry_msgs
   cv_bridge camera_model image_transport asr_sdm_perception_msgs
 )
-target_link_libraries(feature_tracker_node ${OpenCV_LIBS})
+target_link_libraries(feature_tracker_node ${OpenCV_LIBS} ${CERES_LIBRARIES})
 
 # Install nodes
 install(

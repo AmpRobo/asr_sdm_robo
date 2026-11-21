@@ -9,7 +9,7 @@ https://github.com/ddz16/UIE_Benckmark
 
 - ROS 2 Jazzy
 - [`tensorrt_common`](../tensorrt_common) (CUDA-enabled OpenCV, CUDA Toolkit, TensorRT 11)
-- Follow `tensorrt_common` README / `scripts/setup_opencv_cuda_env.sh` before building
+- Follow the `tensorrt_common` README (`./setup-dev-env.sh --nvidia`, then `source ~/.local/opencv-cuda/setup_env.sh`) before building
 
 ## Layout
 
@@ -32,7 +32,7 @@ The checkpoint includes training-only `per_loss.*` weights. The export tool filt
 
 ```bash
 source /opt/ros/jazzy/setup.bash
-source src/tensorrt_common/scripts/setup_opencv_cuda_env.sh
+source ~/.local/opencv-cuda/setup_env.sh
 
 colcon build --symlink-install --packages-select tensorrt_common asr_sdm_video_enhancement_ml
 source install/setup.bash

@@ -66,7 +66,7 @@ Optional controller plotting demos need Matplot++ and Python dependencies:
 
 ```bash
 sudo apt install python3-dev python3-numpy python3-matplotlib python3-tk
-./install_matplotplusplus.sh
+./setup-dev-env.sh --common  # builds Matplot++ from source
 colcon build --packages-select asr_sdm_head_following_control \
   --cmake-args -DBUILD_CONTROLLER_DEMOS=ON
 ```
@@ -196,7 +196,7 @@ source install/setup.bash
 
 ```bash
 sudo apt install python3-dev python3-numpy python3-matplotlib python3-tk
-./install_matplotplusplus.sh
+./setup-dev-env.sh --common  # builds Matplot++ from source
 colcon build --packages-select asr_sdm_head_following_control \
   --cmake-args -DBUILD_CONTROLLER_DEMOS=ON
 ```

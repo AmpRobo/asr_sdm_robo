@@ -6,7 +6,6 @@
 set -euo pipefail
 
 option_common=false
-option_dependency=false
 option_ros=false
 option_nvidia=false
 option_no_nvidia=false
@@ -14,6 +13,10 @@ option_no_cuda_drivers=false
 option_runtime=false
 option_yes=false
 option_list=false
+option_rebuild=false
+
+# Set when apt sources change so the next apt_update really refreshes the index
+apt_index_stale=true
 
 # The only ROS 2 distribution supported on Ubuntu 24.04 by this workspace
 ros_distro="jazzy"
@@ -30,16 +33,47 @@ cudnn_cuda_major="13"           # cuDNN 9 flavour matching the CUDA major versio
 tensorrt_version="11.1.0"
 opencv_version="4.14.0"
 
-# Workspace-local third-party sources. COLCON_IGNORE in dependency/ keeps colcon
-# from treating them as packages when building the ROS 2 workspace.
+# Everything this script downloads or builds lives in a dependency/ folder next
+# to the repository (../dependency, beside asr_sdm_robo/): source archives and
+# trees, build directories, apt repo .debs and keys, the rustup installer and
+# cargo's crate cache. Set ASR_SDM_DEPENDENCY_DIR to use another location.
+# COLCON_IGNORE in it keeps colcon from treating the trees as packages if the
+# parent folder is ever built as a workspace.
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-dependency_dir="${script_dir}/dependency"
+dependency_dir="${ASR_SDM_DEPENDENCY_DIR:-$(dirname "${script_dir}")/dependency}"
+# Where older versions of this script kept it (moved on first run)
+legacy_dependency_dir="${script_dir}/dependency"
 periphery_repo_url="https://github.com/AmpRobo/c-periphery.git"
 periphery_src_dir="${dependency_dir}/c-periphery"
 periphery_version="2.5.0"
 periphery_install_prefix="/usr/local"
 opencv_src_dir="${dependency_dir}/opencv-${opencv_version}"
 opencv_contrib_src_dir="${dependency_dir}/opencv_contrib-${opencv_version}"
+# cargo registry/git cache used when building Slint (the Rust toolchain stays in ~/.rustup)
+cargo_cache_dir="${dependency_dir}/cargo"
+# Slint C++ API, built from source (its runtime is Rust, so it needs cargo)
+slint_version="1.19.0"
+slint_src_dir="${dependency_dir}/slint-${slint_version}"
+slint_install_prefix="/usr/local"
+# Minimum Rust installed by --common (what Slint needs)
+rust_min_version="1.95"
+# matplot++ (C++ plotting), built from source
+matplotpp_version="1.2.2"
+matplotpp_repo_url="https://github.com/alandefreitas/matplotplusplus.git"
+matplotpp_src_dir="${dependency_dir}/matplotplusplus-${matplotpp_version}"
+matplotpp_install_prefix="/usr/local"
+# Pinocchio stack built from source, in dependency order eigenpy -> Coal -> Pinocchio.
+# Pinned to a combination that satisfies each project's pixi.toml constraints
+# (Pinocchio 4.1.0 needs eigenpy >= 3.7.0 and Coal >= 3); bump them together.
+eigenpy_version="3.13.0"
+coal_version="3.0.4"
+pinocchio_version="4.1.0"
+eigenpy_repo_url="https://github.com/stack-of-tasks/eigenpy.git"
+coal_repo_url="https://github.com/coal-library/coal.git"
+pinocchio_repo_url="https://github.com/stack-of-tasks/pinocchio.git"
+pinocchio_install_prefix="${PINOCCHIO_INSTALL_PREFIX:-/opt/openrobots}"
+# PINOCCHIO_BUILD_COLLISION=ON builds Pinocchio's Coal-based collision support
+pinocchio_build_collision="${PINOCCHIO_BUILD_COLLISION:-OFF}"
 
 # CUDA library search paths, filled in by install_opencv_cuda
 cuda_lib_dirs=()
@@ -53,10 +87,11 @@ print_help() {
     echo "  --help                  Display this help message"
     echo "  -h                      Display this help message"
     echo "  --list                  List all installable components"
-    echo "  --common                Install common development packages (toolchain, git, python3, CLI tools, Coral GUI)"
+    echo "  --common                Install common development packages (toolchain, git, python3, CLI tools,"
+    echo "                          Coral GUI, Rust >= ${rust_min_version}, Slint ${slint_version} C++, matplot++ ${matplotpp_version},"
+    echo "                          Pinocchio ${pinocchio_version} / eigenpy ${eigenpy_version} / Coal ${coal_version},"
+    echo "                          c-periphery ${periphery_version} static library, all from source)"
     echo "  --ros                   Install ROS 2 ${ros_distro} desktop + rosdep/colcon (Ubuntu 24.04)"
-    echo "  --dependency            Install third-party libraries (Pinocchio from robotpkg,"
-    echo "                          c-periphery ${periphery_version} static library)"
     echo "  --nvidia                Install the NVIDIA stack (driver ${nvidia_driver_branch}, CUDA ${cuda_version},"
     echo "                          cuBLAS, NPP, cuDNN, TensorRT ${tensorrt_version}, OpenCV ${opencv_version} + CUDA)"
     echo "  -y                      Use non-interactive mode"
@@ -64,6 +99,9 @@ print_help() {
     echo "  --no-nvidia             Disable installation of the NVIDIA-related roles ('cuda' and 'tensorrt')"
     echo "  --no-cuda-drivers       Disable installation of 'cuda-drivers' in the role 'cuda'"
     echo "  --runtime               Disable installation dev package of role 'cuda' and 'tensorrt'"
+    echo "  --rebuild               Rebuild source-built libraries (Slint, matplot++, Pinocchio stack,"
+    echo "                          c-periphery, OpenCV)"
+    echo "                          even when the same version is already installed"
     echo "  --data-dir              Set data directory (default: $HOME/asr_sdm_data)"
     echo "  --download-artifacts    Download artifacts"
     echo "  --module                Specify the module (default: all)"
@@ -76,16 +114,21 @@ print_list() {
     echo ""
     echo "  Flag          Component    Description"
     echo "  ----          ---------    -----------"
-    echo "  --common      Common       Install build toolchain, git, python3, CLI tools and Coral GUI libraries"
+    echo "  --common      Common       Install build toolchain, git, python3, CLI tools, Coral GUI libraries,"
+    echo "                             Rust stable >= ${rust_min_version} via rustup (into ~/.cargo, ~/.rustup)"
+    echo "                             and the source-built libraries below"
     echo "  --ros         ROS 2        Install ROS 2 ${ros_distro} desktop + rosdep/colcon (Ubuntu 24.04),"
     echo "                             and set ROS_DOMAIN_ID=${ros_domain_id} in ~/.bashrc"
-    echo "  --dependency  Dependency   Install the third-party libraries below"
     echo "  --nvidia      NVIDIA       Install the GPU stack below (Ubuntu 24.04, x86_64)"
     echo ""
-    echo "  Components of --dependency:"
-    echo "    Pinocchio       robotpkg apt (C++ library and Python bindings)"
-    echo "    c-periphery     ${periphery_version} static library from dependency/c-periphery"
-    echo "                    into ${periphery_install_prefix}"
+    echo "  Source-built components of --common (sources and builds in ${dependency_dir}):"
+    echo "    Slint           ${slint_version} C++ API into ${slint_install_prefix}"
+    echo "    matplot++       ${matplotpp_version} shared library into ${matplotpp_install_prefix}"
+    echo "    eigenpy         ${eigenpy_version} into ${pinocchio_install_prefix}"
+    echo "    Coal            ${coal_version} into ${pinocchio_install_prefix} (with Python bindings)"
+    echo "    Pinocchio       ${pinocchio_version} into ${pinocchio_install_prefix} (with Python bindings;"
+    echo "                    collision support: PINOCCHIO_BUILD_COLLISION=${pinocchio_build_collision})"
+    echo "    c-periphery     ${periphery_version} static library into ${periphery_install_prefix}"
     echo ""
     echo "  Components of --nvidia:"
     echo "    NVIDIA driver   ${nvidia_driver_branch} (cuda-drivers-${nvidia_driver_branch}; skip with --no-cuda-drivers)"
@@ -95,17 +138,17 @@ print_list() {
     echo "    cuDNN           libcudnn9-cuda-${cudnn_cuda_major}"
     echo "    TensorRT        ${tensorrt_version} (needs the NVIDIA TensorRT local apt repo)"
     echo "    OpenCV + CUDA   ${opencv_version} into ~/.local/opencv-cuda"
-    echo "                    (source in dependency/opencv-${opencv_version} and"
-    echo "                     dependency/opencv_contrib-${opencv_version})"
+    echo "                    (source in ${dependency_dir}/opencv-${opencv_version} and"
+    echo "                     ${dependency_dir}/opencv_contrib-${opencv_version})"
     echo ""
     echo "Examples:"
     echo "  ./setup-dev-env.sh --list"
     echo "  ./setup-dev-env.sh --common"
     echo "  ./setup-dev-env.sh --ros"
-    echo "  ./setup-dev-env.sh --dependency"
     echo "  ./setup-dev-env.sh --nvidia"
     echo "  ./setup-dev-env.sh --nvidia --runtime --no-cuda-drivers"
-    echo "  ./setup-dev-env.sh --ros --nvidia --dependency -y"
+    echo "  ./setup-dev-env.sh --nvidia --rebuild"
+    echo "  ./setup-dev-env.sh --ros --common --nvidia -y"
 }
 
 run_cmd() {
@@ -132,6 +175,35 @@ apt_install() {
         sudo apt-get --yes "$@"
     else
         sudo apt-get "$@"
+    fi
+}
+
+# apt-get update once per run, plus again after a step adds or changes an apt source
+apt_update() {
+    if [[ "${apt_index_stale}" == true ]]; then
+        apt_install update
+        apt_index_stale=false
+    fi
+}
+
+# Call after adding or changing an apt source
+mark_apt_sources_changed() {
+    apt_index_stale=true
+}
+
+ensure_sudo() {
+    # Minimal containers run as root without sudo; every step below calls sudo
+    if ! command -v sudo >/dev/null 2>&1; then
+        apt-get -y update
+        apt-get -y install sudo
+    fi
+}
+
+# Prints "-G Ninja" (one word per line) when ninja is available, so callers can
+# use: mapfile -t generator < <(cmake_generator_args)
+cmake_generator_args() {
+    if command -v ninja >/dev/null 2>&1; then
+        printf '%s\n' -G Ninja
     fi
 }
 
@@ -189,6 +261,31 @@ install_common() {
         # Point Cloud Library and optional io pcap support
         libpcl-dev
         libpcap-dev
+        # Logging
+        libgoogle-glog-dev
+        # Pinocchio / eigenpy / Coal build dependencies
+        python3-numpy
+        python3-pybind11
+        libeigen3-dev
+        libboost-all-dev
+        liburdfdom-dev
+        libtinyxml2-dev
+        # c-periphery (uses the kernel's linux/*.h userspace headers)
+        linux-libc-dev
+        # matplot++ build and runtime dependencies (gnuplot is its plotting backend)
+        gnuplot
+        libpng-dev
+        libjpeg-dev
+        libtiff-dev
+        libblas-dev
+        liblapack-dev
+        zlib1g-dev
+        # Slint C++ build dependencies
+        libfontconfig-dev
+        libxkbcommon-dev
+        libxcb-shape0-dev
+        libxcb-xfixes0-dev
+        libssl-dev
         # Everyday CLI tools
         vim
         tmux
@@ -207,40 +304,131 @@ install_common() {
 
     echo -e "\e[36mInstalling common development packages...\e[m"
 
-    if ! command -v sudo >/dev/null 2>&1; then
-        apt-get -y update
-        apt-get -y install sudo
+    apt_update
+
+    # xacro is only packaged in the ROS apt repository (set up by --ros)
+    if apt-cache show "ros-${ros_distro}-xacro" >/dev/null 2>&1; then
+        common_packages+=("ros-${ros_distro}-xacro")
+    else
+        echo -e "\e[33mSkipping xacro: 'ros-${ros_distro}-xacro' is not available. Run with --ros first to add the ROS apt repository.\e[m"
     fi
 
-    apt_install update
     apt_install install "${common_packages[@]}"
+
+    ensure_rust_toolchain
+    install_slint
+    install_periphery
+    install_matplotpp
+    install_pinocchio_stack
 
     echo -e "\e[32mDone.\e[0m Common packages installed."
 }
 
-ensure_dependency_dir() {
-    # Keep a COLCON_IGNORE marker so `colcon build` from the workspace root does not
-    # treat third-party trees under dependency/ as packages.
-    mkdir -p "${dependency_dir}"
-    if [[ ! -f "${dependency_dir}/COLCON_IGNORE" ]]; then
-        touch "${dependency_dir}/COLCON_IGNORE"
+# Home directory of the user behind sudo (or the current user)
+invoking_user_home() {
+    if [[ "${EUID}" -eq 0 && -n "${SUDO_USER:-}" && "${SUDO_USER}" != "root" ]]; then
+        getent passwd "${SUDO_USER}" | cut -d: -f6
+    else
+        printf '%s' "${HOME}"
     fi
 }
 
-# Download a GitHub tag zip into dependency/<dir_name> when that tree is missing.
-# GitHub extracts the archive as <repo>-<tag>/, which must match dir_name.
-ensure_github_tag_source() {
-    local repo="$1"
+# Prints the version of <rustc>, or nothing when it cannot run
+rustc_version_of() {
+    "$1" --version 2>/dev/null | awk '{print $2}' || true
+}
+
+version_at_least() {
+    # version_at_least <have> <need>
+    [[ "$(printf '%s\n%s\n' "$2" "$1" | sort -V | head -n1)" == "$2" ]]
+}
+
+# Part of --common: make sure the invoking user has a rustup-managed Rust
+# >= rust_min_version (the minimum Slint needs). rustup's installer adds
+# `. "$HOME/.cargo/env"` to ~/.bashrc so new shells find cargo.
+# The rustup installer script is saved into dependency/; the toolchain itself
+# lives in ~/.cargo and ~/.rustup as usual.
+ensure_rust_toolchain() {
+    local user_home cargo_bin rustup_init have
+    user_home="$(invoking_user_home)"
+    cargo_bin="${user_home}/.cargo/bin"
+
+    if [[ ! -x "${cargo_bin}/rustup" ]]; then
+        download_to_dependency https://sh.rustup.rs rustup-init.sh
+        rustup_init="${dependency_dir}/rustup-init.sh"
+        echo -e "\e[36mInstalling Rust (stable) with rustup...\e[m"
+        run_cmd run_as_invoking_user sh "${rustup_init}" -y --default-toolchain stable --profile minimal
+    fi
+
+    have="$(rustc_version_of "${cargo_bin}/rustc")"
+    if [[ -z "${have}" ]] || ! version_at_least "${have}" "${rust_min_version}"; then
+        echo -e "\e[36mRust ${have:-unknown} is older than ${rust_min_version}; updating the stable toolchain and making it the default...\e[m"
+        run_cmd run_as_invoking_user "${cargo_bin}/rustup" update stable
+        run_cmd run_as_invoking_user "${cargo_bin}/rustup" default stable
+        have="$(rustc_version_of "${cargo_bin}/rustc")"
+    fi
+
+    if [[ -z "${have}" ]] || ! version_at_least "${have}" "${rust_min_version}"; then
+        echo -e "\e[31mRust >= ${rust_min_version} is required for Slint, found ${have:-none}.\e[m" >&2
+        return 1
+    fi
+    echo "Using Rust ${have} from ${cargo_bin}."
+}
+
+install_slint() {
+    local build_dir="${slint_src_dir}/build"
+    local compiler="${slint_install_prefix}/bin/slint-compiler"
+    local user_home cargo_bin
+
+    if [[ "${option_rebuild}" != true && -x "${compiler}" && -d "${slint_install_prefix}/lib/cmake/Slint" ]] \
+        && "${compiler}" --version 2>/dev/null | grep -qw "${slint_version}"; then
+        echo "Slint ${slint_version} already installed in ${slint_install_prefix}, skipping."
+        return 0
+    fi
+
+    echo -e "\e[36mBuilding Slint ${slint_version} C++ API...\e[m"
+
+    # Rust comes from ensure_rust_toolchain, run earlier in install_common
+    user_home="$(invoking_user_home)"
+    cargo_bin="${user_home}/.cargo/bin"
+
+    # GitHub extracts tag v<version> as slint-<version>/
+    ensure_github_tag_source "slint-ui/slint" "v${slint_version}" "slint-${slint_version}"
+
+    echo "  SOURCE_DIR      = ${slint_src_dir}"
+    echo "  BUILD_DIR       = ${build_dir}"
+    echo "  INSTALL_PREFIX  = ${slint_install_prefix}"
+
+    # Configure and build as the invoking user so cargo uses their toolchain;
+    # CARGO_HOME keeps the downloaded crates in dependency/. Only install needs root.
+    mkdir -p "${cargo_cache_dir}"
+    reset_stale_cmake_cache "${slint_src_dir}" "${build_dir}"
+    run_cmd run_as_invoking_user env PATH="${cargo_bin}:${PATH}" CARGO_HOME="${cargo_cache_dir}" \
+        cmake -S "${slint_src_dir}" -B "${build_dir}" -G Ninja \
+        -D CMAKE_BUILD_TYPE=Release \
+        -D CMAKE_INSTALL_PREFIX="${slint_install_prefix}"
+    run_cmd run_as_invoking_user env PATH="${cargo_bin}:${PATH}" CARGO_HOME="${cargo_cache_dir}" \
+        cmake --build "${build_dir}" --parallel "$(nproc)"
+    run_cmd sudo cmake --install "${build_dir}"
+    fix_dependency_owner
+
+    echo -e "\e[32mDone.\e[0m Slint installed. Verify: ${compiler} --version"
+}
+
+# ensure_git_tag_source <repo_url> <tag> <dir_name> [submodule_path]: shallow clone of
+# <tag> with its submodules (or only [submodule_path]) into dependency/<dir_name>.
+# Used instead of GitHub zips for projects whose build needs submodules
+# (jrl-cmakemodules in cmake/ for the Pinocchio stack).
+ensure_git_tag_source() {
+    local repo_url="$1"
     local tag="$2"
-    local dir_name="$3"
-    local dest_dir="${dependency_dir}/${dir_name}"
-    local zip_path="${dependency_dir}/${dir_name}.zip"
-    local url="https://github.com/${repo}/archive/refs/tags/${tag}.zip"
+    local dest_dir="${dependency_dir}/$3"
+    local recurse="--recurse-submodules${4:+=$4}"
 
     ensure_dependency_dir
 
     if [[ -f "${dest_dir}/CMakeLists.txt" ]]; then
-        echo "${dir_name} source already present in ${dest_dir}, skipping download."
+        echo "$3 source already present in ${dest_dir}, skipping clone."
         return 0
     fi
 
@@ -249,20 +437,326 @@ ensure_github_tag_source() {
         return 1
     fi
 
-    if [[ ! -f "${zip_path}" ]]; then
-        echo -e "\e[36mDownloading ${repo} ${tag} into ${dependency_dir}...\e[m"
-        run_cmd wget -q --show-progress -O "${zip_path}" "${url}"
-    else
-        echo "Using existing archive ${zip_path}."
+    echo -e "\e[36mCloning ${repo_url} ${tag} into ${dest_dir}...\e[m"
+    run_cmd run_as_invoking_user git clone --depth 1 --branch "${tag}" \
+        "${recurse}" --shallow-submodules "${repo_url}" "${dest_dir}"
+    fix_dependency_owner
+}
+
+# source_build_installed <src_dir> <prefix> <package_dir>: true when cmake_build_install
+# already installed this (versioned) source tree into <prefix> and the CMake package
+# is still there, unless --rebuild is set. A stamp is used instead of the package's
+# reported version because some tags (matplot++ v1.2.2) declare an older one.
+source_build_installed() {
+    local stamp="$1/build/.installed-by-setup-dev-env"
+    local prefix="$2"
+    local package_dir="$3"
+
+    [[ "${option_rebuild}" != true && -f "${stamp}" ]] || return 1
+    grep -qxF "${prefix}" "${stamp}" || return 1
+    compgen -G "${prefix}/lib/cmake/${package_dir}" >/dev/null \
+        || compgen -G "${prefix}/lib/*/cmake/${package_dir}" >/dev/null
+}
+
+# cmake_build_install <src_dir> <prefix> <jobs> [extra cmake args...]:
+# configure and build <src_dir>/build as the invoking user, then install into
+# <prefix> (with sudo when <prefix> is not writable).
+# reset_stale_cmake_cache <src_dir> <build_dir>: drop a CMake cache that was
+# configured for another source path (e.g. after dependency/ was moved), which
+# cmake would otherwise refuse to reuse. Sources and stamp files are kept.
+reset_stale_cmake_cache() {
+    local src_dir="$1"
+    local build_dir="$2"
+    local cached
+
+    [[ -f "${build_dir}/CMakeCache.txt" ]] || return 0
+    cached="$(sed -n 's/^CMAKE_HOME_DIRECTORY:INTERNAL=//p' "${build_dir}/CMakeCache.txt")"
+    if [[ -n "${cached}" && "${cached}" != "${src_dir}" ]]; then
+        echo "CMake cache in ${build_dir} was made for ${cached}; reconfiguring."
+        run_cmd rm -rf "${build_dir}/CMakeCache.txt" "${build_dir}/CMakeFiles"
     fi
+}
+
+cmake_build_install() {
+    local src_dir="$1"
+    local prefix="$2"
+    local jobs="$3"
+    local build_dir="${src_dir}/build"
+    local probe="${prefix}"
+    local -a generator
+    shift 3
+
+    mapfile -t generator < <(cmake_generator_args)
+    reset_stale_cmake_cache "${src_dir}" "${build_dir}"
+    run_cmd run_as_invoking_user env CMAKE_PREFIX_PATH="${prefix}${CMAKE_PREFIX_PATH:+:${CMAKE_PREFIX_PATH}}" \
+        cmake -S "${src_dir}" -B "${build_dir}" "${generator[@]}" \
+        -D CMAKE_BUILD_TYPE=Release \
+        -D CMAKE_INSTALL_PREFIX="${prefix}" \
+        "$@"
+    run_cmd run_as_invoking_user cmake --build "${build_dir}" --parallel "${jobs}"
+
+    # Walk up to the first existing directory to decide whether sudo is needed
+    while [[ ! -e "${probe}" && "${probe}" != "/" ]]; do
+        probe="$(dirname "${probe}")"
+    done
+    if [[ -w "${probe}" ]]; then
+        run_cmd cmake --install "${build_dir}"
+    else
+        run_cmd sudo cmake --install "${build_dir}"
+        run_cmd sudo ldconfig
+    fi
+    echo "${prefix}" > "${build_dir}/.installed-by-setup-dev-env"
+    fix_dependency_owner
+}
+
+install_matplotpp() {
+    if source_build_installed "${matplotpp_src_dir}" "${matplotpp_install_prefix}" "Matplot++"; then
+        echo "matplot++ ${matplotpp_version} already installed in ${matplotpp_install_prefix}, skipping."
+        return 0
+    fi
+
+    echo -e "\e[36mBuilding matplot++ ${matplotpp_version}...\e[m"
+    ensure_git_tag_source "${matplotpp_repo_url}" "v${matplotpp_version}" "matplotplusplus-${matplotpp_version}"
+    cmake_build_install "${matplotpp_src_dir}" "${matplotpp_install_prefix}" "$(nproc)" \
+        -D CMAKE_CXX_STANDARD=17 \
+        -D MATPLOTPP_BUILD_EXAMPLES=OFF \
+        -D MATPLOTPP_BUILD_TESTS=OFF \
+        -D MATPLOTPP_BUILD_EXPERIMENTAL_OPENGL_BACKEND=OFF \
+        -D BUILD_SHARED_LIBS=ON
+
+    echo -e "\e[32mDone.\e[0m matplot++ ${matplotpp_version} installed. Use in CMake: find_package(Matplot++ REQUIRED)"
+}
+
+# register_openrobots_prefix <prefix> <python_version>: make the Pinocchio stack in
+# <prefix> visible without the ~/.bashrc exports, which shells opened before the
+# install, non-interactive shells (~/.bashrc returns early), IDEs and CI never load:
+#   - CMake: entries in the user package registry (~/.cmake/packages/<name>/),
+#     which find_package() consults by default, so colcon finds pinocchio/coal/eigenpy
+#   - runtime linker: /etc/ld.so.conf.d entry + ldconfig
+#   - Python: a .pth file in the system site-packages directory
+register_openrobots_prefix() {
+    local prefix="$1"
+    local python_version="$2"
+    local user_home registry_dir pkg config_dir site_dir
+    local ld_conf="/etc/ld.so.conf.d/asr-sdm-openrobots.conf"
+    local pth_name="asr-sdm-openrobots.pth"
+
+    user_home="$(invoking_user_home)"
+    for pkg in eigenpy coal pinocchio; do
+        config_dir="${prefix}/lib/cmake/${pkg}"
+        [[ -d "${config_dir}" ]] || continue
+        registry_dir="${user_home}/.cmake/packages/${pkg}"
+        run_as_invoking_user mkdir -p "${registry_dir}"
+        printf '%s\n' "${config_dir}" | run_as_invoking_user tee "${registry_dir}/asr_sdm_robo" >/dev/null
+    done
+    echo "Registered eigenpy / coal / pinocchio in the CMake user package registry (${user_home}/.cmake/packages)."
+
+    if [[ "$(cat "${ld_conf}" 2>/dev/null || true)" != "${prefix}/lib" ]]; then
+        echo "Running: sudo tee ${ld_conf}"
+        echo "${prefix}/lib" | sudo tee "${ld_conf}" >/dev/null
+    fi
+    run_cmd sudo ldconfig
+
+    # /usr/local/lib/python3.X/dist-packages is on sys.path of the system python3
+    site_dir="/usr/local/lib/python${python_version}/dist-packages"
+    if [[ -d "${prefix}/lib/python${python_version}/site-packages" ]]; then
+        run_cmd sudo mkdir -p "${site_dir}"
+        echo "Running: sudo tee ${site_dir}/${pth_name}"
+        echo "${prefix}/lib/python${python_version}/site-packages" | sudo tee "${site_dir}/${pth_name}" >/dev/null
+    fi
+}
+
+install_pinocchio_stack() {
+    local python_bin
+    local python_version
+    local prefix="${pinocchio_install_prefix}"
+    # Pinocchio's Python bindings need several GB of RAM per compile job
+    local jobs=$(( $(nproc) / 2 ))
+    ((jobs >= 1)) || jobs=1
+    local -a common_args
+
+    python_bin="$(command -v python3)"
+    python_version="$("${python_bin}" -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")')"
+    common_args=(
+        -D BUILD_TESTING=OFF
+        -D INSTALL_DOCUMENTATION=OFF
+        -D PYTHON_EXECUTABLE="${python_bin}"
+    )
+
+    if dpkg -s robotpkg-pinocchio >/dev/null 2>&1; then
+        echo -e "\e[33mWarning: robotpkg-pinocchio (apt) is installed and shares ${prefix} with this source build.\e[m"
+        echo "Remove it first to avoid mixed files: sudo apt remove 'robotpkg-*pinocchio' 'robotpkg-*coal' 'robotpkg-*eigenpy'"
+    fi
+
+    echo -e "\e[36mSetting up eigenpy ${eigenpy_version}, Coal ${coal_version} and Pinocchio ${pinocchio_version} in ${prefix} (${jobs} build jobs)...\e[m"
+
+    if source_build_installed "${dependency_dir}/eigenpy-${eigenpy_version}" "${prefix}" eigenpy; then
+        echo "eigenpy ${eigenpy_version} already installed, skipping."
+    else
+        ensure_git_tag_source "${eigenpy_repo_url}" "v${eigenpy_version}" "eigenpy-${eigenpy_version}"
+        cmake_build_install "${dependency_dir}/eigenpy-${eigenpy_version}" "${prefix}" "${jobs}" \
+            "${common_args[@]}" \
+            -D BUILD_TESTING_SCIPY=OFF \
+            -D GENERATE_PYTHON_STUBS=OFF
+    fi
+
+    if source_build_installed "${dependency_dir}/coal-${coal_version}" "${prefix}" coal; then
+        echo "Coal ${coal_version} already installed, skipping."
+    else
+        ensure_git_tag_source "${coal_repo_url}" "v${coal_version}" "coal-${coal_version}"
+        cmake_build_install "${dependency_dir}/coal-${coal_version}" "${prefix}" "${jobs}" \
+            "${common_args[@]}" \
+            -D BUILD_PYTHON_INTERFACE=ON \
+            -D BUILD_STANDALONE_PYTHON_INTERFACE=OFF \
+            -D GENERATE_PYTHON_STUBS=OFF \
+            -D COAL_HAS_QHULL=OFF \
+            -D COAL_ENABLE_LOGGING=OFF
+    fi
+
+    if source_build_installed "${dependency_dir}/pinocchio-${pinocchio_version}" "${prefix}" pinocchio; then
+        echo "Pinocchio ${pinocchio_version} already installed, skipping."
+    else
+        # Only the cmake/ submodule; models/example-robot-data is for tests and examples
+        ensure_git_tag_source "${pinocchio_repo_url}" "v${pinocchio_version}" "pinocchio-${pinocchio_version}" cmake
+        cmake_build_install "${dependency_dir}/pinocchio-${pinocchio_version}" "${prefix}" "${jobs}" \
+            "${common_args[@]}" \
+            -D BUILD_EXAMPLES=OFF \
+            -D BUILD_PYTHON_INTERFACE=ON \
+            -D BUILD_WITH_COLLISION_SUPPORT="${pinocchio_build_collision}"
+    fi
+
+    register_openrobots_prefix "${prefix}" "${python_version}"
+
+    # Replaces the block written by the robotpkg install of earlier versions
+    remove_bashrc_block "pinocchio robotpkg setup" || true
+    write_bashrc_block "pinocchio source install setup" "export PATH=${prefix}/bin:\$PATH
+export PKG_CONFIG_PATH=${prefix}/lib/pkgconfig:\$PKG_CONFIG_PATH
+export LD_LIBRARY_PATH=${prefix}/lib:\$LD_LIBRARY_PATH
+export PYTHONPATH=${prefix}/lib/python${python_version}/site-packages:\$PYTHONPATH
+export CMAKE_PREFIX_PATH=${prefix}:\$CMAKE_PREFIX_PATH"
+
+    echo -e "\e[32mDone.\e[0m Pinocchio stack installed into ${prefix}."
+    echo "Reload: source ~/.bashrc  |  Verify: python3 -c 'import pinocchio; print(pinocchio.__version__)'"
+}
+
+# The user who should own dependency/: the caller behind sudo, or the current
+# user when not root. Empty when running as plain root (nothing to hand back).
+dependency_owner() {
+    local user=""
+    if [[ "${EUID}" -eq 0 ]]; then
+        if [[ -n "${SUDO_USER:-}" && "${SUDO_USER}" != "root" ]]; then
+            user="${SUDO_USER}"
+        fi
+    else
+        user="$(id -un)"
+    fi
+    [[ -n "${user}" ]] && echo "${user}:$(id -gn "${user}")"
+    return 0
+}
+
+# Hand dependency/ (sources, archives, build dirs) back to the invoking user so
+# it is never left root-owned after a sudo run or a `sudo cmake --install`.
+fix_dependency_owner() {
+    local owner
+    [[ -d "${dependency_dir}" ]] || return 0
+    owner="$(dependency_owner)"
+    [[ -n "${owner}" ]] || return 0
+
+    # Skip the recursive chown when everything already belongs to the user
+    if [[ -z "$(find "${dependency_dir}" ! -user "${owner%%:*}" -print -quit 2>/dev/null)" ]]; then
+        return 0
+    fi
+
+    echo "Setting owner of ${dependency_dir} to ${owner}..."
+    if [[ "${EUID}" -eq 0 ]]; then
+        chown -R "${owner}" "${dependency_dir}"
+    else
+        sudo chown -R "${owner}" "${dependency_dir}"
+    fi
+}
+
+# Older versions kept dependency/ inside the repository. Move it next to the
+# repository once so finished builds (and their skip stamps) are kept.
+migrate_legacy_dependency_dir() {
+    [[ -d "${legacy_dependency_dir}" ]] || return 0
+    [[ "${legacy_dependency_dir}" != "${dependency_dir}" ]] || return 0
+    if [[ -e "${dependency_dir}" ]]; then
+        echo -e "\e[33mWarning: both ${legacy_dependency_dir} and ${dependency_dir} exist; using ${dependency_dir}. Remove the old one when no longer needed.\e[m"
+        return 0
+    fi
+    echo "Moving ${legacy_dependency_dir} to ${dependency_dir}..."
+    run_cmd mkdir -p "$(dirname "${dependency_dir}")"
+    run_cmd mv "${legacy_dependency_dir}" "${dependency_dir}"
+}
+
+ensure_dependency_dir() {
+    # Keep a COLCON_IGNORE marker so `colcon build` from the workspace root does not
+    # treat third-party trees under dependency/ as packages.
+    mkdir -p "${dependency_dir}"
+    fix_dependency_owner
+    if [[ ! -f "${dependency_dir}/COLCON_IGNORE" ]]; then
+        touch "${dependency_dir}/COLCON_IGNORE"
+    fi
+}
+
+# download_to_dependency <url> <file_name>: fetch <url> into dependency/<file_name>
+# unless it is already there. A .part file keeps an interrupted download from
+# being mistaken for a complete one on the next run.
+download_to_dependency() {
+    local url="$1"
+    local dest="${dependency_dir}/$2"
+
+    ensure_dependency_dir
+    if [[ -s "${dest}" ]]; then
+        echo "Using existing ${dest}."
+        return 0
+    fi
+
+    echo -e "\e[36mDownloading ${url} into ${dependency_dir}...\e[m"
+    if ! run_cmd curl -fL --retry 3 --retry-delay 2 --proto-redir '=https' -o "${dest}.part" "${url}"; then
+        rm -f "${dest}.part"
+        echo -e "\e[31mFailed to download ${url}\e[m" >&2
+        return 1
+    fi
+    mv "${dest}.part" "${dest}"
+    fix_dependency_owner
+}
+
+# Download a GitHub tag zip into dependency/<dir_name> when that tree is missing.
+# GitHub extracts the archive as <repo>-<tag>/, which must match dir_name.
+ensure_github_tag_source() {
+    local repo="$1"
+    local tag="$2"
+    local dir_name="$3"
+    # File whose presence marks a complete source tree (opencv_contrib has no top-level CMakeLists.txt)
+    local marker="${4:-CMakeLists.txt}"
+    local dest_dir="${dependency_dir}/${dir_name}"
+    local zip_path="${dependency_dir}/${dir_name}.zip"
+    local url="https://github.com/${repo}/archive/refs/tags/${tag}.zip"
+
+    ensure_dependency_dir
+
+    if [[ -f "${dest_dir}/${marker}" ]]; then
+        echo "${dir_name} source already present in ${dest_dir}, skipping download."
+        return 0
+    fi
+
+    if [[ -e "${dest_dir}" ]]; then
+        echo -e "\e[31m${dest_dir} exists but has no ${marker}; not overwriting it.\e[m" >&2
+        return 1
+    fi
+
+    download_to_dependency "${url}" "${dir_name}.zip"
 
     echo "Extracting ${zip_path}..."
     run_cmd unzip -q -d "${dependency_dir}" "${zip_path}"
 
-    if [[ ! -f "${dest_dir}/CMakeLists.txt" ]]; then
+    if [[ ! -f "${dest_dir}/${marker}" ]]; then
         echo -e "\e[31mFailed to extract ${repo} ${tag} into ${dest_dir}.\e[m" >&2
         return 1
     fi
+
+    fix_dependency_owner
 }
 
 ensure_periphery_source() {
@@ -279,63 +773,34 @@ ensure_periphery_source() {
     fi
 
     echo -e "\e[36mCloning c-periphery into ${periphery_src_dir}...\e[m"
-    run_cmd git clone --depth 1 "${periphery_repo_url}" "${periphery_src_dir}"
+    run_cmd run_as_invoking_user git clone --depth 1 "${periphery_repo_url}" "${periphery_src_dir}"
+    fix_dependency_owner
 }
 
 ensure_opencv_source() {
     ensure_github_tag_source "opencv/opencv" "${opencv_version}" "opencv-${opencv_version}"
-    ensure_github_tag_source "opencv/opencv_contrib" "${opencv_version}" "opencv_contrib-${opencv_version}"
+    ensure_github_tag_source "opencv/opencv_contrib" "${opencv_version}" "opencv_contrib-${opencv_version}" "modules/README.md"
 }
 
 install_periphery() {
-    local build_dir="${periphery_src_dir}/build"
     local static_lib=""
     local candidate
     local multiarch=""
-    local -a generator
+
+    if source_build_installed "${periphery_src_dir}" "${periphery_install_prefix}" periphery; then
+        echo "c-periphery already installed in ${periphery_install_prefix}, skipping."
+        return 0
+    fi
 
     echo -e "\e[36mInstalling c-periphery ${periphery_version} as a static library...\e[m"
-
-    if ! command -v sudo >/dev/null 2>&1; then
-        apt-get -y update
-        apt-get -y install sudo
-    fi
-
-    apt_install update
-    apt_install install \
-        build-essential \
-        cmake \
-        git \
-        pkg-config \
-        ninja-build \
-        linux-libc-dev
-
     ensure_periphery_source
-
-    rm -rf "${build_dir}"
-    mkdir -p "${build_dir}"
-
-    if command -v ninja >/dev/null 2>&1; then
-        generator=(-G Ninja)
-    else
-        generator=()
-    fi
-
-    echo "  SOURCE_DIR      = ${periphery_src_dir}"
-    echo "  BUILD_DIR       = ${build_dir}"
-    echo "  INSTALL_PREFIX  = ${periphery_install_prefix}"
 
     # CMAKE_INSTALL_LIBDIR=lib keeps libperiphery.a in /usr/local/lib so the
     # linker and find_package(periphery) both find it without a multiarch path.
-    run_cmd cmake -S "${periphery_src_dir}" -B "${build_dir}" "${generator[@]}" \
-        -D CMAKE_BUILD_TYPE=Release \
-        -D CMAKE_INSTALL_PREFIX="${periphery_install_prefix}" \
+    cmake_build_install "${periphery_src_dir}" "${periphery_install_prefix}" "$(nproc)" \
         -D CMAKE_INSTALL_LIBDIR=lib \
         -D BUILD_SHARED_LIBS=OFF \
         -D BUILD_TESTS=OFF
-
-    run_cmd cmake --build "${build_dir}" --parallel "$(nproc)"
-    run_cmd sudo cmake --install "${build_dir}"
 
     if command -v dpkg-architecture >/dev/null 2>&1; then
         multiarch="$(dpkg-architecture -qDEB_HOST_MULTIARCH 2>/dev/null || true)"
@@ -346,7 +811,7 @@ install_periphery() {
         "${periphery_install_prefix}/lib64/libperiphery.a" \
         "${periphery_install_prefix}/lib/${multiarch}/libperiphery.a"
     do
-        if [[ -n "${candidate}" && -f "${candidate}" ]]; then
+        if [[ -f "${candidate}" ]]; then
             static_lib="${candidate}"
             break
         fi
@@ -357,8 +822,7 @@ install_periphery() {
         return 1
     fi
 
-    echo -e "\e[32mDone.\e[0m c-periphery static library installed:"
-    echo "  ${static_lib}"
+    echo -e "\e[32mDone.\e[0m c-periphery static library installed: ${static_lib}"
     echo "CMake package: find_package(periphery)  (prefix ${periphery_install_prefix})"
 }
 
@@ -396,6 +860,7 @@ enable_ubuntu_universe() {
 
     apt_install install software-properties-common
     run_cmd sudo add-apt-repository -y universe
+    mark_apt_sources_changed
 }
 
 configure_utf8_locale() {
@@ -415,11 +880,11 @@ setup_ros_apt_repo() {
     local codename="$1"
     local source_version=""
     local deb_url
-    local tmp_deb
+    local deb_name
 
     if [[ "$(dpkg-query -W -f='${Status}' ros2-apt-source 2>/dev/null || true)" == "install ok installed" ]]; then
         echo "ros2-apt-source already installed, skipping."
-        apt_install update
+        apt_update
         return 0
     fi
 
@@ -435,21 +900,16 @@ setup_ros_apt_repo() {
         echo -e "\e[33mCould not query the latest ros-apt-source release; falling back to ${source_version}.\e[m"
     fi
 
-    deb_url="https://github.com/ros-infrastructure/ros-apt-source/releases/download/${source_version}/ros2-apt-source_${source_version}.${codename}_all.deb"
-    tmp_deb="$(mktemp -t ros2-apt-source.XXXXXXXX.deb)"
+    deb_name="ros2-apt-source_${source_version}.${codename}_all.deb"
+    deb_url="https://github.com/ros-infrastructure/ros-apt-source/releases/download/${source_version}/${deb_name}"
+    download_to_dependency "${deb_url}" "${deb_name}" || return 1
 
-    if ! run_cmd curl -fsSL --retry 3 --retry-delay 2 -o "${tmp_deb}" "${deb_url}"; then
-        rm -f "${tmp_deb}"
-        echo -e "\e[31mFailed to download ${deb_url}\e[m" >&2
-        return 1
-    fi
-
-    if ! sudo dpkg -i "${tmp_deb}"; then
+    if ! run_cmd sudo dpkg -i "${dependency_dir}/${deb_name}"; then
         apt_install install -f
     fi
-    rm -f "${tmp_deb}"
 
-    apt_install update
+    mark_apt_sources_changed
+    apt_update
 }
 
 setup_rosdep() {
@@ -495,12 +955,7 @@ install_ros() {
 
     echo -e "\e[36mInstalling ROS 2 ${ros_distro}...\e[m"
 
-    if ! command -v sudo >/dev/null 2>&1; then
-        apt-get -y update
-        apt-get -y install sudo
-    fi
-
-    apt_install update
+    apt_update
     apt_install install \
         ca-certificates \
         curl \
@@ -530,6 +985,7 @@ install_ros() {
     apt_install upgrade
     apt_install install \
         "ros-${ros_distro}-desktop" \
+        "ros-${ros_distro}-xacro" \
         ros-dev-tools \
         python3-rosdep \
         python3-colcon-common-extensions
@@ -549,73 +1005,6 @@ fi"
 
     echo -e "\e[32mDone.\e[0m ROS 2 ${ros_distro} installed (ROS_DOMAIN_ID=${ros_domain_id})."
     echo "Reload: source ~/.bashrc  |  Verify: ros2 run demo_nodes_cpp talker"
-}
-
-install_dependency() {
-    echo -e "\e[36mInstalling third-party libraries (c-periphery, Pinocchio)...\e[m"
-    install_periphery
-    install_pinocchio_from_apt
-    echo -e "\e[32mDependency setup complete.\e[0m"
-}
-
-install_pinocchio_from_apt() {
-    local robotpkg_key_url="http://robotpkg.openrobots.org/packages/debian/robotpkg.asc"
-    local robotpkg_key_path="/etc/apt/keyrings/robotpkg.asc"
-    local robotpkg_list_path="/etc/apt/sources.list.d/robotpkg.list"
-    local bashrc_path="${HOME}/.bashrc"
-    local python_version
-    local python_version_short
-    local codename
-    local repo_line
-    local -a pinocchio_packages
-
-    python_version="$(python3 -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")')"
-    python_version_short="$(python3 -c 'import sys; print(f"{sys.version_info.major}{sys.version_info.minor}")')"
-
-    pinocchio_packages=(
-        "robotpkg-pinocchio"
-        "robotpkg-py${python_version_short}-pinocchio"
-        "robotpkg-coal"
-        "robotpkg-py${python_version_short}-coal"
-        "robotpkg-py${python_version_short}-eigenpy"
-    )
-
-    run_cmd sudo apt update
-    run_cmd sudo apt install -qqy lsb-release curl
-
-    run_cmd sudo mkdir -p /etc/apt/keyrings
-    run_cmd sudo curl -fsSL "${robotpkg_key_url}" -o "${robotpkg_key_path}"
-
-    codename="$(lsb_release -cs)"
-    repo_line="deb [arch=amd64 signed-by=${robotpkg_key_path}] http://robotpkg.openrobots.org/packages/debian/pub ${codename} robotpkg"
-
-    if [[ -f "${robotpkg_list_path}" ]] && grep -qxF "${repo_line}" "${robotpkg_list_path}"; then
-        echo "robotpkg apt source already exists, skipping."
-    else
-        echo "Running: sudo tee -a ${robotpkg_list_path}"
-        echo "${repo_line}" | sudo tee -a "${robotpkg_list_path}" >/dev/null
-    fi
-
-    run_cmd sudo apt update
-    run_cmd sudo apt install --reinstall -qqy "${pinocchio_packages[@]}"
-
-    if [[ -f "${bashrc_path}" ]] && grep -q "pinocchio robotpkg setup" "${bashrc_path}"; then
-        echo "~/.bashrc already contains Pinocchio environment variables, skipping."
-    else
-        cat >> "${bashrc_path}" <<EOF
-
-# >>> pinocchio robotpkg setup >>>
-export PATH=/opt/openrobots/bin:\$PATH
-export PKG_CONFIG_PATH=/opt/openrobots/lib/pkgconfig:\$PKG_CONFIG_PATH
-export LD_LIBRARY_PATH=/opt/openrobots/lib:\$LD_LIBRARY_PATH
-export PYTHONPATH=/opt/openrobots/lib/python${python_version}/site-packages:\$PYTHONPATH
-export CMAKE_PREFIX_PATH=/opt/openrobots:\$CMAKE_PREFIX_PATH
-# <<< pinocchio robotpkg setup <<<
-EOF
-        echo "Appended Pinocchio environment variables to ~/.bashrc. Reload or reopen the terminal."
-    fi
-
-    echo "Pinocchio installation and environment setup complete."
 }
 
 portable_home_path() {
@@ -650,27 +1039,37 @@ portable_home_path_list() {
     printf '%s' "${result}"
 }
 
-write_bashrc_block() {
-    # write_bashrc_block <marker> <content>; rewrites the block when it already exists
+remove_bashrc_block() {
+    # remove_bashrc_block <marker>; drops "# >>> <marker> >>>" ... "# <<< <marker> <<<"
+    # from ~/.bashrc. Returns 1 when the block is not there.
     local marker="$1"
-    local content="$2"
     local bashrc_path="${HOME}/.bashrc"
     local begin_line="# >>> ${marker} >>>"
     local end_line="# <<< ${marker} <<<"
     local tmp_file
 
+    [[ -f "${bashrc_path}" ]] && grep -qxF "${begin_line}" "${bashrc_path}" || return 1
+
+    tmp_file="$(mktemp)"
+    awk -v begin_line="${begin_line}" -v end_line="${end_line}" '
+        $0 == begin_line { inside = 1 }
+        inside == 0      { print }
+        $0 == end_line   { inside = 0 }
+    ' "${bashrc_path}" > "${tmp_file}"
+    # Command substitution drops the trailing blank lines left behind by the removed block
+    printf '%s\n' "$(cat "${tmp_file}")" > "${bashrc_path}"
+    rm -f "${tmp_file}"
+}
+
+write_bashrc_block() {
+    # write_bashrc_block <marker> <content>; rewrites the block when it already exists
+    local marker="$1"
+    local content="$2"
+    local bashrc_path="${HOME}/.bashrc"
+
     touch "${bashrc_path}"
 
-    if grep -qxF "${begin_line}" "${bashrc_path}"; then
-        tmp_file="$(mktemp)"
-        awk -v begin_line="${begin_line}" -v end_line="${end_line}" '
-            $0 == begin_line { inside = 1 }
-            inside == 0      { print }
-            $0 == end_line   { inside = 0 }
-        ' "${bashrc_path}" > "${tmp_file}"
-        # Command substitution drops the trailing blank lines left behind by the removed block
-        printf '%s\n' "$(cat "${tmp_file}")" > "${bashrc_path}"
-        rm -f "${tmp_file}"
+    if remove_bashrc_block "${marker}"; then
         echo "Refreshed '${marker}' in ~/.bashrc."
     else
         echo "Appended '${marker}' to ~/.bashrc."
@@ -678,9 +1077,9 @@ write_bashrc_block() {
 
     {
         echo ""
-        echo "${begin_line}"
+        echo "# >>> ${marker} >>>"
         echo "${content}"
-        echo "${end_line}"
+        echo "# <<< ${marker} <<<"
     } >> "${bashrc_path}"
 }
 
@@ -711,20 +1110,21 @@ check_nvidia_prerequisites() {
 }
 
 setup_cuda_apt_repo() {
-    local keyring_deb="/tmp/cuda-keyring_1.1-1_all.deb"
-    local keyring_url="https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2404/x86_64/cuda-keyring_1.1-1_all.deb"
+    local keyring_name="cuda-keyring_1.1-1_all.deb"
+    local keyring_url="https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2404/x86_64/${keyring_name}"
 
     if dpkg -s cuda-keyring >/dev/null 2>&1; then
         echo "cuda-keyring already installed, skipping."
     else
         echo -e "\e[36mAdding the NVIDIA CUDA apt repository...\e[m"
-        apt_install update
+        apt_update
         apt_install install ca-certificates curl gnupg
-        run_cmd curl -fsSL -o "${keyring_deb}" "${keyring_url}"
-        run_cmd sudo dpkg -i "${keyring_deb}"
+        download_to_dependency "${keyring_url}" "${keyring_name}"
+        run_cmd sudo dpkg -i "${dependency_dir}/${keyring_name}"
+        mark_apt_sources_changed
     fi
 
-    apt_install update
+    apt_update
 }
 
 detect_nvidia_driver_version() {
@@ -927,23 +1327,26 @@ ensure_unversioned_cuda_lib() {
 }
 
 install_opencv_cuda() {
-    local previous_dir="${PWD}"
     local install_prefix="${OPENCV_CUDA_PREFIX:-${HOME}/.local/opencv-cuda}"
-    # Keep the CUDA object tree out of the workspace; only the source lives in dependency/.
-    local build_root="${OPENCV_CUDA_BUILD_ROOT:-${HOME}/.cache/opencv_cuda_build}"
-    local build_dir="${build_root}/build-${opencv_version}"
+    # Build next to the source in dependency/ (override with OPENCV_CUDA_BUILD_ROOT)
+    local build_root="${OPENCV_CUDA_BUILD_ROOT:-${opencv_src_dir}}"
+    local build_dir="${build_root}/build"
     local cuda_libs_root
     local cuda_lib_path
     local cuda_arch_bin
     local env_file
     local lib
+    local lib_path
     local -a generator
     local -a missing_libs
+    local -a cuda_lib_args
+    # Every CUDA library OpenCV's FindCUDA looks up; the first four are required
+    local -a cuda_libs=(cublas cufft nppc npps cublasLt nppial nppicc nppidei nppif nppig nppim nppist nppisu nppitc)
 
     # Only core + the contrib CUDA modules used by tensorrt_common
     local build_list="core,imgproc,imgcodecs,cudev,cudaarithm,cudawarping,cudaimgproc,cudafilters"
 
-    echo -e "\e[36mBuilding OpenCV ${opencv_version} with CUDA...\e[m"
+    echo -e "\e[36mSetting up OpenCV ${opencv_version} with CUDA...\e[m"
 
     apt_install install \
         build-essential \
@@ -985,33 +1388,18 @@ install_opencv_cuda() {
     export LD_LIBRARY_PATH="${cuda_lib_path}:${LD_LIBRARY_PATH:-}"
     export LIBRARY_PATH="${cuda_lib_path}:${LIBRARY_PATH:-}"
 
-    for lib in cublas cublasLt cufft nppc nppial nppicc nppidei nppif nppig nppim nppist nppisu nppitc npps; do
-        ensure_unversioned_cuda_lib "${lib}" || true
-    done
-
-    local cublas_lib cufft_lib
-    local nppc_lib nppial_lib nppicc_lib nppidei_lib nppif_lib nppig_lib
-    local nppim_lib nppist_lib nppisu_lib nppitc_lib npps_lib
-
-    cublas_lib="$(find_cuda_lib cublas || true)"
-    cufft_lib="$(find_cuda_lib cufft || true)"
-    nppc_lib="$(find_cuda_lib nppc || true)"
-    nppial_lib="$(find_cuda_lib nppial || true)"
-    nppicc_lib="$(find_cuda_lib nppicc || true)"
-    nppidei_lib="$(find_cuda_lib nppidei || true)"
-    nppif_lib="$(find_cuda_lib nppif || true)"
-    nppig_lib="$(find_cuda_lib nppig || true)"
-    nppim_lib="$(find_cuda_lib nppim || true)"
-    nppist_lib="$(find_cuda_lib nppist || true)"
-    nppisu_lib="$(find_cuda_lib nppisu || true)"
-    nppitc_lib="$(find_cuda_lib nppitc || true)"
-    npps_lib="$(find_cuda_lib npps || true)"
-
     missing_libs=()
-    [[ -n "${cublas_lib}" ]] || missing_libs+=("cublas")
-    [[ -n "${cufft_lib}" ]] || missing_libs+=("cufft")
-    [[ -n "${nppc_lib}" ]] || missing_libs+=("nppc")
-    [[ -n "${npps_lib}" ]] || missing_libs+=("npps")
+    cuda_lib_args=()
+    for lib in "${cuda_libs[@]}"; do
+        ensure_unversioned_cuda_lib "${lib}" || true
+        lib_path="$(find_cuda_lib "${lib}" || true)"
+        if [[ -n "${lib_path}" ]]; then
+            # cublasLt is linked through cublas, FindCUDA has no variable for it
+            [[ "${lib}" == "cublasLt" ]] || cuda_lib_args+=(-D "CUDA_${lib}_LIBRARY=${lib_path}")
+        elif [[ "${lib}" =~ ^(cublas|cufft|nppc|npps)$ ]]; then
+            missing_libs+=("${lib}")
+        fi
+    done
 
     if ((${#missing_libs[@]})); then
         echo -e "\e[33mSkipping OpenCV: missing CUDA libraries: ${missing_libs[*]}\e[m"
@@ -1034,20 +1422,30 @@ install_opencv_cuda() {
     echo "  INSTALL_PREFIX  = ${install_prefix}"
     echo "  BUILD_DIR       = ${build_dir}"
 
+    if [[ "${option_rebuild}" != true \
+        && -f "${install_prefix}/include/opencv4/opencv2/cudaimgproc.hpp" ]] \
+        && grep -qs "OpenCV_VERSION ${opencv_version})" "${install_prefix}/lib/cmake/opencv4/OpenCVConfig-version.cmake"; then
+        echo "OpenCV ${opencv_version} with CUDA already installed in ${install_prefix}, skipping build (use --rebuild to force)."
+    else
+        build_opencv_cuda
+    fi
+
+    write_opencv_env
+}
+
+# Called from install_opencv_cuda; reads its locals (install_prefix, build_dir,
+# cuda_* paths, cuda_lib_args, build_list) through bash dynamic scoping.
+build_opencv_cuda() {
     mkdir -p "${install_prefix}"
     ensure_opencv_source
 
     rm -rf "${build_dir}"
     mkdir -p "${build_dir}"
-    cd "${build_dir}"
+    mapfile -t generator < <(cmake_generator_args)
 
-    if command -v ninja >/dev/null 2>&1; then
-        generator=(-G Ninja)
-    else
-        generator=()
-    fi
+    reset_stale_cmake_cache "${opencv_src_dir}" "${build_dir}"
 
-    cmake "${generator[@]}" \
+    run_cmd cmake -S "${opencv_src_dir}" -B "${build_dir}" "${generator[@]}" \
         -D CMAKE_BUILD_TYPE=Release \
         -D CMAKE_INSTALL_PREFIX="${install_prefix}" \
         -D CMAKE_CXX_STANDARD=17 \
@@ -1068,19 +1466,7 @@ install_opencv_cuda() {
         -D CUDA_NVCC_FLAGS="-std=c++17" \
         -D CMAKE_CUDA_STANDARD=17 \
         -D CMAKE_CXX_FLAGS="-I${cuda_libs_root}/targets/x86_64-linux/include" \
-        -D CUDA_cublas_LIBRARY="${cublas_lib}" \
-        -D CUDA_cufft_LIBRARY="${cufft_lib}" \
-        -D CUDA_nppc_LIBRARY="${nppc_lib}" \
-        -D CUDA_nppial_LIBRARY="${nppial_lib}" \
-        -D CUDA_nppicc_LIBRARY="${nppicc_lib}" \
-        -D CUDA_nppidei_LIBRARY="${nppidei_lib}" \
-        -D CUDA_nppif_LIBRARY="${nppif_lib}" \
-        -D CUDA_nppig_LIBRARY="${nppig_lib}" \
-        -D CUDA_nppim_LIBRARY="${nppim_lib}" \
-        -D CUDA_nppist_LIBRARY="${nppist_lib}" \
-        -D CUDA_nppisu_LIBRARY="${nppisu_lib}" \
-        -D CUDA_nppitc_LIBRARY="${nppitc_lib}" \
-        -D CUDA_npps_LIBRARY="${npps_lib}" \
+        "${cuda_lib_args[@]}" \
         -D CUDNN_INCLUDE_DIR=/usr/include/x86_64-linux-gnu \
         -D CUDNN_LIBRARY=/usr/lib/x86_64-linux-gnu/libcudnn.so \
         -D WITH_GTK=OFF \
@@ -1094,22 +1480,20 @@ install_opencv_cuda() {
         -D BUILD_opencv_python3=OFF \
         -D BUILD_JAVA=OFF \
         -D OPENCV_GENERATE_PKGCONFIG=ON \
-        -D OPENCV_ENABLE_NONFREE=OFF \
-        "${opencv_src_dir}"
+        -D OPENCV_ENABLE_NONFREE=OFF
 
     echo "Building (this can take a while)..."
-    if command -v ninja >/dev/null 2>&1; then
-        ninja -j"$(nproc)"
-        ninja install
-    else
-        make -j"$(nproc)"
-        make install
-    fi
+    run_cmd cmake --build "${build_dir}" --parallel "$(nproc)"
+    run_cmd cmake --install "${build_dir}"
 
     if [[ ! -f "${install_prefix}/include/opencv4/opencv2/cudaimgproc.hpp" ]]; then
         echo -e "\e[33mWarning: cudaimgproc.hpp is missing; the OpenCV CUDA modules were not built.\e[m"
     fi
+    echo "Source tree: ${opencv_src_dir}"
+}
 
+# Called from install_opencv_cuda, like build_opencv_cuda above.
+write_opencv_env() {
     # Same content lands in ~/.bashrc and in the sourceable env file, with $HOME left unexpanded
     local prefix_expr cuda_home_expr cuda_lib_path_expr
     prefix_expr="$(portable_home_path "${install_prefix}")"
@@ -1128,10 +1512,7 @@ export PKG_CONFIG_PATH=\"${prefix_expr}/lib/pkgconfig\${PKG_CONFIG_PATH:+:\${PKG
         echo "${nvidia_env_content}"
     } > "${env_file}"
 
-    cd "${previous_dir}"
-
     echo -e "\e[32mDone.\e[0m OpenCV ${opencv_version} installed into ${install_prefix}."
-    echo "Source tree: ${opencv_src_dir}"
     echo "Sourceable copy of the same env: ${env_file}"
 }
 
@@ -1180,7 +1561,9 @@ parse_args() {
                 shift
                 ;;
             --dependency)
-                option_dependency=true
+                # Removed: c-periphery is now part of --common
+                echo -e "\e[33mWarning: --dependency was removed; c-periphery is installed by --common. Running --common.\e[m"
+                option_common=true
                 shift
                 ;;
             --nvidia)
@@ -1197,6 +1580,10 @@ parse_args() {
                 ;;
             --runtime)
                 option_runtime=true
+                shift
+                ;;
+            --rebuild)
+                option_rebuild=true
                 shift
                 ;;
             -y)
@@ -1245,14 +1632,18 @@ main() {
         exit 0
     fi
 
-    if [[ "${option_common}" != true && "${option_ros}" != true \
-        && "${option_dependency}" != true && "${option_nvidia}" != true ]]; then
+    if [[ "${option_common}" != true && "${option_ros}" != true && "${option_nvidia}" != true ]]; then
         print_help
-        echo "No actionable option provided. Use --list, --common, --ros, --nvidia and/or --dependency."
+        echo "No actionable option provided. Use --list, --common, --ros and/or --nvidia."
         exit 1
     fi
 
     confirm_or_exit
+    ensure_sudo
+
+    # Runs on success or failure, after any step that wrote into dependency/ as root
+    trap 'fix_dependency_owner || true' EXIT
+    migrate_legacy_dependency_dir
 
     if [[ "${option_common}" == true ]]; then
         install_common
@@ -1264,10 +1655,6 @@ main() {
 
     if [[ "${option_nvidia}" == true ]]; then
         install_nvidia_stack
-    fi
-
-    if [[ "${option_dependency}" == true ]]; then
-        install_dependency
     fi
 }
 

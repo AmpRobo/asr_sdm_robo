@@ -26,7 +26,7 @@ Matplot++. Install the local prerequisites, then enable them explicitly:
 
 ```bash
 sudo apt install python3-dev python3-numpy python3-matplotlib python3-tk
-./install_matplotplusplus.sh
+./setup-dev-env.sh --common  # builds Matplot++ from source
 
 colcon build \
   --packages-select asr_sdm_head_following_control \

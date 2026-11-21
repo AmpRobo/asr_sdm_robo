@@ -44,13 +44,18 @@ find_path(OpenCV_CUDAIMGPROC_HEADER opencv2/cudaimgproc.hpp
     /usr/include
   PATH_SUFFIXES opencv4
 )
-if(NOT OpenCV_CUDAIMGPROC_HEADER)
-  message(WARNING
-    "OpenCV CUDA headers not found (opencv2/cudaimgproc.hpp). "
-    "Run: ./scripts/install_opencv_cuda.sh && source ./scripts/setup_opencv_cuda_env.sh "
-    "(see README.md). Skipping ${PROJECT_NAME} build.")
-  ament_package()
-  return()
+# The OpenCV found above must itself provide the CUDA modules; a cudaimgproc.hpp
+# lying around next to a non-CUDA OpenCV (e.g. Ubuntu's libopencv-dev) is not enough.
+if(NOT OpenCV_CUDAIMGPROC_HEADER OR NOT TARGET opencv_cudaimgproc)
+  message(FATAL_ERROR
+    "${PROJECT_NAME} requires OpenCV built with CUDA (opencv2/cudaimgproc.hpp and the "
+    "opencv_cudaimgproc module), but the OpenCV found at '${OpenCV_DIR}' "
+    "(version ${OpenCV_VERSION}) does not provide them.\n"
+    "Install it from the workspace root with:\n"
+    "  ./setup-dev-env.sh --nvidia\n"
+    "then open a new terminal or run 'source ~/.bashrc' (or "
+    "'source ~/.local/opencv-cuda/setup_env.sh') and rebuild. "
+    "To point at another CUDA OpenCV, set OpenCV_DIR to its lib/cmake/opencv4 directory.")
 endif()
 message(STATUS "OpenCV CUDA header: ${OpenCV_CUDAIMGPROC_HEADER}")
 message(STATUS "OpenCV Version: ${OpenCV_VERSION}")

@@ -15,6 +15,8 @@ find_package(cv_bridge REQUIRED)
 find_package(camera_model REQUIRED)
 find_package(message_filters REQUIRED)
 find_package(OpenCV 4 REQUIRED)
+# camera_model's public headers (CataCamera.h) include ceres/rotation.h
+find_package(Ceres REQUIRED)
 find_package(visualization_msgs REQUIRED)
 find_package(nav_msgs REQUIRED)
 find_package(geometry_msgs REQUIRED)
@@ -31,7 +33,7 @@ add_executable(ar_demo_node src/ar_demo_node.cpp)
 
 ament_target_dependencies(ar_demo_node rclcpp rcpputils std_msgs sensor_msgs geometry_msgs visualization_msgs nav_msgs cv_bridge camera_model image_transport)
 
-target_link_libraries(ar_demo_node ${OpenCV_LIBS}) 
+target_link_libraries(ar_demo_node ${OpenCV_LIBS} ${CERES_LIBRARIES})
 
 # Install nodes
 install(

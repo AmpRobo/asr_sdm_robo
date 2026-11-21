@@ -1,7 +1,11 @@
 # Slint C++ API 安装说明
 
 本文说明如何从本地源码编译并安装 Slint C++ API。源码目录为
-`/home/michael/Documents/code/dependency/slint`，CMake 工程版本为 1.19.0。
+`dependency/slint-1.19.0`（与 `asr_sdm_robo` 并列的 `../dependency`），CMake 工程版本为 1.19.0。
+
+`./setup-dev-env.sh --common` 会自动完成下面第 2–5 节：安装系统依赖，按需用 rustup
+安装或升级 Rust（不低于 1.95），把源码下载到 `dependency/slint-1.19.0`，编译并安装到
+`/usr/local`。以下为手动步骤。
 
 系统范围安装使用 `/usr/local`，需要 `sudo`。没有免密 sudo 时，可以安装到
 `~/.local`。
@@ -54,8 +58,8 @@ rustup 会把 `$HOME/.cargo/env` 写入 `~/.bashrc`。新开的终端一般可�
 安装到 `/usr/local`：
 
 ```bash
-cd /home/michael/Documents/code/dependency/slint
-mkdir -p cppbuild && cd cppbuild
+cd ../dependency/slint-1.19.0
+mkdir -p build && cd build
 cmake -GNinja -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=/usr/local ..
 cmake --build .
 ```
@@ -67,7 +71,7 @@ cmake -GNinja -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX="$HOME/.local" .
 cmake --build .
 ```
 
-`cppbuild` 已经按 `CMAKE_INSTALL_PREFIX=$HOME/.local` 配置并完成 Release 编译时，
+`build` 已经按 `CMAKE_INSTALL_PREFIX=$HOME/.local` 配置并完成 Release 编译时，
 不必为了更换安装位置而重新编译。安装命令里的 `--prefix` 会覆盖配置时的前缀。
 
 ## 5. 安装
@@ -77,7 +81,7 @@ cmake --build .
 构建目录已经存在时：
 
 ```bash
-cd /home/michael/Documents/code/dependency/slint/cppbuild
+cd ../dependency/slint-1.19.0/build
 sudo cmake --install . --prefix /usr/local
 ```
 
@@ -101,7 +105,7 @@ sudo cmake --install .
 不需要 sudo：
 
 ```bash
-cd /home/michael/Documents/code/dependency/slint/cppbuild
+cd ../dependency/slint-1.19.0/build
 cmake --install . --prefix "$HOME/.local"
 ```
 
