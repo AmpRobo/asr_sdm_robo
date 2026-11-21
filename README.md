@@ -10,6 +10,9 @@ Workspace for Amphibious Snake-like Robot with Screw-drive Mechanism
 `setup-dev-env.sh` installs the development dependencies. It targets **Ubuntu 24.04 (noble)**, and the NVIDIA role additionally requires **x86_64**. Each role is opt-in, and re-running the script is safe: finished steps are detected and skipped. Run it as your normal user; it calls `sudo` itself where needed.
 
 ```sh
+# Make the script executable (needed once, e.g. after a fresh clone)
+sudo chmod +x setup-dev-env.sh
+
 # Show every installable component with its versions
 ./setup-dev-env.sh --list
 
@@ -271,6 +274,9 @@ colcon build --symlink-install --parallel-workers 2
 `setup-dev-env.sh` 用于安装开发依赖。目标环境为 **Ubuntu 24.04（noble）**，其中 NVIDIA 部分还要求 **x86_64** 架构。各类别均需显式指定，脚本可重复执行：已完成的步骤会被检测并跳过。请以普通用户运行，脚本会在需要时自行调用 `sudo`。
 
 ```sh
+# 赋予脚本可执行权限（只需一次，例如刚克隆仓库后）
+sudo chmod +x setup-dev-env.sh
+
 # 列出所有可安装组件及其版本
 ./setup-dev-env.sh --list
 
