@@ -1,0 +1,15 @@
+#!/bin/sh
+# Starts gnome-shell. In a GNOME Remote Desktop (headless, Remote=yes) session it
+# makes the shell use Mesa's EGL instead of NVIDIA's: with NVIDIA EGL, headless
+# mutter 46 segfaults as soon as an Xwayland GL window such as rviz2 opens.
+# Local (seat) logins are left unchanged.
+#
+# Installed to ~/.local/bin by asr_sdm_robo/docs/remote_desktop/install.sh and
+# started by ~/.config/systemd/user/org.gnome.Shell@wayland.service.d/remote-mesa-egl.conf
+
+session="$(loginctl show-user "$(id -u)" -p Display --value 2>/dev/null)"
+if [ -n "${session}" ] && [ "$(loginctl show-session "${session}" -p Remote --value 2>/dev/null)" = "yes" ]; then
+    export __EGL_VENDOR_LIBRARY_FILENAMES=/usr/share/glvnd/egl_vendor.d/50_mesa.json
+fi
+
+exec /usr/bin/gnome-shell "$@"

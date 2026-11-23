@@ -14,6 +14,7 @@ option_runtime=false
 option_yes=false
 option_list=false
 option_rebuild=false
+option_purge_nvidia=false
 
 # Set when apt sources change so the next apt_update really refreshes the index
 apt_index_stale=true
@@ -103,6 +104,9 @@ print_help() {
     echo "                          cuBLAS, NPP, cuDNN, TensorRT ${tensorrt_version}, OpenCV ${opencv_version} + CUDA)"
     echo "  -y                      Use non-interactive mode"
     echo "  -v                      Enable debug outputs"
+    echo "  --purge-nvidia          Purge every NVIDIA-related package (driver, kernel modules, CUDA, cuDNN,"
+    echo "                          TensorRT, NVIDIA apt repos), the TensorRT pin, OpenCV + CUDA and the"
+    echo "                          ~/.bashrc exports. Combined with --nvidia, the stack is reinstalled afterwards"
     echo "  --no-nvidia             Disable installation of the NVIDIA-related roles ('cuda' and 'tensorrt')"
     echo "  --no-cuda-drivers       Keep the current NVIDIA driver (skip the driver install)"
     echo "  --runtime               Disable installation dev package of role 'cuda' and 'tensorrt'"
@@ -127,6 +131,7 @@ print_list() {
     echo "  --ros         ROS 2        Install ROS 2 ${ros_distro} desktop + rosdep/colcon (Ubuntu 24.04),"
     echo "                             and set ROS_DOMAIN_ID=${ros_domain_id} in ~/.bashrc"
     echo "  --nvidia      NVIDIA       Install the GPU stack below (Ubuntu 24.04, x86_64)"
+    echo "  --purge-nvidia             Purge every NVIDIA-related package and OpenCV + CUDA (runs before --nvidia)"
     echo ""
     echo "  Source-built components of --common (sources and builds in ${dependency_dir}):"
     echo "    Slint           ${slint_version} C++ API into ${slint_install_prefix}"
@@ -155,6 +160,8 @@ print_list() {
     echo "  ./setup-dev-env.sh --nvidia"
     echo "  ./setup-dev-env.sh --nvidia --runtime --no-cuda-drivers"
     echo "  ./setup-dev-env.sh --nvidia --rebuild"
+    echo "  ./setup-dev-env.sh --purge-nvidia"
+    echo "  ./setup-dev-env.sh --purge-nvidia --nvidia"
     echo "  ./setup-dev-env.sh --ros --common --nvidia -y"
 }
 
@@ -169,7 +176,12 @@ confirm_or_exit() {
         return
     fi
 
-    echo -e "\e[33mThis will install the selected development packages.\e[m"
+    if [[ "${option_purge_nvidia}" == true ]]; then
+        echo -e "\e[31mThis will PURGE all NVIDIA packages (driver, CUDA, cuDNN, TensorRT) and OpenCV + CUDA.\e[m"
+    fi
+    if [[ "${option_common}" == true || "${option_ros}" == true || "${option_nvidia}" == true ]]; then
+        echo -e "\e[33mThis will install the selected development packages.\e[m"
+    fi
     read -rp "> Continue? [y/N] " answer
     if ! [[ ${answer:0:1} =~ y|Y ]]; then
         echo -e "\e[33mCancelled.\e[0m"
@@ -1635,6 +1647,78 @@ export PKG_CONFIG_PATH=\"${prefix_expr}/lib/pkgconfig\${PKG_CONFIG_PATH:+:\${PKG
     echo "Sourceable copy of the same env: ${env_file}"
 }
 
+installed_nvidia_packages() {
+    # Prints every installed (or removed-but-not-purged) package of the NVIDIA stack:
+    # driver, kernel modules, CUDA, cuDNN, TensorRT, NCCL and the NVIDIA apt repo packages
+    dpkg-query -W -f='${Package} ${db:Status-Abbrev}\n' \
+        '*nvidia*' 'cuda*' 'libcuda*' 'libcudnn*' 'libcublas*' 'libcufft*' 'libcufile*' \
+        'libcurand*' 'libcusolver*' 'libcusparse*' 'libcupti*' 'libnpp*' 'libnvrtc*' \
+        'libnvjitlink*' 'libnvjpeg*' 'libnvvm*' 'libnvtoolsext*' 'libnvblas*' 'libnccl*' \
+        'libnvfatbin*' 'libcuobjclient*' \
+        'libnvinfer*' 'libnvonnxparsers*' 'libnvparsers*' 'python3-libnvinfer*' 'tensorrt*' \
+        'nv-tensorrt-local-repo-*' 'cudnn-local-repo-*' 'nsight-*' 2>/dev/null |
+        awk '$2 ~ /^.[^n]/ { print $1 }' |
+        # linux-firmware-* belongs to the generic linux-firmware set (also used by nouveau), and
+        # removing it would drag linux-firmware and the kernel metapackages along
+        grep -v '^linux-firmware' | sort -u || true   # dpkg-query fails when nothing matches
+    # libxnvctrl0 is deliberately not matched: libhwloc-plugins depends on it, so purging it would
+    # also remove OpenMPI, PCL, VTK, libopencv-dev and ros-jazzy-desktop. autoremove drops it when unused.
+}
+
+purge_nvidia_stack() {
+    local opencv_prefix="${OPENCV_CUDA_PREFIX:-${HOME}/.local/opencv-cuda}"
+    local tensorrt_pin_file="/etc/apt/preferences.d/asr-sdm-tensorrt-pin"
+    local -a packages
+    local -a collateral
+
+    echo -e "\e[36mPurging the NVIDIA stack (driver, CUDA, cuDNN, TensorRT, OpenCV + CUDA)...\e[m"
+
+    mapfile -t packages < <(installed_nvidia_packages)
+    if ((${#packages[@]} > 0)); then
+        echo "Packages to purge (${#packages[@]}):"
+        printf '  %s\n' "${packages[@]}"
+
+        # Refuse when apt would also remove packages outside the NVIDIA stack (reverse dependencies)
+        mapfile -t collateral < <(
+            comm -23 \
+                <(apt-get -s purge "${packages[@]}" 2>/dev/null | awk '$1 == "Purg" { print $2 }' | sort -u) \
+                <(printf '%s\n' "${packages[@]}")
+        )
+        if ((${#collateral[@]} > 0)); then
+            echo -e "\e[31mPurging these would also remove packages outside the NVIDIA stack:\e[m"
+            printf '  %s\n' "${collateral[@]}"
+            if [[ "${option_yes}" == true ]]; then
+                echo "Aborting (-y). Purge them by hand, or remove the packages that depend on them first."
+                return 1
+            fi
+            echo "Review apt's list below carefully before confirming."
+        fi
+
+        apt_install purge "${packages[@]}"
+        apt_install autoremove --purge
+        # Purging cuda-keyring / the local repo packages drops their apt sources
+        mark_apt_sources_changed
+    else
+        echo "No NVIDIA packages installed."
+    fi
+
+    if [[ -e "${tensorrt_pin_file}" ]]; then
+        run_cmd sudo rm -f "${tensorrt_pin_file}"
+    fi
+
+    # OpenCV built against the purged CUDA cannot load anymore
+    if [[ -d "${opencv_prefix}" ]]; then
+        run_cmd rm -rf "${opencv_prefix}"
+    fi
+
+    if remove_bashrc_block "asr_sdm nvidia env"; then
+        echo "Removed 'asr_sdm nvidia env' from ~/.bashrc."
+    fi
+
+    echo -e "\e[32mDone.\e[0m NVIDIA stack purged; reboot to unload the driver."
+    echo "Sources in ${dependency_dir} are kept (delete opencv-* there to free space)."
+}
+
 install_nvidia_stack() {
     if [[ "${option_no_nvidia}" == true ]]; then
         echo -e "\e[33mSkipping the NVIDIA stack (--no-nvidia).\e[m"
@@ -1687,6 +1771,10 @@ parse_args() {
                 ;;
             --nvidia)
                 option_nvidia=true
+                shift
+                ;;
+            --purge-nvidia)
+                option_purge_nvidia=true
                 shift
                 ;;
             --no-nvidia)
@@ -1751,9 +1839,10 @@ main() {
         exit 0
     fi
 
-    if [[ "${option_common}" != true && "${option_ros}" != true && "${option_nvidia}" != true ]]; then
+    if [[ "${option_common}" != true && "${option_ros}" != true && "${option_nvidia}" != true \
+        && "${option_purge_nvidia}" != true ]]; then
         print_help
-        echo "No actionable option provided. Use --list, --common, --ros and/or --nvidia."
+        echo "No actionable option provided. Use --list, --common, --ros, --nvidia and/or --purge-nvidia."
         exit 1
     fi
 
@@ -1763,6 +1852,11 @@ main() {
     # Runs on success or failure, after any step that wrote into dependency/ as root
     trap 'fix_dependency_owner || true' EXIT
     migrate_legacy_dependency_dir
+
+    # Purge before any install so --purge-nvidia --nvidia gives a clean reinstall
+    if [[ "${option_purge_nvidia}" == true ]]; then
+        purge_nvidia_stack
+    fi
 
     if [[ "${option_common}" == true ]]; then
         install_common

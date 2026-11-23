@@ -39,6 +39,7 @@ Modifiers:
 | Flag | Effect |
 |---|---|
 | `-y` | Non-interactive mode (skips the confirmation prompt) |
+| `--purge-nvidia` | Purge every NVIDIA-related package (driver, kernel modules, CUDA, cuDNN, TensorRT, NCCL, the CUDA / TensorRT apt repo packages), the TensorRT pin, `~/.local/opencv-cuda` and the NVIDIA `~/.bashrc` exports. Runs before any install, so `--purge-nvidia --nvidia` gives a clean reinstall. Reboot afterwards |
 | `--no-nvidia` | Skip the whole NVIDIA role |
 | `--no-cuda-drivers` | Install the NVIDIA role but keep the current driver |
 | `--runtime` | Install runtime packages only, without the CUDA and TensorRT dev packages |
@@ -144,6 +145,9 @@ sudo apt install -y qt6-base-dev qt6-declarative-dev qt6-tools-dev qml6-module-q
 ros2 run asr_sdm_monitor asr_sdm_monitor
 ```
 
+### GNOME Remote Desktop
+
+If opening rviz2 in a GNOME Remote Desktop (RDP) remote-login session closes the whole remote desktop (`GNOME Shell crashed with signal 11` in the journal), see [`docs/remote_desktop`](docs/remote_desktop/README.md) for the cause and a per-user workaround.
 
 ## Radxa Zero Setup
 
@@ -410,6 +414,10 @@ sudo apt install -y qt6-base-dev qt6-declarative-dev qt6-tools-dev qml6-module-q
 # 启动 monitor
 ros2 run asr_sdm_monitor asr_sdm_monitor
 ```
+
+### GNOME 远程桌面
+
+如果在 GNOME 远程桌面（RDP）远程登录会话中一打开 rviz2 整个远程桌面就闪退（journal 中有 `GNOME Shell crashed with signal 11`），原因和用户级解决办法见 [`docs/remote_desktop`](docs/remote_desktop/README.md#中文)。
 
 ## Radxa Zero 配置
 
