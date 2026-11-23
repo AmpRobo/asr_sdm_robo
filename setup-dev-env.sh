@@ -26,11 +26,18 @@ ros_domain_id="100"
 ros_apt_source_fallback_version="1.2.0"
 
 # Versions of the NVIDIA stack (see src/asr_sdm_universe/common/tensorrt_common/README.md)
-nvidia_driver_branch="595"
-cuda_version="13.2"
-cuda_apt_suffix="13-2"          # apt package suffix for CUDA 13.2
+# The driver is the newest nvidia-driver-*-open in Ubuntu's restricted archive
+# (prebuilt kernel modules, no DKMS). CUDA must not be newer than the CUDA version
+# that driver supports ("CUDA UMD Version" in nvidia-smi), otherwise PTX JIT fails
+# with "the provided PTX was compiled with an unsupported toolchain". cuDNN and
+# TensorRT are the newest NVIDIA CUDA-repo builds for that CUDA version.
+# OpenCV 4.14.0 is the newest 4.x release; 5.x changes the API.
+nvidia_driver_branch="615"      # newest nvidia-driver-*-open in Ubuntu noble; supports CUDA <= 13.4
+cuda_version="13.4"
+cuda_apt_suffix="13-4"          # apt package suffix for CUDA 13.4
 cudnn_cuda_major="13"           # cuDNN 9 flavour matching the CUDA major version
-tensorrt_version="11.1.0"
+tensorrt_version="11.4.0"       # newest TensorRT with a +cuda13.4 build
+tensorrt_cuda_tag="cuda${cuda_version}"   # TensorRT build to pick, e.g. 11.4.0.106-1+cuda13.4
 opencv_version="4.14.0"
 
 # Everything this script downloads or builds lives in a dependency/ folder next
@@ -97,7 +104,7 @@ print_help() {
     echo "  -y                      Use non-interactive mode"
     echo "  -v                      Enable debug outputs"
     echo "  --no-nvidia             Disable installation of the NVIDIA-related roles ('cuda' and 'tensorrt')"
-    echo "  --no-cuda-drivers       Disable installation of 'cuda-drivers' in the role 'cuda'"
+    echo "  --no-cuda-drivers       Keep the current NVIDIA driver (skip the driver install)"
     echo "  --runtime               Disable installation dev package of role 'cuda' and 'tensorrt'"
     echo "  --rebuild               Rebuild source-built libraries (Slint, matplot++, Pinocchio stack,"
     echo "                          c-periphery, OpenCV)"
@@ -131,7 +138,7 @@ print_list() {
     echo "    c-periphery     ${periphery_version} static library into ${periphery_install_prefix}"
     echo ""
     echo "  Components of --nvidia:"
-    echo "    NVIDIA driver   ${nvidia_driver_branch} (cuda-drivers-${nvidia_driver_branch}; skip with --no-cuda-drivers)"
+    echo "    NVIDIA driver   ${nvidia_driver_branch} (nvidia-driver-${nvidia_driver_branch}-open + prebuilt kernel modules; skip with --no-cuda-drivers)"
     echo "    CUDA Toolkit    ${cuda_version} (cuda-toolkit-${cuda_apt_suffix})"
     echo "    CUDA cuBLAS     libcublas-${cuda_apt_suffix}"
     echo "    CUDA NPP        libnpp-${cuda_apt_suffix} (plus cuFFT, required by OpenCV CUDA)"
@@ -1084,11 +1091,13 @@ write_bashrc_block() {
 }
 
 apt_candidate_version() {
-    # apt_candidate_version <package> <version-prefix>
+    # apt_candidate_version <package> <version-prefix> [<substring>]
+    # Prints the newest apt version starting with <version-prefix> (and containing <substring>)
     local pkg="$1"
     local prefix="$2"
-    apt-cache madison "${pkg}" 2>/dev/null | awk -F'|' -v p="${prefix}" '
-        { gsub(/^[ \t]+|[ \t]+$/, "", $2); if (index($2, p) == 1) { print $2; exit } }'
+    local substring="${3:-}"
+    apt-cache madison "${pkg}" 2>/dev/null | awk -F'|' -v p="${prefix}" -v s="${substring}" '
+        { gsub(/^[ \t]+|[ \t]+$/, "", $2); if (index($2, p) == 1 && index($2, s) > 0) { print $2; exit } }'
 }
 
 check_nvidia_prerequisites() {
@@ -1147,31 +1156,107 @@ detect_nvidia_driver_version() {
     printf '%s' "${version}"
 }
 
+installed_nvidia_driver_package() {
+    # Prints the highest installed Ubuntu driver package (e.g. nvidia-driver-615-open), or nothing
+    dpkg-query -W -f='${Package} ${db:Status-Abbrev}\n' 'nvidia-driver-*' 2>/dev/null |
+        awk '$2 == "ii" && $1 ~ /^nvidia-driver-[0-9]+(-open)?$/ { print $1 }' |
+        sort -t- -k3,3n | tail -1 || true   # dpkg-query fails when nothing matches
+}
+
+installed_kernel_versions() {
+    # Prints every kernel that can be booted (one per line), e.g. 7.0.0-43-generic
+    local image
+
+    for image in /boot/vmlinuz-*; do
+        [[ -e "${image}" ]] || continue
+        printf '%s\n' "${image#/boot/vmlinuz-}"
+    done
+}
+
+installed_kernel_flavours() {
+    # Prints the installed kernel metapackage flavours, e.g. generic-hwe-24.04 for linux-image-generic-hwe-24.04
+    dpkg-query -W -f='${Package} ${db:Status-Abbrev}\n' 'linux-image-*' 2>/dev/null |
+        awk '$2 == "ii" { sub(/^linux-image-/, "", $1); print $1 }' |
+        grep -v -E '^([0-9]|unsigned-|uc-)' || true
+}
+
+kernels_missing_nvidia_module() {
+    # Prints the installed kernels that have no nvidia.ko, i.e. would boot without the driver
+    local kver
+
+    while IFS= read -r kver; do
+        [[ -n "${kver}" ]] || continue
+        if ! modinfo -k "${kver}" -F version nvidia >/dev/null 2>&1; then
+            printf '%s\n' "${kver}"
+        fi
+    done < <(installed_kernel_versions)
+}
+
+nvidia_module_packages() {
+    # nvidia_module_packages <driver-package>, e.g. nvidia-driver-615-open
+    # Prints Ubuntu's prebuilt module packages for that driver: the kernel-flavour
+    # metapackage (so future kernel updates pull in a matching nvidia.ko) plus the
+    # per-kernel package of every kernel already installed
+    local prefix="linux-modules-nvidia-${1#nvidia-driver-}"
+    local item
+
+    while IFS= read -r item; do
+        [[ -n "${item}" ]] || continue
+        if apt-cache show "${prefix}-${item}" >/dev/null 2>&1; then
+            printf '%s\n' "${prefix}-${item}"
+        fi
+    done < <(installed_kernel_flavours; installed_kernel_versions)
+}
+
 install_nvidia_driver() {
-    local installed_version
+    local driver_package
     local installed_branch
+    local installed_version
+    local -a missing_kernels
+    local -a packages
 
     if [[ "${option_no_cuda_drivers}" == true ]]; then
         echo -e "\e[33mSkipping NVIDIA driver (--no-cuda-drivers).\e[m"
         return 0
     fi
 
-    installed_version="$(detect_nvidia_driver_version)"
-    installed_branch="${installed_version%%.*}"
+    # The driver comes from Ubuntu's restricted archive with prebuilt, signed kernel
+    # modules (no DKMS). Each kernel needs its own linux-modules-nvidia-* package, so
+    # a kernel installed without one boots with no driver at all.
+    driver_package="$(installed_nvidia_driver_package)"
+    installed_branch="$(sed -E 's/^nvidia-driver-([0-9]+).*/\1/' <<<"${driver_package}")"
 
-    if [[ "${installed_branch}" =~ ^[0-9]+$ ]]; then
-        if ((installed_branch >= nvidia_driver_branch)); then
-            echo -e "\e[32mNVIDIA driver ${installed_version} already installed (branch >= ${nvidia_driver_branch}), skipping.\e[m"
+    if [[ -z "${driver_package}" ]]; then
+        installed_version="$(detect_nvidia_driver_version)"
+        if [[ "${installed_version%%.*}" =~ ^[0-9]+$ ]] && ((${installed_version%%.*} >= nvidia_driver_branch)); then
+            echo -e "\e[33mNVIDIA driver ${installed_version} found but not from an Ubuntu nvidia-driver-* package; leaving it alone.\e[m"
             return 0
         fi
-        echo -e "\e[36mNVIDIA driver ${installed_version} is older than branch ${nvidia_driver_branch}; upgrading...\e[m"
+        driver_package="nvidia-driver-${nvidia_driver_branch}-open"
+        echo -e "\e[36mNo NVIDIA driver package detected; installing ${driver_package}...\e[m"
+    elif ((installed_branch < nvidia_driver_branch)); then
+        echo -e "\e[36m${driver_package} is older than branch ${nvidia_driver_branch}; upgrading...\e[m"
+        driver_package="nvidia-driver-${nvidia_driver_branch}-open"
     else
-        echo -e "\e[36mNo NVIDIA driver detected; installing branch ${nvidia_driver_branch}...\e[m"
+        mapfile -t missing_kernels < <(kernels_missing_nvidia_module)
+        if ((${#missing_kernels[@]} == 0)); then
+            echo -e "\e[32m${driver_package} installed with a module for every kernel, skipping.\e[m"
+            return 0
+        fi
+        echo -e "\e[36m${driver_package} installed, but these kernels have no nvidia module: ${missing_kernels[*]}\e[m"
     fi
 
-    apt_install install "cuda-drivers-${nvidia_driver_branch}"
+    mapfile -t packages < <(nvidia_module_packages "${driver_package}")
+    apt_install install "${driver_package}" "${packages[@]}"
 
-    echo -e "\e[32mDone.\e[0m Driver ${nvidia_driver_branch} installed; reboot before running 'nvidia-smi'."
+    mapfile -t missing_kernels < <(kernels_missing_nvidia_module)
+    if ((${#missing_kernels[@]} > 0)); then
+        echo -e "\e[33mWarning: no prebuilt nvidia module for kernel(s) ${missing_kernels[*]}; they will boot without the driver.\e[m"
+        echo "Boot a different kernel from GRUB, or remove the kernel(s) above."
+    fi
+
+    echo -e "\e[32mDone.\e[0m ${driver_package} installed; reboot before running 'nvidia-smi'."
+    echo "Use 'sudo apt full-upgrade' (not 'apt upgrade') so kernel updates also install their nvidia module."
 }
 
 install_cuda_toolkit() {
@@ -1204,7 +1289,7 @@ install_cuda_toolkit() {
     apt_install install "${cuda_packages[@]}"
 
     # Superseded by the OpenCV env below once that build succeeds
-    nvidia_env_content="export CUDA_HOME=\"/usr/local/cuda\"
+    nvidia_env_content="export CUDA_HOME=\"/usr/local/cuda-${cuda_version}\"
 export PATH=\"\${CUDA_HOME}/bin:\${PATH}\"
 export LD_LIBRARY_PATH=\"\${CUDA_HOME}/lib64\${LD_LIBRARY_PATH:+:\${LD_LIBRARY_PATH}}\""
 
@@ -1267,16 +1352,36 @@ install_tensorrt() {
         return 0
     fi
 
-    # Pin every package to the same TensorRT release when that version is available.
-    pinned_version="$(apt_candidate_version "${tensorrt_packages[0]}" "${tensorrt_version}")"
+    # Pin the whole TensorRT family to one release. Pinning only the requested packages
+    # (pkg=version) is not enough: their exact-version dependencies (libnvinfer11, ...)
+    # would still resolve to the newest candidate from the CUDA network repo (priority 600).
+    # The preferences file also stops 'apt upgrade' from moving TensorRT to a newer release.
+    # Prefer the build for the installed CUDA (+cuda13.4), else the newest CUDA 13 build
+    pinned_version="$(apt_candidate_version "${tensorrt_packages[0]}" "${tensorrt_version}" "+${tensorrt_cuda_tag}")"
+    if [[ -z "${pinned_version}" ]]; then
+        pinned_version="$(apt_candidate_version "${tensorrt_packages[0]}" "${tensorrt_version}" "+cuda${cuda_version%%.*}.")"
+    fi
     if [[ -n "${pinned_version}" ]]; then
-        echo "Pinning TensorRT packages to ${pinned_version}."
-        local -a pinned_packages=()
-        local pkg
-        for pkg in "${tensorrt_packages[@]}"; do
-            pinned_packages+=("${pkg}=${pinned_version}")
-        done
-        apt_install install "${pinned_packages[@]}"
+        local pin_file="/etc/apt/preferences.d/asr-sdm-tensorrt-pin"
+        local -a installed_trt_packages=()
+
+        echo "Pinning TensorRT packages to ${pinned_version} (${pin_file})."
+        echo "Running: sudo tee ${pin_file}"
+        sudo tee "${pin_file}" >/dev/null <<EOF
+# Written by asr_sdm_robo setup-dev-env.sh: keep every TensorRT package on ${tensorrt_version}
+Package: libnvinfer* libnvonnxparsers* python3-libnvinfer* tensorrt*
+Pin: version ${pinned_version}
+Pin-Priority: 1001
+EOF
+
+        # Move TensorRT packages that are already installed (possibly a newer release) along too
+        mapfile -t installed_trt_packages < <(
+            dpkg-query -W -f='${Package} ${db:Status-Abbrev}\n' \
+                'libnvinfer*' 'libnvonnxparsers*' 'python3-libnvinfer*' 'tensorrt*' 2>/dev/null |
+                awk '$2 == "ii" { print $1 }'
+        )
+
+        apt_install install --allow-downgrades "${tensorrt_packages[@]}" "${installed_trt_packages[@]}"
     else
         echo -e "\e[33mTensorRT ${tensorrt_version} not available in apt; installing the default candidate.\e[m"
         apt_install install "${tensorrt_packages[@]}"
@@ -1363,6 +1468,15 @@ install_opencv_cuda() {
         libtiff-dev \
         libtbb-dev
 
+    # Prefer the versioned toolkit: /usr/local/cuda is an alternatives link that can
+    # point at another (or a removed) CUDA release, and so can an inherited CUDA_HOME
+    if [[ -n "${CUDA_HOME:-}" && ! -x "${CUDA_HOME}/bin/nvcc" ]]; then
+        echo -e "\e[33mIgnoring CUDA_HOME=${CUDA_HOME} (no nvcc there).\e[m"
+        unset CUDA_HOME
+    fi
+    if [[ -x "/usr/local/cuda-${cuda_version}/bin/nvcc" ]]; then
+        export CUDA_HOME="/usr/local/cuda-${cuda_version}"
+    fi
     if [[ -z "${CUDA_HOME:-}" ]]; then
         if [[ -x /usr/local/cuda/bin/nvcc ]]; then
             export CUDA_HOME=/usr/local/cuda
@@ -1411,7 +1525,12 @@ install_opencv_cuda() {
     cuda_arch_bin="${OPENCV_CUDA_ARCH_BIN:-}"
     if [[ -z "${cuda_arch_bin}" ]]; then
         cuda_arch_bin="$(nvidia-smi --query-gpu=compute_cap --format=csv,noheader 2>/dev/null | head -1 | tr -d ' ' || true)"
-        cuda_arch_bin="${cuda_arch_bin:-8.6}"
+        # nvidia-smi prints errors on stdout (e.g. "Driver/library version mismatch"
+        # right after a driver install, before the reboot), so accept only "X.Y"
+        if [[ ! "${cuda_arch_bin}" =~ ^[0-9]+\.[0-9]+$ ]]; then
+            echo -e "\e[33mCould not read the GPU compute capability from nvidia-smi; using 8.6 (set OPENCV_CUDA_ARCH_BIN to override).\e[m"
+            cuda_arch_bin="8.6"
+        fi
     fi
 
     echo "  CUDA_HOME       = ${CUDA_HOME}"

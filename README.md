@@ -32,7 +32,7 @@ sudo chmod +x setup-dev-env.sh
 |---|---|
 | `--common` | Build toolchain (`build-essential`, `cmake`, `ninja-build`, `ccache`, `gdb`, `clang-format`), `git` / `git-lfs`, Python 3 dev packages, Qt 6 + QML modules, Coral GUI libraries (OpenSceneGraph, Vulkan, Assimp), PCL, glog, `xacro`, everyday CLI tools, Rust stable (>= 1.95, via rustup), and these libraries built from source: [Slint](https://slint.dev) 1.19.0 C++ and [Matplot++](https://github.com/alandefreitas/matplotplusplus) 1.2.2 into `/usr/local`, [Pinocchio](https://github.com/stack-of-tasks/pinocchio) 4.1.0 + eigenpy 3.13.0 + Coal 3.0.4 (with Python bindings) into `/opt/openrobots`, and the [c-periphery](https://github.com/AmpRobo/c-periphery) 2.5.0 static library into `/usr/local` |
 | `--ros` | ROS 2 Jazzy desktop, `rosdep`, `colcon`, and the matching `~/.bashrc` entries |
-| `--nvidia` | NVIDIA driver 595, CUDA Toolkit 13.2, cuBLAS / NPP / cuFFT, cuDNN 9, TensorRT 11.1.0, and OpenCV 4.14.0 built with CUDA |
+| `--nvidia` | NVIDIA driver 615, CUDA Toolkit 13.4, cuBLAS / NPP / cuFFT, cuDNN 9, TensorRT 11.4.0, and OpenCV 4.14.0 built with CUDA |
 
 Modifiers:
 
@@ -54,8 +54,11 @@ Notes on the `--common` role:
 
 Notes on the `--nvidia` role:
 
-- The driver is only installed when the current one is older than branch 595, so an up-to-date machine is left untouched. **Reboot** after a driver install before `nvidia-smi` works.
+- The driver is Ubuntu's `nvidia-driver-615-open` with prebuilt kernel modules (`linux-modules-nvidia-615-open-*`). It is installed when missing or older than branch 615, and re-runs also add the module for any installed kernel that lacks one. **Reboot** after a driver install before `nvidia-smi` works.
+- CUDA is kept at 13.4, the newest version driver 615 supports (`CUDA UMD Version` in `nvidia-smi`). A newer toolkit runs native GPU code but breaks PTX JIT (`the provided PTX was compiled with an unsupported toolchain`), which OpenCV and TensorRT plugins can hit.
+- Each kernel needs its own NVIDIA module package. Upgrade with `sudo apt full-upgrade`: `apt upgrade` and unattended-upgrades can keep the module package back while still installing a new kernel, which then boots without the driver. If that happens, re-run `./setup-dev-env.sh --nvidia`.
 - TensorRT is not publicly downloadable. Register the NVIDIA local apt repo first (`nv-tensorrt-local-repo-ubuntu2404-*.deb` from [NVIDIA TensorRT](https://developer.nvidia.com/tensorrt)); otherwise the script prints instructions and skips that step.
+- All TensorRT packages are pinned to 11.4.0 (the `+cuda13.4` build) via `/etc/apt/preferences.d/asr-sdm-tensorrt-pin`, so the CUDA network repo cannot pull them to a newer release; a newer TensorRT already installed is downgraded. Delete that file to lift the pin.
 - OpenCV is built from source into `~/.local/opencv-cuda`, which takes a while. Later runs skip the build while 4.14.0 with the CUDA modules is installed there (use `--rebuild` to force it). Ubuntu's `libopencv-dev` has no CUDA modules and cannot replace it.
 - The resulting `CUDA_HOME`, `OpenCV_DIR`, `LD_LIBRARY_PATH` and `PKG_CONFIG_PATH` exports are written to `~/.bashrc`. Run `source ~/.bashrc` before `colcon build`, or source `~/.local/opencv-cuda/setup_env.sh` for a single shell.
 
@@ -296,7 +299,7 @@ sudo chmod +x setup-dev-env.sh
 |---|---|
 | `--common` | 编译工具链（`build-essential`、`cmake`、`ninja-build`、`ccache`、`gdb`、`clang-format`）、`git` / `git-lfs`、Python 3 开发包、Qt 6 与 QML 模块、Coral GUI 依赖库（OpenSceneGraph、Vulkan、Assimp）、PCL、glog、`xacro`、常用命令行工具、Rust stable（>= 1.95，通过 rustup），以及从源码编译的库：安装到 `/usr/local` 的 [Slint](https://slint.dev) 1.19.0 C++ 与 [Matplot++](https://github.com/alandefreitas/matplotplusplus) 1.2.2，安装到 `/opt/openrobots` 的 [Pinocchio](https://github.com/stack-of-tasks/pinocchio) 4.1.0 + eigenpy 3.13.0 + Coal 3.0.4（含 Python 绑定），以及安装到 `/usr/local` 的 [c-periphery](https://github.com/AmpRobo/c-periphery) 2.5.0 静态库 |
 | `--ros` | ROS 2 Jazzy desktop、`rosdep`、`colcon`，并写入对应的 `~/.bashrc` 配置 |
-| `--nvidia` | NVIDIA 驱动 595、CUDA Toolkit 13.2、cuBLAS / NPP / cuFFT、cuDNN 9、TensorRT 11.1.0，以及启用 CUDA 编译的 OpenCV 4.14.0 |
+| `--nvidia` | NVIDIA 驱动 615、CUDA Toolkit 13.4、cuBLAS / NPP / cuFFT、cuDNN 9、TensorRT 11.4.0，以及启用 CUDA 编译的 OpenCV 4.14.0 |
 
 修饰选项：
 
@@ -318,8 +321,11 @@ sudo chmod +x setup-dev-env.sh
 
 关于 `--nvidia` 的说明：
 
-- 仅当现有驱动低于 595 分支时才会安装驱动，已达标的机器不会被改动。安装驱动后需**重启**，`nvidia-smi` 才可用。
+- 驱动使用 Ubuntu 的 `nvidia-driver-615-open` 及预编译内核模块（`linux-modules-nvidia-615-open-*`）。未安装或低于 615 分支时会安装；再次运行时，也会为缺少模块的已安装内核补装模块。安装驱动后需**重启**，`nvidia-smi` 才可用。
+- CUDA 固定为 13.4，即 615 驱动支持的最高版本（`nvidia-smi` 中的 `CUDA UMD Version`）。更新的工具链虽能运行原生 GPU 代码，但 PTX 即时编译会失败（`the provided PTX was compiled with an unsupported toolchain`），OpenCV 和 TensorRT 插件都可能受影响。
+- 每个内核都需要各自的 NVIDIA 模块包。请用 `sudo apt full-upgrade` 升级：`apt upgrade` 和 unattended-upgrades 可能装了新内核却把模块包 kept back，新内核启动后就没有驱动。遇到这种情况，重新运行 `./setup-dev-env.sh --nvidia` 即可。
 - TensorRT 无法公开下载，需先注册 NVIDIA 本地 apt 源（从 [NVIDIA TensorRT](https://developer.nvidia.com/tensorrt) 获取 `nv-tensorrt-local-repo-ubuntu2404-*.deb`）；否则脚本会打印操作指引并跳过该步骤。
+- 所有 TensorRT 包通过 `/etc/apt/preferences.d/asr-sdm-tensorrt-pin` 固定在 11.4.0（`+cuda13.4` 构建），CUDA 网络源无法再把它们升级到新版本；已安装的更新版本会被降级。删除该文件即可解除固定。
 - OpenCV 从源码编译安装到 `~/.local/opencv-cuda`，耗时较长。之后只要该目录中已有带 CUDA 模块的 4.14.0 就会跳过编译（用 `--rebuild` 强制重编）。Ubuntu 自带的 `libopencv-dev` 不含 CUDA 模块，无法替代。
 - 生成的 `CUDA_HOME`、`OpenCV_DIR`、`LD_LIBRARY_PATH`、`PKG_CONFIG_PATH` 会写入 `~/.bashrc`。执行 `colcon build` 前请先 `source ~/.bashrc`，或仅在当前终端 source `~/.local/opencv-cuda/setup_env.sh`。
 
