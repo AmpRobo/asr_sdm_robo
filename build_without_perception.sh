@@ -5,7 +5,8 @@
 # Purpose:
 #   Build all colcon packages in the workspace except those under perception.
 #   Automatically scans src/asr_sdm_universe/perception/ and skips them via
-#   colcon --packages-skip.
+#   colcon --packages-skip. Also skips extra non-perception packages listed
+#   in EXTRA_SKIP_PACKAGES (e.g. tensorrt_common).
 #
 # Notes:
 #   - Perception message packages under asr_sdm_msgs are not skipped
@@ -32,6 +33,8 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 WORKSPACE_ROOT="${SCRIPT_DIR}"
 PERCEPTION_DIR="${WORKSPACE_ROOT}/src/asr_sdm_universe/perception"
+# Packages outside perception that should also be skipped
+EXTRA_SKIP_PACKAGES=(tensorrt_common)
 
 LIST_ONLY=0
 SYMLINK_INSTALL=1
@@ -42,7 +45,7 @@ usage() {
 Usage: ./build_without_perception.sh [options] [colcon-args...]
 
 Build the workspace while skipping all packages under
-src/asr_sdm_universe/perception/.
+src/asr_sdm_universe/perception/, plus tensorrt_common.
 
 Options:
   --list-only           Print packages that would be skipped and exit
@@ -89,6 +92,7 @@ mapfile -t SKIP_PACKAGES < <(
     | sed 's/^[[:space:]]*//;s/[[:space:]]*$//' \
     | sort -u
 )
+SKIP_PACKAGES+=("${EXTRA_SKIP_PACKAGES[@]}")
 
 if [[ ${#SKIP_PACKAGES[@]} -eq 0 ]]; then
   echo "No packages found under ${PERCEPTION_DIR}" >&2
@@ -96,7 +100,7 @@ if [[ ${#SKIP_PACKAGES[@]} -eq 0 ]]; then
 fi
 
 if [[ "${LIST_ONLY}" -eq 1 ]]; then
-  echo "Would skip ${#SKIP_PACKAGES[@]} perception package(s):"
+  echo "Would skip ${#SKIP_PACKAGES[@]} package(s):"
   printf '  %s\n' "${SKIP_PACKAGES[@]}"
   exit 0
 fi
@@ -110,7 +114,7 @@ if [[ ${#COLCON_ARGS[@]} -gt 0 ]]; then
   CMD+=("${COLCON_ARGS[@]}")
 fi
 
-echo "Skipping ${#SKIP_PACKAGES[@]} perception package(s)"
+echo "Skipping ${#SKIP_PACKAGES[@]} package(s)"
 printf '%q ' "${CMD[@]}"
 echo
 cd "${WORKSPACE_ROOT}"
