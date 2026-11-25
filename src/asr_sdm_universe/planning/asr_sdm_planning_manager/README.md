@@ -72,7 +72,10 @@ points \(v_i=(q_{i+1}-q_i)/\Delta t\):
 \]
 
 Yaw rate and pitch rate use the same one-sided penalty on
-\(\omega=(\alpha_{i+1}-\alpha_i)/\Delta t\) (yaw wrapped to \((-\pi,\pi]\)):
+\(\omega=(\alpha_{i+1}-\alpha_i)/\Delta t\) (yaw wrapped to \((-\pi,\pi]\)).
+Both are evaluated in one pass (`calcHeadingRateCost`): each \(v_i\) yields
+\(\psi\) and \(\theta\) once, and the term comes back already weighted by
+`lambda_yaw_rate` and `lambda_pitch_rate`:
 
 \[
 e=\lvert\omega\rvert/\omega_{\max}-1,\qquad
@@ -88,7 +91,6 @@ well defined. A vanishing velocity is skipped rather than penalized.
 
 ```text
 GUIDE_PHASE                = SMOOTHNESS | GUIDE
-GUIDE_NONHOLONOMIC_PHASE   = GUIDE_PHASE | NONHOLONOMIC
 NORMAL_PHASE               = SMOOTHNESS | DISTANCE | FEASIBILITY
 NONHOLONOMIC_PHASE         = NORMAL_PHASE | NONHOLONOMIC
 ```
@@ -100,14 +102,14 @@ NONHOLONOMIC_PHASE         = NORMAL_PHASE | NONHOLONOMIC
 | Refine (collision or not) | `refineTraj` | `localCostFunction()` | same as phase 2 |
 | Yaw / pitch fit | `fitAngleBspline` | `SMOOTHNESS \| WAYPOINTS` | same as phase 2 |
 
-`topoGuideCostFunction()` is `GUIDE_NONHOLONOMIC_PHASE` when
-`manager.nonholonomic` is true, otherwise `GUIDE_PHASE`.
-`localCostFunction()` is `NONHOLONOMIC_PHASE` or `NORMAL_PHASE` the same way.
+`topoGuideCostFunction()` is always `GUIDE_PHASE`.
+`localCostFunction()` is `NONHOLONOMIC_PHASE` when `manager.nonholonomic` is
+true, otherwise `NORMAL_PHASE`.
 
 Phase 1 starts from the *colliding* local segment. `lambda5` has to outweigh
-`lambda1` there, or the polygon never reaches the detour homotopy. The yaw /
-pitch hinges keep that first pull from locking onto a knife-edge corner of the
-TopologyPRM polyline. Phase 2 then adds clearance and feasibility.
+`lambda1` there, or the polygon never reaches the detour homotopy. Phase 1
+carries no heading hinges; phase 2 adds them together with clearance and
+feasibility.
 
 A detour is longer than the window it replaces but inherits that window's
 duration, which saturates the heading hinges. `optimizeTopoBspline` therefore
@@ -139,15 +141,15 @@ These are used by the manager but are not `lambda*` terms:
 | Parameter | Default | Role |
 |---|---|---|
 | `lambda1` | 10 | Smoothness |
-| `lambda2` | 5 | Clearance inside `dist0` (0.4 m) |
+| `lambda2` | 3 | Clearance inside `dist0` (0.3 m) |
 | `lambda3` | 1 | Residual vel/acc after time stretch |
 | `lambda4` | 0.001 | Unused (`ENDPOINT`) |
 | `lambda5` | 1.5 | Guide pull in phase 1 |
 | `lambda6` | 10 | Unused (visibility) |
 | `lambda7` | 20 | Heading waypoint fit |
-| `lambda_yaw_rate` | 10 | Yaw-rate hinge |
-| `lambda_pitch_rate` | 10 | Pitch-rate hinge |
-| `lambda_min_vel` | 1 | Minimum forward speed |
+| `lambda_yaw_rate` | 15 | Yaw-rate hinge |
+| `lambda_pitch_rate` | 15 | Pitch-rate hinge |
+| `lambda_min_vel` | 0.1 | Minimum forward speed |
 
 Open space: `DISTANCE` is ~0, so `lambda1` dominates how fast the polygon
 straightens. Dense obstacles: raise `lambda2` / `lambda5` and drop `lambda1`,
@@ -180,7 +182,7 @@ ros2 launch asr_sdm_planning_manager asr_sdm_planning_manager.launch.py
 | `FEASIBILITY` | `lambda3` | 分轴速度/加速度超 `max_vel` / `max_acc` 的二次铰链 |
 | `GUIDE` | `lambda5` | 控制点贴 TopologyPRM 引导折线 |
 | `WAYPOINTS` | `lambda7` | 1 维 yaw/pitch 样条贴采样角 |
-| `NONHOLONOMIC` | `lambda_yaw_rate` / `lambda_pitch_rate` / `lambda_min_vel` | 切向偏航/俯仰角速度超限、前向速度过低；\(e^2/(1+e^2)\) 饱和铰链 |
+| `NONHOLONOMIC` | `lambda_yaw_rate` / `lambda_pitch_rate` / `lambda_min_vel` | 切向偏航/俯仰角速度超限、前向速度过低；\(e^2/(1+e^2)\) 饱和铰链。偏航与俯仰在同一次循环里算（`calcHeadingRateCost`），每个 \(v_i\) 只求一次航向 |
 
 `ENDPOINT`（`lambda4`）、可见性（`lambda6`）、`lambda8` 以及
 `heading_planner.lambda*` **未接入**。
@@ -194,12 +196,12 @@ ros2 launch asr_sdm_planning_manager asr_sdm_planning_manager.launch.py
 
 | 阶段 | 掩码 |
 |---|---|
-| 拓扑候选第一阶段 | `GUIDE_NONHOLONOMIC_PHASE`（默认）= 平滑 + 引导 + 非完整 |
+| 拓扑候选第一阶段 | `GUIDE_PHASE` = 平滑 + 引导 |
 | 拓扑候选第二阶段、精修 | `NONHOLONOMIC_PHASE`（默认）= 平滑 + 距离 + 可行性 + 非完整 |
 | 航向拟合 | 平滑 + 路点 |
 
 第一阶段初值仍在碰撞段上。`lambda5` 必须压过 `lambda1`，否则到不了绕障同伦。
-偏航/俯仰铰链避免第一阶段把控制点焊在 TopologyPRM 折线的尖角上。绕障段比
+第一阶段不带偏航/俯仰铰链，它们在第二阶段与距离、可行性一起加入。绕障段比
 原窗口长却继承原时长，铰链会饱和，因此 `optimizeTopoBspline` 会按
 `guide_len / (max_vel · duration)` 拉长 knot span（不超过
 `max_time_lengthen_ratio`）。首尾固定的控制点按新的 knot span 重算，起点和终点速度

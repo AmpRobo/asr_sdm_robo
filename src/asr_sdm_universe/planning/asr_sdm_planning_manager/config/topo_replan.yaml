@@ -142,6 +142,7 @@
       lambda5: 1.5               # topo guide
       lambda6: 10.0              # unused (visibility)
       lambda7: 20.0              # waypoints / refine anchor
+      # yaw / pitch rate hinges share one pass over the velocity control points
       lambda_yaw_rate: 15.0      # with manager.max_yaw_rate
       lambda_pitch_rate: 15.0    # with manager.max_pitch_rate
       lambda_min_vel: 0.1        # with manager.min_vel

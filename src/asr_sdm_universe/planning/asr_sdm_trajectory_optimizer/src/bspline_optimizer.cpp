@@ -22,8 +22,6 @@ const int BsplineOptimizer::WAYPOINTS = (1 << 6);
 const int BsplineOptimizer::NONHOLONOMIC = (1 << 7);
 
 const int BsplineOptimizer::GUIDE_PHASE = BsplineOptimizer::SMOOTHNESS | BsplineOptimizer::GUIDE;
-const int BsplineOptimizer::GUIDE_NONHOLONOMIC_PHASE =
-  BsplineOptimizer::GUIDE_PHASE | BsplineOptimizer::NONHOLONOMIC;
 const int BsplineOptimizer::NORMAL_PHASE =
   BsplineOptimizer::SMOOTHNESS | BsplineOptimizer::DISTANCE | BsplineOptimizer::FEASIBILITY;
 const int BsplineOptimizer::NONHOLONOMIC_PHASE =
@@ -59,8 +57,6 @@ double wrapToPi(double angle)
   return angle;
 }
 
-enum class HeadingAxis { kYaw, kPitch };
-
 /* Heading of a robot whose body x-axis follows its velocity, together with the
  * Jacobian of that heading with respect to the velocity. The convention matches
  * R = Rz(yaw) * Ry(pitch) used by asr_sdm_control_manager, so a positive pitch
@@ -72,13 +68,6 @@ struct Heading
   Eigen::Vector3d dyaw_dv = Eigen::Vector3d::Zero();
   Eigen::Vector3d dpitch_dv = Eigen::Vector3d::Zero();
   bool valid = false;
-
-  double angle(HeadingAxis axis) const { return axis == HeadingAxis::kYaw ? yaw : pitch; }
-
-  const Eigen::Vector3d & jacobian(HeadingAxis axis) const
-  {
-    return axis == HeadingAxis::kYaw ? dyaw_dv : dpitch_dv;
-  }
 };
 
 /* One-sided hinges on a quantity normalized by its own limit. The quadratic is
@@ -131,41 +120,60 @@ Heading headingFromVelocity(const Eigen::Vector3d & v)
 }
 
 /* Yaw and pitch are two angles of the same tangent direction and the robot
- * bounds the rate of both, so they are evaluated by one implementation that only
- * differs in which angle it reads out of the heading. Yaw needs wrapping because
- * it is periodic; pitch stays inside (-pi/2, pi/2), where wrapping is a no-op.
+ * bounds the rate of both, so both are read out of one heading per velocity
+ * control point. Yaw needs wrapping because it is periodic; pitch stays inside
+ * (-pi/2, pi/2), where wrapping is a no-op.
  *
  * A rate spans two consecutive velocity control points, v_i = (q_{i+1} - q_i)/dt,
- * so each penalty couples three consecutive position control points. */
+ * so each penalty couples three consecutive position control points. Each
+ * heading is computed once and carried over to the next rate. The returned cost
+ * and gradient are already weighted. */
 void headingRateCost(
-  const vector<Eigen::Vector3d> & q, double ts, HeadingAxis axis, double max_rate, double & cost,
-  vector<Eigen::Vector3d> & gradient)
+  const vector<Eigen::Vector3d> & q, double ts, double max_yaw_rate, double max_pitch_rate,
+  double w_yaw, double w_pitch, double & cost, vector<Eigen::Vector3d> & gradient)
 {
   cost = 0.0;
   Eigen::Vector3d zero(0, 0, 0);
   std::fill(gradient.begin(), gradient.end(), zero);
 
   const int vel_num = static_cast<int>(q.size()) - 1;
+  if (vel_num < 2) return;
+
+  Heading h0 = headingFromVelocity((q[1] - q[0]) / ts);
 
   for (int i = 0; i + 1 < vel_num; i++) {
-    const Heading h0 = headingFromVelocity((q[i + 1] - q[i]) / ts);
     const Heading h1 = headingFromVelocity((q[i + 2] - q[i + 1]) / ts);
-    if (!h0.valid || !h1.valid) continue;
 
-    const double rate = wrapToPi(h1.angle(axis) - h0.angle(axis)) / ts;
+    if (h0.valid && h1.valid) {
+      /* weighted derivative of the cost with respect to the velocity at each end */
+      Eigen::Vector3d dcost_dv0 = Eigen::Vector3d::Zero();
+      Eigen::Vector3d dcost_dv1 = Eigen::Vector3d::Zero();
+      double term = 0.0, dterm_drate = 0.0;
 
-    double term = 0.0, dterm_drate = 0.0;
-    if (!overLimitPenalty(rate, max_rate, term, dterm_drate)) continue;
+      const double yaw_rate = wrapToPi(h1.yaw - h0.yaw) / ts;
+      if (overLimitPenalty(yaw_rate, max_yaw_rate, term, dterm_drate)) {
+        cost += w_yaw * term;
+        const double dcost_dangle = w_yaw * dterm_drate / ts;
+        dcost_dv1 += dcost_dangle * h1.dyaw_dv;
+        dcost_dv0 -= dcost_dangle * h0.dyaw_dv;
+      }
 
-    cost += term;
+      const double pitch_rate = (h1.pitch - h0.pitch) / ts;
+      if (overLimitPenalty(pitch_rate, max_pitch_rate, term, dterm_drate)) {
+        cost += w_pitch * term;
+        const double dcost_dangle = w_pitch * dterm_drate / ts;
+        dcost_dv1 += dcost_dangle * h1.dpitch_dv;
+        dcost_dv0 -= dcost_dangle * h0.dpitch_dv;
+      }
 
-    const double dcost_dangle = dterm_drate / ts;
-    const Eigen::Vector3d g1 = dcost_dangle * h1.jacobian(axis) / ts;
-    const Eigen::Vector3d g0 = -dcost_dangle * h0.jacobian(axis) / ts;
+      const Eigen::Vector3d g1 = dcost_dv1 / ts;
+      const Eigen::Vector3d g0 = dcost_dv0 / ts;
+      gradient[i + 2] += g1;
+      gradient[i + 1] += g0 - g1;
+      gradient[i + 0] += -g0;
+    }
 
-    gradient[i + 2] += g1;
-    gradient[i + 1] += g0 - g1;
-    gradient[i + 0] += -g0;
+    h0 = h1;
   }
 }
 
@@ -298,8 +306,7 @@ void BsplineOptimizer::optimize()
   g_endpoint_.resize(pt_num);
   g_waypoints_.resize(pt_num);
   g_guide_.resize(pt_num);
-  g_yaw_rate_.resize(pt_num);
-  g_pitch_rate_.resize(pt_num);
+  g_heading_rate_.resize(pt_num);
   g_min_vel_.resize(pt_num);
 
   if (cost_function_ & ENDPOINT) {
@@ -559,16 +566,12 @@ void BsplineOptimizer::calcGuideCost(
  * Heading angles are evaluated on the velocity control points of the position
  * B-spline, v_i = (q_{i+1} - q_i) / dt, which is the same discretization the
  * velocity feasibility cost uses. */
-void BsplineOptimizer::calcYawRateCost(
+void BsplineOptimizer::calcHeadingRateCost(
   const vector<Eigen::Vector3d> & q, double & cost, vector<Eigen::Vector3d> & gradient)
 {
-  headingRateCost(q, bspline_interval_, HeadingAxis::kYaw, max_yaw_rate_, cost, gradient);
-}
-
-void BsplineOptimizer::calcPitchRateCost(
-  const vector<Eigen::Vector3d> & q, double & cost, vector<Eigen::Vector3d> & gradient)
-{
-  headingRateCost(q, bspline_interval_, HeadingAxis::kPitch, max_pitch_rate_, cost, gradient);
+  headingRateCost(
+    q, bspline_interval_, max_yaw_rate_, max_pitch_rate_, lambda_yaw_rate_, lambda_pitch_rate_,
+    cost, gradient);
 }
 
 /* A screw-driven robot cannot turn on the spot, and a vanishing velocity leaves
@@ -652,8 +655,8 @@ void BsplineOptimizer::combineCost(
   /*  evaluate costs and their gradient  */
   double f_smoothness, f_distance, f_feasibility, f_endpoint, f_guide, f_waypoints;
   f_smoothness = f_distance = f_feasibility = f_endpoint = f_guide = f_waypoints = 0.0;
-  double f_yaw_rate, f_pitch_rate, f_min_vel;
-  f_yaw_rate = f_pitch_rate = f_min_vel = 0.0;
+  double f_heading_rate, f_min_vel;
+  f_heading_rate = f_min_vel = 0.0;
 
   if (cost_function_ & SMOOTHNESS) {
     calcSmoothnessCost(g_q_, f_smoothness, g_smoothness_);
@@ -692,17 +695,11 @@ void BsplineOptimizer::combineCost(
       for (int j = 0; j < dim_; j++) grad[dim_ * i + j] += lambda7_ * g_waypoints_[i + order_](j);
   }
   if (useNonholonomicCost()) {
-    calcYawRateCost(g_q_, f_yaw_rate, g_yaw_rate_);
-    f_combine += lambda_yaw_rate_ * f_yaw_rate;
+    // already weighted by lambda_yaw_rate_ and lambda_pitch_rate_
+    calcHeadingRateCost(g_q_, f_heading_rate, g_heading_rate_);
+    f_combine += f_heading_rate;
     for (int i = 0; i < variable_num_ / dim_; i++)
-      for (int j = 0; j < dim_; j++)
-        grad[dim_ * i + j] += lambda_yaw_rate_ * g_yaw_rate_[i + order_](j);
-
-    calcPitchRateCost(g_q_, f_pitch_rate, g_pitch_rate_);
-    f_combine += lambda_pitch_rate_ * f_pitch_rate;
-    for (int i = 0; i < variable_num_ / dim_; i++)
-      for (int j = 0; j < dim_; j++)
-        grad[dim_ * i + j] += lambda_pitch_rate_ * g_pitch_rate_[i + order_](j);
+      for (int j = 0; j < dim_; j++) grad[dim_ * i + j] += g_heading_rate_[i + order_](j);
 
     calcForwardSpeedCost(g_q_, f_min_vel, g_min_vel_);
     f_combine += lambda_min_vel_ * f_min_vel;

@@ -31,7 +31,6 @@ public:
   static const int NONHOLONOMIC;
 
   static const int GUIDE_PHASE;
-  static const int GUIDE_NONHOLONOMIC_PHASE;
   static const int NORMAL_PHASE;
   static const int NONHOLONOMIC_PHASE;
 
@@ -124,8 +123,7 @@ private:
   vector<Eigen::Vector3d> g_endpoint_;
   vector<Eigen::Vector3d> g_guide_;
   vector<Eigen::Vector3d> g_waypoints_;
-  vector<Eigen::Vector3d> g_yaw_rate_;
-  vector<Eigen::Vector3d> g_pitch_rate_;
+  vector<Eigen::Vector3d> g_heading_rate_;
   vector<Eigen::Vector3d> g_min_vel_;
 
   int variable_num_;                   // optimization variables
@@ -173,11 +171,9 @@ private:
   /* nonholonomic heading costs: the body axis of the robot is slaved to the
    * trajectory tangent, so yaw and pitch are functions of the position control
    * points and their limits become constraints on the position trajectory.
-   * The two rate costs are evaluated equivalently, differing only in which
-   * angle of the tangent they bound. */
-  void calcYawRateCost(
-    const vector<Eigen::Vector3d> & q, double & cost, vector<Eigen::Vector3d> & gradient);
-  void calcPitchRateCost(
+   * The yaw and pitch rate costs share one pass over the velocity control points
+   * and come back already weighted by lambda_yaw_rate_ and lambda_pitch_rate_. */
+  void calcHeadingRateCost(
     const vector<Eigen::Vector3d> & q, double & cost, vector<Eigen::Vector3d> & gradient);
   void calcForwardSpeedCost(
     const vector<Eigen::Vector3d> & q, double & cost, vector<Eigen::Vector3d> & gradient);

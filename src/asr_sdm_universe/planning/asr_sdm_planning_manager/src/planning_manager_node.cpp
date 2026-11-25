@@ -864,10 +864,11 @@ int PlanningManager::localCostFunction() const
   return pp_.nonholonomic_ ? BsplineOptimizer::NONHOLONOMIC_PHASE : BsplineOptimizer::NORMAL_PHASE;
 }
 
+/* Phase 1 only pulls the polygon onto the detour; the heading limits are left to
+ * phase 2, which adds them on top of clearance and feasibility. */
 int PlanningManager::topoGuideCostFunction() const
 {
-  return pp_.nonholonomic_ ? BsplineOptimizer::GUIDE_NONHOLONOMIC_PHASE
-                           : BsplineOptimizer::GUIDE_PHASE;
+  return BsplineOptimizer::GUIDE_PHASE;
 }
 
 double PlanningManager::headingRateRatio(fast_planner::NonUniformBspline & pos) const
