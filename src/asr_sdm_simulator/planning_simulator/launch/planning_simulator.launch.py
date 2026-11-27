@@ -73,7 +73,7 @@ def generate_launch_description():
         description="Start asr_sdm_log_collector (merged rotating logs)")
     map_type_arg = DeclareLaunchArgument(
         "map_type",
-        default_value="perlin3d",
+        default_value="random_forest",
         choices=["random_forest", "perlin3d", "post2d", "maze2d", "maze3d"],
         description="asr_sdm_map_generator map type; per-type settings live in "
                     "asr_sdm_map_generator/config/asr_sdm_map_generator.yaml")

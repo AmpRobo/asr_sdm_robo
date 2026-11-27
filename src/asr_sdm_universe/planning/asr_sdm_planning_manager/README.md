@@ -38,7 +38,8 @@ terms are on** at each stage.
 
 `PlanningManager` never evaluates a scalar cost of its own. It calls
 `BsplineOptimizer::BsplineOptimizeTraj` with a bit-mask. `combineCost` then
-sums the enabled terms. Leading and trailing `order` control points stay fixed
+sums the enabled terms: each term multiplies in its own `lambda*` and adds its
+gradient onto one shared buffer. Leading and trailing `order` control points stay fixed
 unless `ENDPOINT` is set (it is not, in this package).
 
 Weights are `optimization.lambda*` in `topo_replan.yaml`. Limits that the

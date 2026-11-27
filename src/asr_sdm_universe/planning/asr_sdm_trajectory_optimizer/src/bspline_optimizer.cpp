@@ -126,18 +126,16 @@ Heading headingFromVelocity(const Eigen::Vector3d & v)
  *
  * A rate spans two consecutive velocity control points, v_i = (q_{i+1} - q_i)/dt,
  * so each penalty couples three consecutive position control points. Each
- * heading is computed once and carried over to the next rate. The returned cost
- * and gradient are already weighted. */
-void headingRateCost(
+ * heading is computed once and carried over to the next rate. Returns the
+ * weighted cost and adds the weighted gradient onto gradient. */
+double headingRateCost(
   const vector<Eigen::Vector3d> & q, double ts, double max_yaw_rate, double max_pitch_rate,
-  double w_yaw, double w_pitch, double & cost, vector<Eigen::Vector3d> & gradient)
+  double w_yaw, double w_pitch, vector<Eigen::Vector3d> & gradient)
 {
-  cost = 0.0;
-  Eigen::Vector3d zero(0, 0, 0);
-  std::fill(gradient.begin(), gradient.end(), zero);
+  double cost = 0.0;
 
   const int vel_num = static_cast<int>(q.size()) - 1;
-  if (vel_num < 2) return;
+  if (vel_num < 2) return cost;
 
   Heading h0 = headingFromVelocity((q[1] - q[0]) / ts);
 
@@ -175,6 +173,8 @@ void headingRateCost(
 
     h0 = h1;
   }
+
+  return cost;
 }
 
 }  // namespace
@@ -300,14 +300,7 @@ void BsplineOptimizer::optimize()
   min_cost_ = std::numeric_limits<double>::max();
   const int pt_num = control_points_.rows();
   g_q_.resize(pt_num);
-  g_smoothness_.resize(pt_num);
-  g_distance_.resize(pt_num);
-  g_feasibility_.resize(pt_num);
-  g_endpoint_.resize(pt_num);
-  g_waypoints_.resize(pt_num);
-  g_guide_.resize(pt_num);
-  g_heading_rate_.resize(pt_num);
-  g_min_vel_.resize(pt_num);
+  g_grad_.resize(pt_num);
 
   if (cost_function_ & ENDPOINT) {
     variable_num_ = dim_ * (pt_num - order_);
@@ -375,36 +368,37 @@ void BsplineOptimizer::optimize()
       rclcpp::get_logger("asr_sdm_trajectory_optimizerimizer"), "iter num: %d", iter_num_);
 }
 
-void BsplineOptimizer::calcSmoothnessCost(
-  const vector<Eigen::Vector3d> & q, double & cost, vector<Eigen::Vector3d> & gradient)
+/* Every term below multiplies its own weight in, returns its weighted cost and
+ * adds its weighted gradient onto the shared gradient buffer, which combineCost
+ * clears once per evaluation. */
+double BsplineOptimizer::calcSmoothnessCost(
+  const vector<Eigen::Vector3d> & q, vector<Eigen::Vector3d> & gradient)
 {
-  cost = 0.0;
-  Eigen::Vector3d zero(0, 0, 0);
-  std::fill(gradient.begin(), gradient.end(), zero);
+  double cost = 0.0;
   Eigen::Vector3d jerk, temp_j;
 
   for (int i = 0; i < q.size() - order_; i++) {
     /* evaluate jerk */
     jerk = q[i + 3] - 3 * q[i + 2] + 3 * q[i + 1] - q[i];
     cost += jerk.squaredNorm();
-    temp_j = 2.0 * jerk;
+    temp_j = 2.0 * lambda1_ * jerk;
     /* jerk gradient */
     gradient[i + 0] += -temp_j;
     gradient[i + 1] += 3.0 * temp_j;
     gradient[i + 2] += -3.0 * temp_j;
     gradient[i + 3] += temp_j;
   }
+
+  return lambda1_ * cost;
 }
 
-void BsplineOptimizer::calcDistanceCost(
-  const vector<Eigen::Vector3d> & q, double & cost, vector<Eigen::Vector3d> & gradient)
+double BsplineOptimizer::calcDistanceCost(
+  const vector<Eigen::Vector3d> & q, vector<Eigen::Vector3d> & gradient)
 {
-  cost = 0.0;
-  Eigen::Vector3d zero(0, 0, 0);
-  std::fill(gradient.begin(), gradient.end(), zero);
+  double cost = 0.0;
 
   double dist;
-  Eigen::Vector3d dist_grad, g_zero(0, 0, 0);
+  Eigen::Vector3d dist_grad;
 
   int end_idx = (cost_function_ & ENDPOINT) ? q.size() : q.size() - order_;
 
@@ -433,17 +427,17 @@ void BsplineOptimizer::calcDistanceCost(
 
     if (dist < dist0_) {
       cost += pow(dist - dist0_, 2);
-      gradient[i] += 2.0 * (dist - dist0_) * dist_grad;
+      gradient[i] += 2.0 * lambda2_ * (dist - dist0_) * dist_grad;
     }
   }
+
+  return lambda2_ * cost;
 }
 
-void BsplineOptimizer::calcFeasibilityCost(
-  const vector<Eigen::Vector3d> & q, double & cost, vector<Eigen::Vector3d> & gradient)
+double BsplineOptimizer::calcFeasibilityCost(
+  const vector<Eigen::Vector3d> & q, vector<Eigen::Vector3d> & gradient)
 {
-  cost = 0.0;
-  Eigen::Vector3d zero(0, 0, 0);
-  std::fill(gradient.begin(), gradient.end(), zero);
+  double cost = 0.0;
 
   /* abbreviation */
   double ts, vm2, am2, ts_inv2, ts_inv4;
@@ -463,7 +457,7 @@ void BsplineOptimizer::calcFeasibilityCost(
       if (vd > 0.0) {
         cost += pow(vd, 2);
 
-        double temp_v = 4.0 * vd * ts_inv2;
+        double temp_v = 4.0 * lambda3_ * vd * ts_inv2;
         gradient[i + 0](j) += -temp_v * vi(j);
         gradient[i + 1](j) += temp_v * vi(j);
       }
@@ -479,22 +473,20 @@ void BsplineOptimizer::calcFeasibilityCost(
       if (ad > 0.0) {
         cost += pow(ad, 2);
 
-        double temp_a = 4.0 * ad * ts_inv4;
+        double temp_a = 4.0 * lambda3_ * ad * ts_inv4;
         gradient[i + 0](j) += temp_a * ai(j);
         gradient[i + 1](j) += -2 * temp_a * ai(j);
         gradient[i + 2](j) += temp_a * ai(j);
       }
     }
   }
+
+  return lambda3_ * cost;
 }
 
-void BsplineOptimizer::calcEndpointCost(
-  const vector<Eigen::Vector3d> & q, double & cost, vector<Eigen::Vector3d> & gradient)
+double BsplineOptimizer::calcEndpointCost(
+  const vector<Eigen::Vector3d> & q, vector<Eigen::Vector3d> & gradient)
 {
-  cost = 0.0;
-  Eigen::Vector3d zero(0, 0, 0);
-  std::fill(gradient.begin(), gradient.end(), zero);
-
   // zero cost and gradient in hard constraints
   Eigen::Vector3d q_3, q_2, q_1, dq;
   q_3 = q[q.size() - 3];
@@ -502,19 +494,20 @@ void BsplineOptimizer::calcEndpointCost(
   q_1 = q[q.size() - 1];
 
   dq = 1 / 6.0 * (q_3 + 4 * q_2 + q_1) - end_pt_;
-  cost += dq.squaredNorm();
+  const double cost = dq.squaredNorm();
 
+  dq *= lambda4_;
   gradient[q.size() - 3] += 2 * dq * (1 / 6.0);
   gradient[q.size() - 2] += 2 * dq * (4 / 6.0);
   gradient[q.size() - 1] += 2 * dq * (1 / 6.0);
+
+  return lambda4_ * cost;
 }
 
-void BsplineOptimizer::calcWaypointsCost(
-  const vector<Eigen::Vector3d> & q, double & cost, vector<Eigen::Vector3d> & gradient)
+double BsplineOptimizer::calcWaypointsCost(
+  const vector<Eigen::Vector3d> & q, vector<Eigen::Vector3d> & gradient)
 {
-  cost = 0.0;
-  Eigen::Vector3d zero(0, 0, 0);
-  std::fill(gradient.begin(), gradient.end(), zero);
+  double cost = 0.0;
 
   Eigen::Vector3d q1, q2, q3, dq;
 
@@ -534,29 +527,32 @@ void BsplineOptimizer::calcWaypointsCost(
     dq = 1 / 6.0 * (q1 + 4 * q2 + q3) - waypt;
     cost += dq.squaredNorm();
 
+    dq *= lambda7_;
     gradient[idx] += dq * (2.0 / 6.0);      // 2*dq*(1/6)
     gradient[idx + 1] += dq * (8.0 / 6.0);  // 2*dq*(4/6)
     gradient[idx + 2] += dq * (2.0 / 6.0);
   }
+
+  return lambda7_ * cost;
 }
 
 /* use the uniformly sampled points on a geomertic path to guide the
  * trajectory. For each control points to be optimized, it is assigned a
  * guiding point on the path and the distance between them is penalized */
-void BsplineOptimizer::calcGuideCost(
-  const vector<Eigen::Vector3d> & q, double & cost, vector<Eigen::Vector3d> & gradient)
+double BsplineOptimizer::calcGuideCost(
+  const vector<Eigen::Vector3d> & q, vector<Eigen::Vector3d> & gradient)
 {
-  cost = 0.0;
-  Eigen::Vector3d zero(0, 0, 0);
-  std::fill(gradient.begin(), gradient.end(), zero);
+  double cost = 0.0;
 
   int end_idx = q.size() - order_;
 
   for (int i = order_; i < end_idx; i++) {
     Eigen::Vector3d gpt = guide_pts_[i - order_];
     cost += (q[i] - gpt).squaredNorm();
-    gradient[i] += 2 * (q[i] - gpt);
+    gradient[i] += 2 * lambda5_ * (q[i] - gpt);
   }
+
+  return lambda5_ * cost;
 }
 
 /* The heading of a nonholonomic robot cannot be chosen freely: its body x-axis
@@ -566,23 +562,21 @@ void BsplineOptimizer::calcGuideCost(
  * Heading angles are evaluated on the velocity control points of the position
  * B-spline, v_i = (q_{i+1} - q_i) / dt, which is the same discretization the
  * velocity feasibility cost uses. */
-void BsplineOptimizer::calcHeadingRateCost(
-  const vector<Eigen::Vector3d> & q, double & cost, vector<Eigen::Vector3d> & gradient)
+double BsplineOptimizer::calcHeadingRateCost(
+  const vector<Eigen::Vector3d> & q, vector<Eigen::Vector3d> & gradient)
 {
-  headingRateCost(
+  return headingRateCost(
     q, bspline_interval_, max_yaw_rate_, max_pitch_rate_, lambda_yaw_rate_, lambda_pitch_rate_,
-    cost, gradient);
+    gradient);
 }
 
 /* A screw-driven robot cannot turn on the spot, and a vanishing velocity leaves
  * the commanded heading undefined. Keeping the forward speed above min_vel_
  * keeps the tangent, and therefore the heading, well posed. */
-void BsplineOptimizer::calcForwardSpeedCost(
-  const vector<Eigen::Vector3d> & q, double & cost, vector<Eigen::Vector3d> & gradient)
+double BsplineOptimizer::calcForwardSpeedCost(
+  const vector<Eigen::Vector3d> & q, vector<Eigen::Vector3d> & gradient)
 {
-  cost = 0.0;
-  Eigen::Vector3d zero(0, 0, 0);
-  std::fill(gradient.begin(), gradient.end(), zero);
+  double cost = 0.0;
 
   const double ts = bspline_interval_;
   const int vel_num = static_cast<int>(q.size()) - 1;
@@ -598,10 +592,12 @@ void BsplineOptimizer::calcForwardSpeedCost(
 
     cost += term;
 
-    const Eigen::Vector3d g = (dterm_dspeed / (speed * ts)) * v;
+    const Eigen::Vector3d g = (lambda_min_vel_ * dterm_dspeed / (speed * ts)) * v;
     gradient[i + 1] += g;
     gradient[i + 0] += -g;
   }
+
+  return lambda_min_vel_ * cost;
 }
 
 bool BsplineOptimizer::useNonholonomicCost() const
@@ -611,8 +607,7 @@ bool BsplineOptimizer::useNonholonomicCost() const
   return (cost_function_ & NONHOLONOMIC) && dim_ == 3;
 }
 
-void BsplineOptimizer::combineCost(
-  const std::vector<double> & x, std::vector<double> & grad, double & f_combine)
+double BsplineOptimizer::combineCost(const double * x, double * grad)
 {
   /* convert the flat solver vector to control points. */
 
@@ -648,89 +643,33 @@ void BsplineOptimizer::combineCost(
     }
   }
 
-  f_combine = 0.0;
-  grad.resize(variable_num_);
-  fill(grad.begin(), grad.end(), 0.0);
-
   /*  evaluate costs and their gradient  */
-  double f_smoothness, f_distance, f_feasibility, f_endpoint, f_guide, f_waypoints;
-  f_smoothness = f_distance = f_feasibility = f_endpoint = f_guide = f_waypoints = 0.0;
-  double f_heading_rate, f_min_vel;
-  f_heading_rate = f_min_vel = 0.0;
+  std::fill(g_grad_.begin(), g_grad_.end(), Eigen::Vector3d::Zero());
+  double f_combine = 0.0;
 
-  if (cost_function_ & SMOOTHNESS) {
-    calcSmoothnessCost(g_q_, f_smoothness, g_smoothness_);
-    f_combine += lambda1_ * f_smoothness;
-    for (int i = 0; i < variable_num_ / dim_; i++)
-      for (int j = 0; j < dim_; j++) grad[dim_ * i + j] += lambda1_ * g_smoothness_[i + order_](j);
-  }
-  if (cost_function_ & DISTANCE) {
-    calcDistanceCost(g_q_, f_distance, g_distance_);
-    f_combine += lambda2_ * f_distance;
-    for (int i = 0; i < variable_num_ / dim_; i++)
-      for (int j = 0; j < dim_; j++) grad[dim_ * i + j] += lambda2_ * g_distance_[i + order_](j);
-  }
-  if (cost_function_ & FEASIBILITY) {
-    calcFeasibilityCost(g_q_, f_feasibility, g_feasibility_);
-    f_combine += lambda3_ * f_feasibility;
-    for (int i = 0; i < variable_num_ / dim_; i++)
-      for (int j = 0; j < dim_; j++) grad[dim_ * i + j] += lambda3_ * g_feasibility_[i + order_](j);
-  }
-  if (cost_function_ & ENDPOINT) {
-    calcEndpointCost(g_q_, f_endpoint, g_endpoint_);
-    f_combine += lambda4_ * f_endpoint;
-    for (int i = 0; i < variable_num_ / dim_; i++)
-      for (int j = 0; j < dim_; j++) grad[dim_ * i + j] += lambda4_ * g_endpoint_[i + order_](j);
-  }
-  if (cost_function_ & GUIDE) {
-    calcGuideCost(g_q_, f_guide, g_guide_);
-    f_combine += lambda5_ * f_guide;
-    for (int i = 0; i < variable_num_ / dim_; i++)
-      for (int j = 0; j < dim_; j++) grad[dim_ * i + j] += lambda5_ * g_guide_[i + order_](j);
-  }
-  if (cost_function_ & WAYPOINTS) {
-    calcWaypointsCost(g_q_, f_waypoints, g_waypoints_);
-    f_combine += lambda7_ * f_waypoints;
-    for (int i = 0; i < variable_num_ / dim_; i++)
-      for (int j = 0; j < dim_; j++) grad[dim_ * i + j] += lambda7_ * g_waypoints_[i + order_](j);
-  }
+  if (cost_function_ & SMOOTHNESS) f_combine += calcSmoothnessCost(g_q_, g_grad_);
+  if (cost_function_ & DISTANCE) f_combine += calcDistanceCost(g_q_, g_grad_);
+  if (cost_function_ & FEASIBILITY) f_combine += calcFeasibilityCost(g_q_, g_grad_);
+  if (cost_function_ & ENDPOINT) f_combine += calcEndpointCost(g_q_, g_grad_);
+  if (cost_function_ & GUIDE) f_combine += calcGuideCost(g_q_, g_grad_);
+  if (cost_function_ & WAYPOINTS) f_combine += calcWaypointsCost(g_q_, g_grad_);
   if (useNonholonomicCost()) {
-    // already weighted by lambda_yaw_rate_ and lambda_pitch_rate_
-    calcHeadingRateCost(g_q_, f_heading_rate, g_heading_rate_);
-    f_combine += f_heading_rate;
-    for (int i = 0; i < variable_num_ / dim_; i++)
-      for (int j = 0; j < dim_; j++) grad[dim_ * i + j] += g_heading_rate_[i + order_](j);
-
-    calcForwardSpeedCost(g_q_, f_min_vel, g_min_vel_);
-    f_combine += lambda_min_vel_ * f_min_vel;
-    for (int i = 0; i < variable_num_ / dim_; i++)
-      for (int j = 0; j < dim_; j++)
-        grad[dim_ * i + j] += lambda_min_vel_ * g_min_vel_[i + order_](j);
+    f_combine += calcHeadingRateCost(g_q_, g_grad_);
+    f_combine += calcForwardSpeedCost(g_q_, g_grad_);
   }
-  /*  print cost  */
-  // if ((cost_function_ & WAYPOINTS) && iter_num_ % 10 == 0) {
-  //   cout << iter_num_ << ", total: " << f_combine << ", acc: " << lambda8_ * f_view
-  //        << ", waypt: " << lambda7_ * f_waypoints << endl;
-  // }
 
-  // if (optimization_phase_ == SECOND_PHASE) {
-  //  << ", smooth: " << lambda1_ * f_smoothness
-  //  << " , dist:" << lambda2_ * f_distance
-  //  << ", fea: " << lambda3_ * f_feasibility << endl;
-  // << ", end: " << lambda4_ * f_endpoint
-  // << ", guide: " << lambda5_ * f_guide
-  // }
+  /* only the free control points are solver variables */
+  if (grad != nullptr) {
+    for (int i = 0; i < variable_num_ / dim_; i++)
+      for (int j = 0; j < dim_; j++) grad[dim_ * i + j] = g_grad_[i + order_](j);
+  }
+
+  return f_combine;
 }
 
 double BsplineOptimizer::evaluateCost(const double * x, double * grad, int n)
 {
-  double cost = 0.0;
-  std::vector<double> x_vec(x, x + n);
-  std::vector<double> grad_vec;
-  combineCost(x_vec, grad_vec, cost);
-  if (grad) {
-    for (int i = 0; i < n; ++i) grad[i] = grad_vec[i];
-  }
+  const double cost = combineCost(x, grad);
   iter_num_++;
 
   /* save the min cost result */
@@ -748,7 +687,8 @@ bool BsplineOptimizer::budgetExhausted() const
 
   const double max_time = max_iteration_time_[max_time_id_];
   if (max_time > 0.0) {
-    const std::chrono::duration<double> elapsed = std::chrono::steady_clock::now() - opt_start_time_;
+    const std::chrono::duration<double> elapsed =
+      std::chrono::steady_clock::now() - opt_start_time_;
     if (elapsed.count() >= max_time) return true;
   }
 

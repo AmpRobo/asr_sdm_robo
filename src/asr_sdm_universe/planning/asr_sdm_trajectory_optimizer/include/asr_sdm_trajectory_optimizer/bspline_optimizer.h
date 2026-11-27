@@ -117,14 +117,7 @@ private:
   /* buffer for gradient of cost function, to avoid repeated allocation and
    * release of memory */
   vector<Eigen::Vector3d> g_q_;
-  vector<Eigen::Vector3d> g_smoothness_;
-  vector<Eigen::Vector3d> g_distance_;
-  vector<Eigen::Vector3d> g_feasibility_;
-  vector<Eigen::Vector3d> g_endpoint_;
-  vector<Eigen::Vector3d> g_guide_;
-  vector<Eigen::Vector3d> g_waypoints_;
-  vector<Eigen::Vector3d> g_heading_rate_;
-  vector<Eigen::Vector3d> g_min_vel_;
+  vector<Eigen::Vector3d> g_grad_;  // gradient shared by all enabled cost terms
 
   int variable_num_;                   // optimization variables
   int iter_num_;                       // cost evaluations performed by the solver
@@ -148,35 +141,26 @@ private:
    * budgets are honoured at iteration granularity. */
   bool budgetExhausted() const;
 
-  void combineCost(const std::vector<double> & x, vector<double> & grad, double & cost);
+  /* Sums the enabled cost terms at x and writes the gradient of the free
+   * control points into grad. */
+  double combineCost(const double * x, double * grad);
 
-  // q contains all control points
-  void calcSmoothnessCost(
-    const vector<Eigen::Vector3d> & q, double & cost, vector<Eigen::Vector3d> & gradient);
-  void calcDistanceCost(
-    const vector<Eigen::Vector3d> & q, double & cost, vector<Eigen::Vector3d> & gradient);
-  void calcFeasibilityCost(
-    const vector<Eigen::Vector3d> & q, double & cost, vector<Eigen::Vector3d> & gradient);
-  void calcEndpointCost(
-    const vector<Eigen::Vector3d> & q, double & cost, vector<Eigen::Vector3d> & gradient);
-  void calcGuideCost(
-    const vector<Eigen::Vector3d> & q, double & cost, vector<Eigen::Vector3d> & gradient);
-  void calcVisibilityCost(
-    const vector<Eigen::Vector3d> & q, double & cost, vector<Eigen::Vector3d> & gradient);
-  void calcWaypointsCost(
-    const vector<Eigen::Vector3d> & q, double & cost, vector<Eigen::Vector3d> & gradient);
-  void calcViewCost(
-    const vector<Eigen::Vector3d> & q, double & cost, vector<Eigen::Vector3d> & gradient);
+  /* q contains all control points. Each term multiplies in its own weight,
+   * returns its weighted cost and adds its weighted gradient onto gradient. */
+  double calcSmoothnessCost(const vector<Eigen::Vector3d> & q, vector<Eigen::Vector3d> & gradient);
+  double calcDistanceCost(const vector<Eigen::Vector3d> & q, vector<Eigen::Vector3d> & gradient);
+  double calcFeasibilityCost(const vector<Eigen::Vector3d> & q, vector<Eigen::Vector3d> & gradient);
+  double calcEndpointCost(const vector<Eigen::Vector3d> & q, vector<Eigen::Vector3d> & gradient);
+  double calcGuideCost(const vector<Eigen::Vector3d> & q, vector<Eigen::Vector3d> & gradient);
+  double calcWaypointsCost(const vector<Eigen::Vector3d> & q, vector<Eigen::Vector3d> & gradient);
 
   /* nonholonomic heading costs: the body axis of the robot is slaved to the
    * trajectory tangent, so yaw and pitch are functions of the position control
    * points and their limits become constraints on the position trajectory.
-   * The yaw and pitch rate costs share one pass over the velocity control points
-   * and come back already weighted by lambda_yaw_rate_ and lambda_pitch_rate_. */
-  void calcHeadingRateCost(
-    const vector<Eigen::Vector3d> & q, double & cost, vector<Eigen::Vector3d> & gradient);
-  void calcForwardSpeedCost(
-    const vector<Eigen::Vector3d> & q, double & cost, vector<Eigen::Vector3d> & gradient);
+   * The yaw and pitch rate costs share one pass over the velocity control points. */
+  double calcHeadingRateCost(const vector<Eigen::Vector3d> & q, vector<Eigen::Vector3d> & gradient);
+  double calcForwardSpeedCost(
+    const vector<Eigen::Vector3d> & q, vector<Eigen::Vector3d> & gradient);
 
   bool useNonholonomicCost() const;
 
