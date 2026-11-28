@@ -3,6 +3,7 @@
 
 #include <Eigen/Geometry>
 #include <asr_sdm_local_path_modifier/topo_path_modifier.hpp>
+#include <rng/rng.h>
 
 #include <algorithm>
 #include <cmath>
@@ -37,11 +38,6 @@ std::uint64_t edgeKey(const int a, const int b)
 }
 }  // namespace
 
-TopoPathModifier::TopoPathModifier()
-: rng_(static_cast<std::mt19937::result_type>(options_.random_seed))
-{
-}
-
 void TopoPathModifier::setOptions(const TopoModifierOptions & options)
 {
   options_ = options;
@@ -51,7 +47,7 @@ void TopoPathModifier::setOptions(const TopoModifierOptions & options)
   options_.max_raw_paths = std::max(1, options_.max_raw_paths);
   options_.reserve_num = std::max(1, options_.reserve_num);
   options_.ratio_to_short = std::max(1.0, options_.ratio_to_short);
-  rng_.seed(static_cast<std::mt19937::result_type>(options_.random_seed));
+  rng_seed(static_cast<std::uint64_t>(options_.random_seed), 1);
 }
 
 TopoModifierResult TopoPathModifier::modify(
@@ -502,16 +498,14 @@ std::vector<Eigen::Vector3d> TopoPathModifier::buildTopoDetour(
   lower -= Eigen::Vector3d::Constant(options_.local_window_padding);
   upper += Eigen::Vector3d::Constant(options_.local_window_padding);
 
-  std::uniform_real_distribution<double> x_dist(lower.x(), upper.x());
-  std::uniform_real_distribution<double> y_dist(lower.y(), upper.y());
-  std::uniform_real_distribution<double> z_dist(lower.z(), upper.z());
+  const Eigen::Vector3d extent = upper - lower;
 
   if (options_.deterministic_sampling) {
-    rng_.seed(static_cast<std::mt19937::result_type>(options_.random_seed));
+    rng_seed(static_cast<std::uint64_t>(options_.random_seed), 1);
   }
 
   for (int i = 0; i < options_.max_sample_num; ++i) {
-    addNode(Eigen::Vector3d(x_dist(rng_), y_dist(rng_), z_dist(rng_)));
+    addNode(lower + extent.cwiseProduct(Eigen::Vector3d(rng_f(), rng_f(), rng_f())));
   }
 
   std::string graph_message;

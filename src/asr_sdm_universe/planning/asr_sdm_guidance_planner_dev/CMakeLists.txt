@@ -37,6 +37,7 @@ find_package(PCL REQUIRED COMPONENTS common)
 find_package(rclcpp REQUIRED)
 find_package(asr_sdm_lbfgs_solver REQUIRED)
 find_package(asr_sdm_esdf_map REQUIRED)
+find_package(pseudo_random REQUIRED)
 
 add_library(${PROJECT_NAME} SHARED
   src/voxel_esdf_map.cpp
@@ -60,6 +61,7 @@ endif()
 target_link_libraries(${PROJECT_NAME}
   Eigen3::Eigen
   ${PCL_LIBRARIES}
+  pseudo_random::pseudo_random
 )
 
 if(TARGET asr_sdm_lbfgs_solver::asr_sdm_lbfgs_solver)
@@ -148,5 +150,6 @@ endif()
 
 ament_export_targets(export_${PROJECT_NAME} HAS_LIBRARY_TARGET)
 ament_export_include_directories(include)
-ament_export_dependencies(Eigen3 PCL rclcpp asr_sdm_lbfgs_solver asr_sdm_esdf_map)
+ament_export_dependencies(
+  Eigen3 PCL rclcpp asr_sdm_lbfgs_solver asr_sdm_esdf_map pseudo_random)
 ament_package()

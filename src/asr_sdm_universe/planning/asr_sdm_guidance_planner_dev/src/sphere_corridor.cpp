@@ -2,6 +2,7 @@
 // Spherical corridor generation implementation.
 
 #include <Eigen/Geometry>
+#include <rng/rng.h>
 #include <sphere_corridor.hpp>
 
 #include <algorithm>
@@ -44,7 +45,7 @@ void buildOrthonormalBasis(
 }  // namespace
 
 SphereCorridorGenerator::SphereCorridorGenerator(const SphereCorridorOptions & options)
-: options_(options), rng_(options.random_seed)
+: options_(options)
 {
 }
 
@@ -131,21 +132,20 @@ CorridorSphere SphereCorridorGenerator::batchSample(
 
   if (!options_.deterministic_sampling) {
     const auto seed =
-      static_cast<uint32_t>(std::chrono::steady_clock::now().time_since_epoch().count());
-    rng_.seed(seed ^ options_.random_seed);
+      static_cast<uint64_t>(std::chrono::steady_clock::now().time_since_epoch().count());
+    rng_seed(seed ^ options_.random_seed, 1);
   } else {
-    rng_.seed(options_.random_seed);
+    rng_seed(options_.random_seed, 1);
   }
 
-  std::normal_distribution<double> standard_normal(0.0, 1.0);
   const int sample_count = std::max(1, options_.batch_sample_count);
 
   for (int k = 0; k < sample_count; ++k) {
     Eigen::Vector3d candidate_center = guide_point;
     if (k > 0) {
-      candidate_center += e1 * (sigma_axis * standard_normal(rng_));
-      candidate_center += e2 * (sigma_lateral * standard_normal(rng_));
-      candidate_center += e3 * (sigma_lateral * standard_normal(rng_));
+      candidate_center += e1 * (sigma_axis * rng_norm());
+      candidate_center += e2 * (sigma_lateral * rng_norm());
+      candidate_center += e3 * (sigma_lateral * rng_norm());
     }
 
     CorridorSphere candidate = generateOneSphere(map, candidate_center);

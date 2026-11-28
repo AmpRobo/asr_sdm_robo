@@ -4,10 +4,12 @@
 #include <asr_sdm_local_path_modifier/topo_prm.h>
 
 #include <asr_sdm_log_collector/log_client.hpp>
+#include <rng/rng.h>
 
 #include <algorithm>
+#include <chrono>
 #include <cmath>
-#include <random>
+#include <numeric>
 #include <thread>
 
 namespace amprobo
@@ -24,9 +26,8 @@ void TopologyPRM::init(const std::shared_ptr<rclcpp::Node> & nh)
 {
   node_ = nh;
   graph_.clear();
-  eng_ = default_random_engine(rd_());
-  rand_pos_ = uniform_real_distribution<double>(-1.0, 1.0);
-  rand_unit_ = uniform_real_distribution<double>(0.0, 1.0);
+  const auto seed = std::chrono::steady_clock::now().time_since_epoch().count();
+  rng_seed(static_cast<uint64_t>(seed), 1);
 
   // init parameter
   node_->declare_parameter("topo_prm.sample_inflate_x", -1.0);
@@ -338,22 +339,25 @@ void TopologyPRM::buildSampleCells()
     SPDLOG_INFO("[Topo]: no region sampling cell, sampling the whole box uniformly");
     return;
   }
-  pick_cell_ = discrete_distribution<int>(weights.begin(), weights.end());
+  std::partial_sum(weights.begin(), weights.end(), weights.begin());
+  cell_cdf_ = std::move(weights);
 
   SPDLOG_INFO(
     "[Topo]: region sampling cells: {}, build time: {:.4f}", sample_cells_.size(),
     (node_->now() - t1).seconds());
 }
 
-/* One sample: a cell picked by pick_cell_, then a point uniform over the whole
- * cell. Without cells, uniform over the box. */
+/* One sample: a cell picked with probability proportional to its weight, then
+ * a point uniform over the whole cell. Without cells, uniform over the box. */
 Eigen::Vector3d TopologyPRM::getRegionSample()
 {
   if (sample_cells_.empty()) return getUniformSample();
 
-  const Eigen::Vector3d & corner = sample_cells_[pick_cell_(eng_)];
+  const double roll = rng_f() * cell_cdf_.back();
+  const auto pick = std::upper_bound(cell_cdf_.begin(), cell_cdf_.end(), roll);
+  const Eigen::Vector3d & corner = sample_cells_[pick - cell_cdf_.begin()];
   const double cell_size = edt_environment_->esdf_map_->getRegionValuationResolution();
-  const Eigen::Vector3d unit(rand_unit_(eng_), rand_unit_(eng_), rand_unit_(eng_));
+  const Eigen::Vector3d unit(rng_f(), rng_f(), rng_f());
   return corner + cell_size * unit;
 }
 
@@ -361,9 +365,9 @@ Eigen::Vector3d TopologyPRM::getUniformSample()
 {
   /* sampling */
   Eigen::Vector3d pt;
-  pt(0) = rand_pos_(eng_) * sample_r_(0);
-  pt(1) = rand_pos_(eng_) * sample_r_(1);
-  pt(2) = rand_pos_(eng_) * sample_r_(2);
+  pt(0) = (2.0 * rng_f() - 1.0) * sample_r_(0);
+  pt(1) = (2.0 * rng_f() - 1.0) * sample_r_(1);
+  pt(2) = (2.0 * rng_f() - 1.0) * sample_r_(2);
 
   pt = rotation_ * pt + translation_;
 

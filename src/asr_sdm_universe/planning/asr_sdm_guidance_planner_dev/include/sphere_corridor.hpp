@@ -8,7 +8,6 @@
 #include <types.hpp>
 
 #include <cstdint>
-#include <random>
 #include <string>
 #include <vector>
 
@@ -75,7 +74,6 @@ public:
 
 private:
   SphereCorridorOptions options_;
-  std::mt19937 rng_;
 
   CorridorSphere batchSample(
     const MapQueryInterface & map, const Eigen::Vector3d & guide_point,

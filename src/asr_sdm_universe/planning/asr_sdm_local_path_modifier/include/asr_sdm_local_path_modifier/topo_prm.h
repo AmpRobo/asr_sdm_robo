@@ -9,7 +9,6 @@
 #include <rclcpp/rclcpp.hpp>
 
 #include <memory>
-#include <random>
 
 namespace amprobo
 {
@@ -101,20 +100,15 @@ private:
   EDTEnvironment::Ptr edt_environment_;  // environment representation
   std::shared_ptr<rclcpp::Node> node_;
 
-  // sampling generator
-  random_device rd_;
-  default_random_engine eng_;
-  uniform_real_distribution<double> rand_pos_;
-  uniform_real_distribution<double> rand_unit_;
-
   Eigen::Vector3d sample_r_;
   Eigen::Vector3d translation_;
   Eigen::Matrix3d rotation_;
 
   // Min corners of the region valuation cells sampled in the current
-  // createGraph, and the distribution that picks one of them per sample.
+  // createGraph, and the running sum of their weights that picks one of
+  // them per sample.
   vector<Eigen::Vector3d> sample_cells_;
-  discrete_distribution<int> pick_cell_;
+  vector<double> cell_cdf_;
 
   // roadmap data structure, 0:start, 1:goal, 2-n: others
   list<GraphNode::Ptr> graph_;

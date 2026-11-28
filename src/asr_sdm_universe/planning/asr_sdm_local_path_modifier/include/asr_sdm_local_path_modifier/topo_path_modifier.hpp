@@ -9,7 +9,6 @@
 
 #include <cstddef>
 #include <functional>
-#include <random>
 #include <string>
 #include <vector>
 
@@ -81,7 +80,7 @@ struct TopoModifierResult
 class TopoPathModifier
 {
 public:
-  TopoPathModifier();
+  TopoPathModifier() = default;
 
   void setOptions(const TopoModifierOptions & options);
   const TopoModifierOptions & options() const { return options_; }
@@ -236,7 +235,6 @@ private:
   void appendUnique(std::vector<Eigen::Vector3d> & path, const Eigen::Vector3d & point) const;
 
   TopoModifierOptions options_;
-  mutable std::mt19937 rng_;
 };
 
 }  // namespace amprobo
